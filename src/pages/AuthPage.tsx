@@ -1,11 +1,8 @@
 import { useState } from 'react';
 import Icon from '../components/Icon';
+import { supabase } from '../lib/supabase';
 
 type AuthMode = 'login' | 'signup';
-
-interface AuthPageProps {
-  onLogin: () => void;
-}
 
 const COUNTRIES = ['Burkina Faso', 'Mali', "Côte d'Ivoire", 'Sénégal', 'Niger'];
 
@@ -20,12 +17,13 @@ const BillioMark = () => (
   </svg>
 );
 
-export default function AuthPage({ onLogin }: AuthPageProps) {
+export default function AuthPage() {
   const [mode, setMode] = useState<AuthMode>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [authError, setAuthError] = useState('');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,8 +34,10 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
   const clearError = (field: string) =>
     setErrors(prev => ({ ...prev, [field]: false }));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError('');
+
     const newErrors: Record<string, boolean> = {};
     if (!email.trim()) newErrors.email = true;
     if (!password.trim()) newErrors.password = true;
@@ -45,11 +45,29 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
       setErrors(newErrors);
       return;
     }
+
     setLoading(true);
-    setTimeout(() => {
+    try {
+      if (isSignup) {
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { country } },
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+      }
+      // onAuthStateChange in App.tsx handles navigation automatically
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Une erreur est survenue.';
+      setAuthError(msg);
       setLoading(false);
-      onLogin();
-    }, 650);
+    }
   };
 
   const switchMode = (next: AuthMode) => {
@@ -177,11 +195,24 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                     />
                     Se souvenir de moi
                   </label>
-                  <button type="button" className="link">Mot de passe oublié ?</button>
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={async () => {
+                      if (!email.trim()) { setErrors(e => ({ ...e, email: true })); return; }
+                      await supabase.auth.resetPasswordForEmail(email.trim());
+                      setAuthError('');
+                      alert('Un e-mail de réinitialisation a été envoyé.');
+                    }}
+                  >
+                    Mot de passe oublié ?
+                  </button>
                 </div>
               )}
 
-              {isSignup && <div style={{ height: 18 }} />}
+              {authError && (
+                <div className="auth-error" role="alert">{authError}</div>
+              )}
 
               <button className="submit-btn" type="submit" disabled={loading}>
                 <span>

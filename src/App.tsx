@@ -1,14 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { supabase } from './lib/supabase';
+import type { Session } from '@supabase/supabase-js';
 import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 
-type View = 'auth' | 'dashboard';
-
 export default function App() {
-  const [view, setView] = useState<View>('auth');
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
 
-  if (view === 'dashboard') {
-    return <Dashboard onLogout={() => setView('auth')} />;
+  useEffect(() => {
+    // Hydrate session from local storage on first load
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Still loading — avoid flash of wrong page
+  if (session === undefined) return null;
+
+  if (session) {
+    return <Dashboard onLogout={() => supabase.auth.signOut()} />;
   }
-  return <AuthPage onLogin={() => setView('dashboard')} />;
+  return <AuthPage />;
 }
