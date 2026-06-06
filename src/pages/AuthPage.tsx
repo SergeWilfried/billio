@@ -29,9 +29,6 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [business, setBusiness] = useState('');
   const [country, setCountry] = useState(COUNTRIES[0]);
 
   const isSignup = mode === 'signup';
@@ -44,8 +41,6 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
     const newErrors: Record<string, boolean> = {};
     if (!email.trim()) newErrors.email = true;
     if (!password.trim()) newErrors.password = true;
-    if (isSignup && !firstName.trim()) newErrors.firstName = true;
-    if (isSignup && !lastName.trim()) newErrors.lastName = true;
     if (Object.keys(newErrors).some(k => newErrors[k])) {
       setErrors(newErrors);
       return;
@@ -120,54 +115,6 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
             </div>
 
             <form onSubmit={handleSubmit} noValidate style={{ marginTop: 24 }}>
-              {isSignup && (
-                <>
-                  <div className="field-row" style={{ marginBottom: 15 }}>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label className="field-label">Prénom</label>
-                      <div className="input-wrap">
-                        <Icon name="user" className="lead" ariaHidden />
-                        <input
-                          className={`input${errors.firstName ? ' err' : ''}`}
-                          type="text"
-                          placeholder="Serge"
-                          autoComplete="given-name"
-                          value={firstName}
-                          onChange={e => { setFirstName(e.target.value); clearError('firstName'); }}
-                        />
-                      </div>
-                    </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label className="field-label">Nom</label>
-                      <div className="input-wrap">
-                        <Icon name="user" className="lead" ariaHidden />
-                        <input
-                          className={`input${errors.lastName ? ' err' : ''}`}
-                          type="text"
-                          placeholder="Wilfried"
-                          autoComplete="family-name"
-                          value={lastName}
-                          onChange={e => { setLastName(e.target.value); clearError('lastName'); }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="field">
-                    <label className="field-label">Entreprise</label>
-                    <div className="input-wrap">
-                      <Icon name="building" className="lead" ariaHidden />
-                      <input
-                        className="input"
-                        type="text"
-                        placeholder="Nom de votre structure"
-                        autoComplete="organization"
-                        value={business}
-                        onChange={e => setBusiness(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
 
               <div className="field">
                 <label className="field-label">Adresse e-mail</label>
