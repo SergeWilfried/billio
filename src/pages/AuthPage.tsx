@@ -7,7 +7,7 @@ interface AuthPageProps {
   onLogin: () => void;
 }
 
-const COUNTRIES = ['Burkina Faso', 'Mali', "Côte d'Ivoire", 'Senegal', 'Niger'];
+const COUNTRIES = ['Burkina Faso', 'Mali', "Côte d'Ivoire", 'Sénégal', 'Niger'];
 
 const BillioMark = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -65,33 +65,33 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
 
   return (
     <div className="auth-root">
-      <h1 className="sr-only">Billio — sign in or create an account</h1>
+      <h1 className="sr-only">Billio — connexion ou création de compte</h1>
       <div className="auth-card">
-        {/* Brand panel */}
+        {/* Panneau marque */}
         <aside className="brand-panel">
           <div className="brand-logo">
             <div className="mark"><BillioMark /></div>
             <div>
               <div className="name">Billio</div>
-              <div className="tag">Invoicing</div>
+              <div className="tag">Facturation</div>
             </div>
           </div>
 
           <div className="brand-head">
-            <h2>Invoicing that gets you paid faster.</h2>
-            <p>Create, send and track professional invoices in minutes — with Mobile Money, reminders and reports built in.</p>
+            <h2>La facturation qui accélère vos paiements.</h2>
+            <p>Créez, envoyez et suivez vos factures en quelques minutes — Mobile Money, relances et rapports inclus.</p>
             <div className="brand-features">
               <div className="bf">
                 <span className="ck"><Icon name="check" /></span>
-                Mobile Money &amp; bank transfers
+                Mobile Money &amp; virements bancaires
               </div>
               <div className="bf">
                 <span className="ck"><Icon name="check" /></span>
-                Automatic payment reminders
+                Relances automatiques de paiement
               </div>
               <div className="bf">
                 <span className="ck"><Icon name="check" /></span>
-                Real-time revenue reports
+                Rapports de revenus en temps réel
               </div>
             </div>
           </div>
@@ -101,22 +101,22 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
               <Icon name="circle-check-filled" />
             </div>
             <div>
-              <div className="mi-top">#INV-0040 paid</div>
-              <div className="mi-sub">Sahel Banque · just now</div>
+              <div className="mi-top">#FAC-0040 payée</div>
+              <div className="mi-sub">Sahel Banque · à l'instant</div>
             </div>
-            <div className="mi-amt">1.2M XOF</div>
+            <div className="mi-amt">1,2M XOF</div>
           </div>
         </aside>
 
-        {/* Form panel */}
+        {/* Panneau formulaire */}
         <section className="form-panel">
           <div className="fp-inner">
-            <div className="fp-eyebrow">{isSignup ? 'Get started' : 'Welcome back'}</div>
-            <div className="fp-title">{isSignup ? 'Create your account' : 'Sign in to Billio'}</div>
+            <div className="fp-eyebrow">{isSignup ? 'Commencer' : 'Bon retour'}</div>
+            <div className="fp-title">{isSignup ? 'Créer votre compte' : 'Connexion à Billio'}</div>
             <div className="fp-sub">
               {isSignup
-                ? 'Start invoicing in minutes — no card required.'
-                : 'Enter your details to access your workspace.'}
+                ? 'Lancez votre facturation en quelques minutes — sans carte requise.'
+                : 'Saisissez vos identifiants pour accéder à votre espace.'}
             </div>
 
             <form onSubmit={handleSubmit} noValidate style={{ marginTop: 24 }}>
@@ -124,7 +124,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                 <>
                   <div className="field-row" style={{ marginBottom: 15 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
-                      <label className="field-label">First name</label>
+                      <label className="field-label">Prénom</label>
                       <div className="input-wrap">
                         <Icon name="user" className="lead" ariaHidden />
                         <input
@@ -138,7 +138,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                       </div>
                     </div>
                     <div className="field" style={{ marginBottom: 0 }}>
-                      <label className="field-label">Last name</label>
+                      <label className="field-label">Nom</label>
                       <div className="input-wrap">
                         <Icon name="user" className="lead" ariaHidden />
                         <input
@@ -153,13 +153,13 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                     </div>
                   </div>
                   <div className="field">
-                    <label className="field-label">Business</label>
+                    <label className="field-label">Entreprise</label>
                     <div className="input-wrap">
                       <Icon name="building" className="lead" ariaHidden />
                       <input
                         className="input"
                         type="text"
-                        placeholder="Studio name"
+                        placeholder="Nom de votre structure"
                         autoComplete="organization"
                         value={business}
                         onChange={e => setBusiness(e.target.value)}
@@ -170,13 +170,13 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
               )}
 
               <div className="field">
-                <label className="field-label">Email address</label>
+                <label className="field-label">Adresse e-mail</label>
                 <div className="input-wrap">
                   <Icon name="mail" className="lead" ariaHidden />
                   <input
                     className={`input${errors.email ? ' err' : ''}`}
                     type="email"
-                    placeholder="you@company.com"
+                    placeholder="vous@entreprise.com"
                     autoComplete="email"
                     value={email}
                     onChange={e => { setEmail(e.target.value); clearError('email'); }}
@@ -185,7 +185,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
               </div>
 
               <div className="field">
-                <label className="field-label">Password</label>
+                <label className="field-label">Mot de passe</label>
                 <div className="input-wrap">
                   <Icon name="lock" className="lead" ariaHidden />
                   <input
@@ -199,7 +199,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                   <button
                     className="pw-toggle"
                     type="button"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                     onClick={() => setShowPassword(v => !v)}
                   >
                     <Icon name={showPassword ? 'eye-off' : 'eye'} ariaHidden />
@@ -209,7 +209,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
 
               {isSignup && (
                 <div className="field">
-                  <label className="field-label">Country</label>
+                  <label className="field-label">Pays</label>
                   <select
                     className="input"
                     value={country}
@@ -228,32 +228,41 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                       checked={rememberMe}
                       onChange={e => setRememberMe(e.target.checked)}
                     />
-                    Remember me
+                    Se souvenir de moi
                   </label>
-                  <button type="button" className="link">Forgot password?</button>
+                  <button type="button" className="link">Mot de passe oublié ?</button>
                 </div>
               )}
 
               {isSignup && <div style={{ height: 18 }} />}
 
               <button className="submit-btn" type="submit" disabled={loading}>
-                <span>{loading ? (isSignup ? 'Creating…' : 'Signing in…') : (isSignup ? 'Create account' : 'Sign in')}</span>
+                <span>
+                  {loading
+                    ? (isSignup ? 'Création en cours…' : 'Connexion en cours…')
+                    : (isSignup ? 'Créer le compte' : 'Se connecter')}
+                </span>
                 <Icon name="arrow-right" ariaHidden />
               </button>
             </form>
 
             <div className="fp-foot">
               {isSignup ? (
-                <>Already have an account? <button className="link" onClick={() => switchMode('login')}>Sign in</button></>
+                <>Vous avez déjà un compte ?{' '}
+                  <button className="link" onClick={() => switchMode('login')}>Se connecter</button>
+                </>
               ) : (
-                <>New to Billio? <button className="link" onClick={() => switchMode('signup')}>Create an account</button></>
+                <>Nouveau sur Billio ?{' '}
+                  <button className="link" onClick={() => switchMode('signup')}>Créer un compte</button>
+                </>
               )}
             </div>
 
             {isSignup && (
               <div className="fp-terms">
-                By creating an account you agree to Billio's{' '}
-                <a href="#">Terms</a> &amp; <a href="#">Privacy Policy</a>.
+                En créant un compte, vous acceptez les{' '}
+                <a href="#">Conditions d'utilisation</a> et la{' '}
+                <a href="#">Politique de confidentialité</a> de Billio.
               </div>
             )}
           </div>

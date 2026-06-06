@@ -18,7 +18,7 @@ interface Invoice {
 
 interface ActivityItem {
   type: 'paid' | 'sent' | 'overdue' | 'viewed' | 'created';
-  text: JSX.Element;
+  text: React.ReactNode;
   time: string;
 }
 
@@ -39,20 +39,20 @@ interface LineItem {
 }
 
 const INVOICES: Invoice[] = [
-  { id: 'INV-0041', subject: 'Brand identity — Q2', client: 'Agence Digitale Sahel', clientInitials: 'AD', clientEmail: 'contact@sahel.digital', avClass: 'av-a', issued: 'Jun 3', amount: 1_200_000, status: 'paid' },
-  { id: 'INV-0040', subject: 'Mobile app UI sprint 4', client: 'Construction Ouaga', clientInitials: 'CO', clientEmail: 'admin@couaga.bf', avClass: 'av-b', issued: 'Jun 1', amount: 850_000, status: 'pending' },
-  { id: 'INV-0039', subject: 'Web platform development', client: 'TechHub Abidjan', clientInitials: 'TH', clientEmail: 'tech@hub-abi.ci', avClass: 'av-c', issued: 'May 28', amount: 2_400_000, status: 'overdue' },
-  { id: 'INV-0038', subject: 'Annual consulting retainer', client: 'Sahel Banque', clientInitials: 'SB', clientEmail: 'ops@sahelbanque.com', avClass: 'av-d', issued: 'May 25', amount: 1_800_000, status: 'paid' },
-  { id: 'INV-0037', subject: 'Logo redesign', client: 'Bureau Dakar', clientInitials: 'BD', clientEmail: 'info@bureau-dk.sn', avClass: 'av-e', issued: 'May 20', amount: 380_000, status: 'overdue' },
-  { id: 'INV-0036', subject: 'E-commerce audit', client: 'Import-Export Mali', clientInitials: 'IE', clientEmail: 'trade@iemali.ml', avClass: 'av-f', issued: 'May 15', amount: 650_000, status: 'draft' },
+  { id: 'FAC-0041', subject: 'Identité visuelle — T2', client: 'Agence Digitale Sahel', clientInitials: 'AD', clientEmail: 'contact@sahel.digital', avClass: 'av-a', issued: '3 juin', amount: 1_200_000, status: 'paid' },
+  { id: 'FAC-0040', subject: 'UI application mobile sprint 4', client: 'Construction Ouaga', clientInitials: 'CO', clientEmail: 'admin@couaga.bf', avClass: 'av-b', issued: '1 juin', amount: 850_000, status: 'pending' },
+  { id: 'FAC-0039', subject: 'Développement plateforme web', client: 'TechHub Abidjan', clientInitials: 'TH', clientEmail: 'tech@hub-abi.ci', avClass: 'av-c', issued: '28 mai', amount: 2_400_000, status: 'overdue' },
+  { id: 'FAC-0038', subject: 'Retainer annuel de conseil', client: 'Sahel Banque', clientInitials: 'SB', clientEmail: 'ops@sahelbanque.com', avClass: 'av-d', issued: '25 mai', amount: 1_800_000, status: 'paid' },
+  { id: 'FAC-0037', subject: 'Refonte du logo', client: 'Bureau Dakar', clientInitials: 'BD', clientEmail: 'info@bureau-dk.sn', avClass: 'av-e', issued: '20 mai', amount: 380_000, status: 'overdue' },
+  { id: 'FAC-0036', subject: 'Audit e-commerce', client: 'Import-Export Mali', clientInitials: 'IE', clientEmail: 'trade@iemali.ml', avClass: 'av-f', issued: '15 mai', amount: 650_000, status: 'draft' },
 ];
 
 const ACTIVITY: ActivityItem[] = [
-  { type: 'paid', text: <><b>INV-0041</b> paid by Agence Digitale Sahel</>, time: '2 hours ago' },
-  { type: 'sent', text: <><b>INV-0040</b> sent to Construction Ouaga</>, time: '5 hours ago' },
-  { type: 'overdue', text: <><b>INV-0039</b> is overdue — due May 28</>, time: '1 day ago' },
-  { type: 'viewed', text: <><b>INV-0038</b> viewed by Sahel Banque</>, time: '2 days ago' },
-  { type: 'paid', text: <><b>INV-0038</b> paid by Sahel Banque</>, time: '3 days ago' },
+  { type: 'paid', text: <><b>FAC-0041</b> payée par Agence Digitale Sahel</>, time: 'il y a 2 heures' },
+  { type: 'sent', text: <><b>FAC-0040</b> envoyée à Construction Ouaga</>, time: 'il y a 5 heures' },
+  { type: 'overdue', text: <><b>FAC-0039</b> en retard — échéance 28 mai</>, time: 'il y a 1 jour' },
+  { type: 'viewed', text: <><b>FAC-0038</b> consultée par Sahel Banque</>, time: 'il y a 2 jours' },
+  { type: 'paid', text: <><b>FAC-0038</b> payée par Sahel Banque</>, time: 'il y a 3 jours' },
 ];
 
 const TOP_CLIENTS: TopClient[] = [
@@ -68,7 +68,7 @@ const CLIENTS_FOR_SELECT = [...new Set(INVOICES.map(i => i.client))];
 function fmtXOF(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace('.0', '')}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return n.toLocaleString();
+  return n.toLocaleString('fr-FR');
 }
 
 function fmtXOFFull(n: number) {
@@ -76,7 +76,10 @@ function fmtXOFFull(n: number) {
 }
 
 const STATUS_LABEL: Record<Status, string> = {
-  paid: 'Paid', pending: 'Pending', overdue: 'Overdue', draft: 'Draft',
+  paid: 'Payée',
+  pending: 'En attente',
+  overdue: 'En retard',
+  draft: 'Brouillon',
 };
 
 const BillioMark = () => (
@@ -98,14 +101,13 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ onLogout }: DashboardProps) {
-  const [activeNav, setActiveNav] = useState('Dashboard');
+  const [activeNav, setActiveNav] = useState('Tableau de bord');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [panelOpen, setPanelOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // New invoice form state
   const [fClient, setFClient] = useState('');
   const [fDate, setFDate] = useState('2026-06-06');
   const [fDue, setFDue] = useState('2026-06-20');
@@ -152,43 +154,51 @@ export default function Dashboard({ onLogout }: DashboardProps) {
 
   const submitInvoice = (type: 'draft' | 'pending') => {
     closePanel();
-    showToast(type === 'draft' ? 'Invoice saved as draft' : 'Invoice sent successfully!');
+    showToast(type === 'draft' ? 'Facture enregistrée comme brouillon' : 'Facture envoyée avec succès !');
     setLineItems([newLineItem()]);
     setFClient(''); setFSubject(''); setFNotes('');
   };
 
+  const NAV_WORKSPACE = [
+    { icon: 'layout-dashboard', label: 'Tableau de bord' },
+    { icon: 'receipt', label: 'Factures', badge: pendingCount || undefined },
+    { icon: 'users', label: 'Clients' },
+    { icon: 'package', label: 'Produits' },
+  ];
+
+  const NAV_FINANCE = [
+    { icon: 'chart-bar', label: 'Rapports' },
+    { icon: 'credit-card', label: 'Paiements' },
+    { icon: 'file-text', label: 'Devis' },
+  ];
+
   const FILTERS: { key: FilterKey; label: string; count?: number }[] = [
-    { key: 'all', label: 'All', count: INVOICES.length },
-    { key: 'pending', label: 'Pending', count: pendingCount },
-    { key: 'overdue', label: 'Overdue', count: overdueCount },
-    { key: 'paid', label: 'Paid', count: INVOICES.filter(i => i.status === 'paid').length },
-    { key: 'draft', label: 'Draft', count: INVOICES.filter(i => i.status === 'draft').length },
+    { key: 'all', label: 'Toutes', count: INVOICES.length },
+    { key: 'pending', label: 'En attente', count: pendingCount },
+    { key: 'overdue', label: 'En retard', count: overdueCount },
+    { key: 'paid', label: 'Payées', count: INVOICES.filter(i => i.status === 'paid').length },
+    { key: 'draft', label: 'Brouillons', count: INVOICES.filter(i => i.status === 'draft').length },
   ];
 
   return (
     <div className="dash-root">
-      <h1 className="sr-only">Billio — invoicing dashboard</h1>
+      <h1 className="sr-only">Billio — tableau de bord de facturation</h1>
       <div className="app">
-        {/* Sidebar */}
+        {/* Barre latérale */}
         <aside className="sidebar">
           <div className="sidebar-logo">
             <div className="logo-mark">
               <div className="logo-icon"><BillioMark /></div>
               <div>
                 <div className="logo-text">Billio</div>
-                <div className="logo-tag">Invoicing</div>
+                <div className="logo-tag">Facturation</div>
               </div>
             </div>
           </div>
 
           <nav className="sidebar-nav">
-            <div className="nav-section">Workspace</div>
-            {[
-              { icon: 'layout-dashboard', label: 'Dashboard' },
-              { icon: 'receipt', label: 'Invoices', badge: pendingCount || undefined },
-              { icon: 'users', label: 'Clients' },
-              { icon: 'package', label: 'Products' },
-            ].map(({ icon, label, badge }) => (
+            <div className="nav-section">Espace de travail</div>
+            {NAV_WORKSPACE.map(({ icon, label, badge }) => (
               <div
                 key={label}
                 className={`nav-item${activeNav === label ? ' active' : ''}`}
@@ -201,11 +211,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
             ))}
 
             <div className="nav-section">Finance</div>
-            {[
-              { icon: 'chart-bar', label: 'Reports' },
-              { icon: 'credit-card', label: 'Payments' },
-              { icon: 'file-text', label: 'Quotes' },
-            ].map(({ icon, label }) => (
+            {NAV_FINANCE.map(({ icon, label }) => (
               <div
                 key={label}
                 className={`nav-item${activeNav === label ? ' active' : ''}`}
@@ -216,88 +222,88 @@ export default function Dashboard({ onLogout }: DashboardProps) {
               </div>
             ))}
 
-            <div className="nav-section">Account</div>
+            <div className="nav-section">Compte</div>
             <div
-              className={`nav-item${activeNav === 'Settings' ? ' active' : ''}`}
-              onClick={() => setActiveNav('Settings')}
+              className={`nav-item${activeNav === 'Paramètres' ? ' active' : ''}`}
+              onClick={() => setActiveNav('Paramètres')}
             >
               <Icon name="settings" ariaHidden />
-              Settings
+              Paramètres
             </div>
           </nav>
 
           <div className="sidebar-bottom">
-            <div className="user-pill" onClick={onLogout} title="Sign out">
+            <div className="user-pill" onClick={onLogout} title="Se déconnecter">
               <div className="avatar">SW</div>
               <div>
                 <div className="user-name">Serge W.</div>
-                <div className="user-plan">Pro plan</div>
+                <div className="user-plan">Offre Pro</div>
               </div>
               <Icon name="logout" ariaHidden />
             </div>
           </div>
         </aside>
 
-        {/* Main */}
+        {/* Contenu principal */}
         <div className="main-rel">
           <div className="main">
             <div className="topbar">
               <div>
-                <div className="page-title">Dashboard</div>
-                <div className="page-sub">June 2026 overview</div>
+                <div className="page-title">Tableau de bord</div>
+                <div className="page-sub">Aperçu de juin 2026</div>
               </div>
               <div className="topbar-actions">
-                <button className="btn"><Icon name="search" ariaHidden /> Search</button>
+                <button className="btn"><Icon name="search" ariaHidden /> Rechercher</button>
                 <button className="btn btn-icon" aria-label="Notifications"><Icon name="bell" ariaHidden /></button>
                 <button className="btn btn-primary" onClick={openPanel}>
-                  <Icon name="plus" ariaHidden /> New invoice
+                  <Icon name="plus" ariaHidden /> Nouvelle facture
                 </button>
               </div>
             </div>
 
             <div className="content">
-              {/* Metrics */}
+              {/* Indicateurs */}
               <div className="metrics">
                 <div className="metric-card">
                   <div className="metric-top">
                     <div className="metric-ico blue"><Icon name="trending-up" size={15} ariaHidden /></div>
-                    <div className="metric-label">Revenue (month)</div>
+                    <div className="metric-label">Chiffre d'affaires</div>
                   </div>
                   <div className="metric-value tnum">{fmtXOF(totalRevenue)}<span className="metric-unit">XOF</span></div>
-                  <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+12%</span> <span className="neutral">vs last month</span></div>
+                  <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+12 %</span> <span className="neutral">vs mois dernier</span></div>
                 </div>
 
                 <div className="metric-card">
                   <div className="metric-top">
                     <div className="metric-ico amber"><Icon name="clock-pause" size={15} ariaHidden /></div>
-                    <div className="metric-label">Outstanding</div>
+                    <div className="metric-label">En attente</div>
                   </div>
                   <div className="metric-value tnum">{fmtXOF(outstanding)}<span className="metric-unit">XOF</span></div>
-                  <div className="metric-change"><span className="neutral">{pendingCount} pending invoice{pendingCount !== 1 ? 's' : ''}</span></div>
+                  <div className="metric-change"><span className="neutral">{pendingCount} facture{pendingCount !== 1 ? 's' : ''} en attente</span></div>
                 </div>
 
                 <div className="metric-card">
                   <div className="metric-top">
                     <div className="metric-ico green"><Icon name="circle-check-filled" size={15} ariaHidden /></div>
-                    <div className="metric-label">Paid this month</div>
+                    <div className="metric-label">Encaissé ce mois</div>
                   </div>
-                  <div className="metric-value tnum">{fmtXOF(INVOICES.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0))}<span className="metric-unit">XOF</span></div>
-                  <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+8%</span> <span className="neutral">vs last month</span></div>
+                  <div className="metric-value tnum">{fmtXOF(totalRevenue)}<span className="metric-unit">XOF</span></div>
+                  <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+8 %</span> <span className="neutral">vs mois dernier</span></div>
                 </div>
 
                 <div className="metric-card">
                   <div className="metric-top">
                     <div className="metric-ico violet"><Icon name="alert-triangle" size={15} ariaHidden /></div>
-                    <div className="metric-label">Overdue</div>
+                    <div className="metric-label">En retard</div>
                   </div>
                   <div className="metric-value tnum">{fmtXOF(overdueAmt)}<span className="metric-unit">XOF</span></div>
-                  <div className="metric-change"><span className="dn"><Icon name="trending-down" size={14} ariaHidden />{overdueCount} invoice{overdueCount !== 1 ? 's' : ''}</span></div>
+                  <div className="metric-change"><span className="dn"><Icon name="trending-down" size={14} ariaHidden />{overdueCount} facture{overdueCount !== 1 ? 's' : ''}</span></div>
                 </div>
               </div>
 
-              {/* Invoice table */}
+              {/* Tableau des factures */}
               <div className="section-header">
-                <div className="section-title">Invoices</div>
+                <div className="section-title">Factures</div>
                 <div className="filters">
                   {FILTERS.map(f => (
                     <button
@@ -314,16 +320,16 @@ export default function Dashboard({ onLogout }: DashboardProps) {
 
               <div className="invoice-table">
                 <div className="table-head grid-cols">
-                  <div className="th">Invoice</div>
+                  <div className="th">Facture</div>
                   <div className="th">Client</div>
-                  <div className="th">Issued</div>
-                  <div className="th right">Amount</div>
-                  <div className="th">Status</div>
+                  <div className="th">Émise le</div>
+                  <div className="th right">Montant</div>
+                  <div className="th">Statut</div>
                   <div className="th"></div>
                 </div>
 
                 {filteredInvoices.length === 0 ? (
-                  <div className="table-empty">No invoices found</div>
+                  <div className="table-empty">Aucune facture trouvée</div>
                 ) : (
                   filteredInvoices.map(inv => (
                     <div key={inv.id} className="inv-row grid-cols">
@@ -346,21 +352,21 @@ export default function Dashboard({ onLogout }: DashboardProps) {
                         <span className={`status-pill s-${inv.status}`}>{STATUS_LABEL[inv.status]}</span>
                       </div>
                       <div className="row-actions">
-                        <button className="icon-btn" aria-label="Edit invoice"><Icon name="edit" size={15} ariaHidden /></button>
-                        <button className="icon-btn" aria-label="Download invoice"><Icon name="download" size={15} ariaHidden /></button>
-                        <button className="icon-btn" aria-label="More options"><Icon name="dots" size={15} ariaHidden /></button>
+                        <button className="icon-btn" aria-label="Modifier la facture"><Icon name="edit" size={15} ariaHidden /></button>
+                        <button className="icon-btn" aria-label="Télécharger la facture"><Icon name="download" size={15} ariaHidden /></button>
+                        <button className="icon-btn" aria-label="Plus d'options"><Icon name="dots" size={15} ariaHidden /></button>
                       </div>
                     </div>
                   ))
                 )}
               </div>
 
-              {/* Bottom panels */}
+              {/* Panneaux bas */}
               <div className="bottom-grid">
                 <div className="panel">
                   <div className="panel-head">
-                    <div className="panel-title">Recent activity</div>
-                    <button className="panel-link">View all</button>
+                    <div className="panel-title">Activité récente</div>
+                    <button className="panel-link">Tout voir</button>
                   </div>
                   {ACTIVITY.map((item, i) => (
                     <div key={i} className="activity-item">
@@ -375,15 +381,15 @@ export default function Dashboard({ onLogout }: DashboardProps) {
 
                 <div className="panel">
                   <div className="panel-head">
-                    <div className="panel-title">Top clients by revenue</div>
-                    <button className="panel-link">Manage</button>
+                    <div className="panel-title">Meilleurs clients par revenu</div>
+                    <button className="panel-link">Gérer</button>
                   </div>
                   {TOP_CLIENTS.map(client => (
                     <div key={client.name} className="client-item">
                       <div className={`client-av lg ${client.avClass}`}>{client.initials}</div>
                       <div className="client-info">
                         <div className="client-name">{client.name}</div>
-                        <div className="client-inv-count">{client.invoiceCount} invoice{client.invoiceCount !== 1 ? 's' : ''}</div>
+                        <div className="client-inv-count">{client.invoiceCount} facture{client.invoiceCount !== 1 ? 's' : ''}</div>
                         <div className="bar-track">
                           <div className="bar-fill" style={{ width: `${client.barPct}%` }} />
                         </div>
@@ -396,15 +402,15 @@ export default function Dashboard({ onLogout }: DashboardProps) {
             </div>
           </div>
 
-          {/* Slide-over: New invoice */}
+          {/* Panneau glissant : Nouvelle facture */}
           <div className={`scrim${panelOpen ? ' open' : ''}`} onClick={closePanel} />
-          <div className={`new-inv-panel${panelOpen ? ' open' : ''}`} role="dialog" aria-label="New invoice" aria-modal="true">
+          <div className={`new-inv-panel${panelOpen ? ' open' : ''}`} role="dialog" aria-label="Nouvelle facture" aria-modal="true">
             <div className="panel-slide-head">
               <div>
-                <div className="panel-slide-title">New invoice</div>
-                <div className="panel-slide-sub">#INV-0042</div>
+                <div className="panel-slide-title">Nouvelle facture</div>
+                <div className="panel-slide-sub">#FAC-0042</div>
               </div>
-              <button className="icon-btn" onClick={closePanel} aria-label="Close panel">
+              <button className="icon-btn" onClick={closePanel} aria-label="Fermer le panneau">
                 <Icon name="x" size={15} ariaHidden />
               </button>
             </div>
@@ -413,38 +419,38 @@ export default function Dashboard({ onLogout }: DashboardProps) {
               <div className="form-group">
                 <label className="form-label">Client</label>
                 <select className="form-input" value={fClient} onChange={e => setFClient(e.target.value)}>
-                  <option value="">Select a client…</option>
+                  <option value="">Sélectionner un client…</option>
                   {CLIENTS_FOR_SELECT.map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
 
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Invoice date</label>
+                  <label className="form-label">Date de facturation</label>
                   <input type="date" className="form-input" value={fDate} onChange={e => setFDate(e.target.value)} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Due date</label>
+                  <label className="form-label">Date d'échéance</label>
                   <input type="date" className="form-input" value={fDue} onChange={e => setFDue(e.target.value)} />
                 </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Reference / Subject</label>
+                <label className="form-label">Référence / Objet</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Web development — sprint 5"
+                  placeholder="ex. Développement web — sprint 5"
                   value={fSubject}
                   onChange={e => setFSubject(e.target.value)}
                 />
               </div>
 
-              <div className="subhead"><span>Line items</span></div>
+              <div className="subhead"><span>Lignes de facturation</span></div>
               <div className="line-items-head">
                 <div className="li-col">Description</div>
-                <div className="li-col right">Qty</div>
-                <div className="li-col right">Price</div>
+                <div className="li-col right">Qté</div>
+                <div className="li-col right">Prix</div>
                 <div />
               </div>
 
@@ -453,7 +459,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
                   <div className="line-item-row">
                     <input
                       className="li-input"
-                      placeholder="Service description"
+                      placeholder="Description du service"
                       value={li.description}
                       onChange={e => updateLine(li.id, 'description', e.target.value)}
                     />
@@ -475,7 +481,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
                     <button
                       className="li-del"
                       onClick={() => removeLine(li.id)}
-                      aria-label="Remove line item"
+                      aria-label="Supprimer la ligne"
                       disabled={lineItems.length === 1}
                     >
                       <Icon name="trash" size={15} ariaHidden />
@@ -485,30 +491,30 @@ export default function Dashboard({ onLogout }: DashboardProps) {
               ))}
 
               <button className="add-line" onClick={addLine}>
-                <Icon name="plus" size={14} ariaHidden /> Add line item
+                <Icon name="plus" size={14} ariaHidden /> Ajouter une ligne
               </button>
 
               <div className="total-block">
                 <div className="total-row">
-                  <span>Subtotal</span>
+                  <span>Sous-total</span>
                   <span>{fmtXOFFull(Math.round(subtotal))} XOF</span>
                 </div>
                 <div className="total-row">
-                  <span>Tax (18% TVA)</span>
+                  <span>TVA (18 %)</span>
                   <span>{fmtXOFFull(Math.round(tax))} XOF</span>
                 </div>
                 <div className="total-row final">
-                  <span>Total due</span>
+                  <span>Total à payer</span>
                   <span>{fmtXOFFull(Math.round(total))} XOF</span>
                 </div>
               </div>
 
               <div className="form-group" style={{ marginTop: 16 }}>
-                <label className="form-label">Payment method</label>
+                <label className="form-label">Mode de paiement</label>
                 <select className="form-input" value={fPay} onChange={e => setFPay(e.target.value)}>
                   <option>Mobile Money (MTN / Orange / Wave)</option>
-                  <option>Bank transfer</option>
-                  <option>Cash on delivery</option>
+                  <option>Virement bancaire</option>
+                  <option>Paiement à la livraison</option>
                 </select>
               </div>
 
@@ -517,7 +523,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
                 <textarea
                   className="form-input"
                   rows={2}
-                  placeholder="Thank you for your business…"
+                  placeholder="Merci pour votre confiance…"
                   style={{ resize: 'none', lineHeight: 1.5 }}
                   value={fNotes}
                   onChange={e => setFNotes(e.target.value)}
@@ -527,10 +533,10 @@ export default function Dashboard({ onLogout }: DashboardProps) {
 
             <div className="panel-footer">
               <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => submitInvoice('draft')}>
-                Save draft
+                Enregistrer brouillon
               </button>
               <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => submitInvoice('pending')}>
-                <Icon name="send" ariaHidden /> Send invoice
+                <Icon name="send" ariaHidden /> Envoyer la facture
               </button>
             </div>
           </div>
