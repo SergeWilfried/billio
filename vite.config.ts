@@ -14,10 +14,14 @@ export default defineConfig({
     },
 
     manifest: {
-      name: 'billio',
-      short_name: 'billio',
-      description: 'billio Logiciel de Gestion Comptable',
-      theme_color: '#ffffff',
+      name: 'Billio — Invoicing',
+      short_name: 'Billio',
+      description: 'Professional invoicing for West African SMBs — create, send and track invoices with Mobile Money support.',
+      theme_color: '#185FA5',
+      background_color: '#EAEEF3',
+      display: 'standalone',
+      orientation: 'portrait-primary',
+      categories: ['finance', 'business', 'productivity'],
     },
 
     workbox: {
