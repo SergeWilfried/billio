@@ -1,0 +1,468 @@
+import { useState, useMemo } from 'react';
+import Icon from '../components/Icon';
+import { fmt } from '../data';
+import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '../lib/schemas';
+
+type FilterKey = 'all' | 'active' | 'lead' | 'balance';
+
+interface MiniInv {
+  id: string;
+  sub: string;
+  amt: number;
+  status: InvoiceStatus;
+}
+
+const CLIENTS: ClientRecord[] = [
+  { code: 'OT', av: 'av-a', name: 'Orange Télécoms',    contact: 'Fatou Sanogo',      email: 'fatou@orange.bf',          phone: '+226 70 11 22 33', city: 'Ouagadougou',    invoices: 11, billed: 9_400_000, balance: 0,       status: 'active'   },
+  { code: 'SB', av: 'av-b', name: 'Sahel Banque',       contact: 'Mariam Koné',        email: 'm.kone@sahelbanque.bf',    phone: '+226 76 44 55 66', city: 'Bobo-Dioulasso', invoices: 5,  billed: 6_800_000, balance: 0,       status: 'active'   },
+  { code: 'TK', av: 'av-c', name: 'TechKonsult',        contact: 'Adama Ouédraogo',    email: 'adama@techkonsult.bf',     phone: '+226 70 12 34 56', city: 'Ouagadougou',    invoices: 8,  billed: 4_200_000, balance: 780_000, status: 'active'   },
+  { code: 'AM', av: 'av-d', name: 'AgroMali SA',        contact: 'Ibrahima Diarra',    email: 'i.diarra@agromali.ml',     phone: '+223 20 22 33 44', city: 'Bamako',         invoices: 6,  billed: 3_100_000, balance: 450_000, status: 'active'   },
+  { code: 'MF', av: 'av-f', name: 'MinFin Burkina',     contact: 'Salif Traoré',       email: 's.traore@finances.gov.bf', phone: '+226 25 30 60 90', city: 'Ouagadougou',    invoices: 2,  billed: 1_500_000, balance: 0,       status: 'active'   },
+  { code: 'BF', av: 'av-e', name: 'BurkinaFarm',        contact: 'Boukary Zongo',      email: 'b.zongo@burkinafarm.bf',   phone: '+226 78 90 12 34', city: 'Koudougou',      invoices: 3,  billed: 1_200_000, balance: 320_000, status: 'active'   },
+  { code: 'NC', av: 'av-g', name: 'Nieta Cosmetics',    contact: 'Aïcha Diallo',       email: 'aicha@nieta.ml',           phone: '+223 66 77 88 99', city: 'Bamako',         invoices: 1,  billed: 280_000,   balance: 0,       status: 'active'   },
+  { code: 'FE', av: 'av-h', name: 'Faso Energy',        contact: 'Awa Bamba',          email: 'awa.bamba@fasoenergy.bf',  phone: '+226 70 55 66 77', city: 'Ouagadougou',    invoices: 0,  billed: 0,         balance: 0,       status: 'lead'     },
+];
+
+const RECENT_INV: Record<string, MiniInv[]> = {
+  OT: [
+    { id: 'FAC-0038', sub: 'Développement app mobile — sprint 4', amt: 960_000,   status: 'paid'    },
+    { id: 'FAC-0031', sub: 'Mise à niveau réseau',                  amt: 1_240_000, status: 'paid'    },
+  ],
+  SB: [
+    { id: 'FAC-0040', sub: 'Licence intégration ERP',              amt: 1_200_000, status: 'paid'    },
+    { id: 'FAC-0029', sub: 'Migration de données',                  amt: 880_000,   status: 'paid'    },
+  ],
+  TK: [
+    { id: 'FAC-0041', sub: 'Refonte web — phase 2',                amt: 780_000,   status: 'overdue' },
+    { id: 'FAC-0033', sub: 'Refonte web — phase 1',                amt: 720_000,   status: 'paid'    },
+  ],
+  AM: [
+    { id: 'FAC-0039', sub: 'Audit sécurité T2',                    amt: 450_000,   status: 'overdue' },
+    { id: 'FAC-0027', sub: 'Contrat pen-test',                     amt: 600_000,   status: 'paid'    },
+  ],
+  MF: [
+    { id: 'FAC-0036', sub: 'Conseil infrastructure réseau',        amt: 625_000,   status: 'draft'   },
+  ],
+  BF: [
+    { id: 'FAC-0037', sub: 'Abonnement SaaS annuel',               amt: 320_000,   status: 'pending' },
+  ],
+  NC: [
+    { id: 'FAC-0034', sub: 'Pack identité visuelle',               amt: 280_000,   status: 'paid'    },
+  ],
+  FE: [],
+};
+
+const STATUS_LABEL: Record<ClientStatus, string> = {
+  active:   'Actif',
+  lead:     'Prospect',
+  inactive: 'Inactif',
+};
+
+const INV_STATUS_LABEL: Record<MiniInv['status'], string> = {
+  paid:    'Payée',
+  pending: 'En attente',
+  overdue: 'En retard',
+  draft:   'Brouillon',
+};
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all',     label: 'Tous'         },
+  { key: 'active',  label: 'Actifs'       },
+  { key: 'lead',    label: 'Prospects'    },
+  { key: 'balance', label: 'Avec solde'   },
+];
+
+const EMPTY_FORM: NewClientForm = {
+  name: '', contact: '', email: '', phone: '', city: '', status: 'active', ifu: '',
+};
+
+function fmtCompact(n: number) {
+  if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1) + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(n);
+}
+
+export default function ClientsPage() {
+  const [clients, setClients] = useState<ClientRecord[]>(CLIENTS);
+  const [filter, setFilter]   = useState<FilterKey>('all');
+  const [search, setSearch]   = useState('');
+  const [panel, setPanel]     = useState<null | { kind: 'detail'; code: string } | { kind: 'new' }>(null);
+  const [form, setForm]       = useState<NewClientForm>(EMPTY_FORM);
+
+  const totalBilled  = clients.reduce((s, c) => s + c.billed, 0);
+  const outstanding  = clients.reduce((s, c) => s + c.balance, 0);
+  const activeCount  = clients.filter(c => c.status === 'active').length;
+  const withBalance  = clients.filter(c => c.balance > 0).length;
+  const leadCount    = clients.filter(c => c.status === 'lead').length;
+
+  const counts = {
+    all:     clients.length,
+    active:  activeCount,
+    lead:    leadCount,
+    balance: withBalance,
+  };
+
+  const filtered = useMemo(() => {
+    let list = clients;
+    if (filter === 'active')  list = list.filter(c => c.status === 'active');
+    if (filter === 'lead')    list = list.filter(c => c.status === 'lead');
+    if (filter === 'balance') list = list.filter(c => c.balance > 0);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.contact.toLowerCase().includes(q) ||
+        c.city.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [clients, filter, search]);
+
+  const detailClient = panel?.kind === 'detail'
+    ? clients.find(c => c.code === panel.code) ?? null
+    : null;
+
+  function closePanel() { setPanel(null); }
+
+  function handleAddClient(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim()) return;
+    const avs = ['av-a','av-b','av-c','av-d','av-e','av-f','av-g','av-h'];
+    const words = form.name.trim().split(/\s+/);
+    const code  = ((words[0]?.[0] ?? '') + (words[1]?.[0] ?? '')).toUpperCase() || 'NC';
+    setClients(prev => [{
+      code, av: avs[prev.length % avs.length],
+      name: form.name, contact: form.contact || '—',
+      email: form.email || '—', phone: form.phone || '—',
+      city: form.city || '—',
+      invoices: 0, billed: 0, balance: 0, status: form.status,
+    }, ...prev]);
+    setForm(EMPTY_FORM);
+    closePanel();
+  }
+
+  return (
+    <>
+      <div className="main">
+        {/* Topbar */}
+        <div className="topbar">
+          <div>
+            <div className="page-title">Clients</div>
+            <div className="page-sub">Tous vos clients en un seul endroit</div>
+          </div>
+          <div className="topbar-actions">
+            <button className="btn btn-primary" onClick={() => setPanel({ kind: 'new' })}>
+              <Icon name="user-plus" size={16} />
+              Nouveau client
+            </button>
+          </div>
+        </div>
+
+        <div className="content">
+          {/* Metrics */}
+          <div className="metrics">
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico blue"><Icon name="users" size={15} /></div>
+                <div className="metric-label">Total clients</div>
+              </div>
+              <div className="metric-value">{clients.length}</div>
+              <div className="metric-change neutral">+2 ce trimestre</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico green"><Icon name="user" size={15} /></div>
+                <div className="metric-label">Actifs</div>
+              </div>
+              <div className="metric-value">{activeCount}</div>
+              <div className="metric-change neutral">{leadCount} prospect{leadCount !== 1 ? 's' : ''} en pipeline</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico violet"><Icon name="cash" size={15} /></div>
+                <div className="metric-label">Total facturé</div>
+              </div>
+              <div className="metric-value">
+                {fmtCompact(totalBilled)}<span className="metric-unit">XOF</span>
+              </div>
+              <div className="metric-change neutral">revenu cumulé</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico amber"><Icon name="clock-pause" size={15} /></div>
+                <div className="metric-label">Solde impayé</div>
+              </div>
+              <div className="metric-value">
+                {fmtCompact(outstanding)}<span className="metric-unit">XOF</span>
+              </div>
+              <div className="metric-change neutral">{withBalance} client{withBalance !== 1 ? 's' : ''} avec solde</div>
+            </div>
+          </div>
+
+          {/* Section header */}
+          <div className="section-header">
+            <div className="section-title">Répertoire</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="search-box">
+                <Icon name="search" size={15} />
+                <input
+                  type="text"
+                  placeholder="Rechercher un client…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <div className="filters">
+                {FILTERS.map(f => (
+                  <button
+                    key={f.key}
+                    className={'filter-chip' + (filter === f.key ? ' active' : '')}
+                    onClick={() => setFilter(f.key)}
+                  >
+                    {f.label}<span className="cnt">{counts[f.key]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Client table */}
+          <div className="client-table">
+            <div className="table-head client-grid-cols">
+              <div className="th">Client</div>
+              <div className="th">Localisation</div>
+              <div className="th">Factures</div>
+              <div className="th right">Total facturé</div>
+              <div className="th">Statut</div>
+              <div className="th" />
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="table-empty">Aucun client ne correspond à votre recherche.</div>
+            ) : (
+              filtered.map(cl => (
+                <div
+                  key={cl.code}
+                  className="client-row client-grid-cols"
+                  onClick={() => setPanel({ kind: 'detail', code: cl.code })}
+                >
+                  {/* Name */}
+                  <div className="name-cell">
+                    <div className={`cl-av ${cl.av}`}>{cl.code}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cl-name">{cl.name}</div>
+                      <div className="cl-contact">{cl.contact}</div>
+                    </div>
+                  </div>
+
+                  {/* Location */}
+                  <div className="loc-cell">
+                    <Icon name="map-pin" size={14} />
+                    {cl.city}
+                  </div>
+
+                  {/* Invoices */}
+                  <div className="inv-count tnum">
+                    {cl.invoices} <span>facture{cl.invoices !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  {/* Billed */}
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="billed tnum">
+                      {fmt(cl.billed)}<span className="cur">XOF</span>
+                    </div>
+                    {cl.balance > 0
+                      ? <div className="billed-sub bal">{fmt(cl.balance)} XOF dû</div>
+                      : cl.billed > 0
+                        ? <div className="billed-sub clear">Tout réglé</div>
+                        : <div className="billed-sub" style={{ color: 'var(--color-text-tertiary)' }}>Aucune facture</div>
+                    }
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <span className={`status-pill s-${cl.status}`}>{STATUS_LABEL[cl.status]}</span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="row-actions" onClick={e => e.stopPropagation()}>
+                    <button className="icon-btn" aria-label="Plus">
+                      <Icon name="dots" size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Scrim */}
+      <div className={'scrim' + (panel ? ' open' : '')} onClick={closePanel} />
+
+      {/* Detail panel */}
+      <div className={'new-inv-panel' + (panel?.kind === 'detail' ? ' open' : '')}>
+        {detailClient && (
+          <>
+            <div className="panel-slide-head">
+              <div>
+                <div className="panel-slide-title">Client</div>
+                <div className="panel-slide-sub">Aperçu &amp; historique</div>
+              </div>
+              <button className="icon-btn" onClick={closePanel} aria-label="Fermer">
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            <div className="panel-body">
+              {/* Hero */}
+              <div className="detail-hero">
+                <div className={`detail-av ${detailClient.av}`}>{detailClient.code}</div>
+                <div>
+                  <div className="detail-name">{detailClient.name}</div>
+                  <div className="detail-meta">{detailClient.contact} · {detailClient.city}</div>
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div className="stat-row">
+                <div className="stat-box">
+                  <div className="stat-label">Total facturé</div>
+                  <div className="stat-val tnum">
+                    {fmtCompact(detailClient.billed)}<span className="cur">XOF</span>
+                  </div>
+                </div>
+                <div className="stat-box">
+                  <div className="stat-label">Solde impayé</div>
+                  <div className={'stat-val tnum' + (detailClient.balance > 0 ? ' bal' : '')}>
+                    {fmtCompact(detailClient.balance)}<span className="cur">XOF</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Contact */}
+              <div className="detail-block">
+                <div className="detail-block-title">Contact</div>
+                <div className="contact-line">
+                  <Icon name="mail" size={16} />
+                  <span>{detailClient.email}</span>
+                </div>
+                <div className="contact-line">
+                  <Icon name="phone" size={16} />
+                  <span>{detailClient.phone}</span>
+                </div>
+                <div className="contact-line">
+                  <Icon name="map-pin" size={16} />
+                  <span>{detailClient.city}</span>
+                </div>
+              </div>
+
+              {/* Recent invoices */}
+              <div className="detail-block">
+                <div className="detail-block-title">Factures récentes</div>
+                {(RECENT_INV[detailClient.code] ?? []).length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--color-text-tertiary)', padding: '6px 0' }}>
+                    Aucune facture pour ce client.
+                  </div>
+                ) : (
+                  (RECENT_INV[detailClient.code] ?? []).map(inv => (
+                    <div key={inv.id} className="mini-inv">
+                      <div>
+                        <div className="mini-id">#{inv.id}</div>
+                        <div className="mini-sub">{inv.sub}</div>
+                      </div>
+                      <div className="mini-amt">{fmt(inv.amt)} XOF</div>
+                      <span className={`mini-status st-${inv.status}`}>
+                        {INV_STATUS_LABEL[inv.status]}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="panel-footer">
+              <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={closePanel}>
+                Fermer
+              </button>
+              <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+                <Icon name="plus" size={15} />
+                Nouvelle facture
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* New client panel */}
+      <div className={'new-inv-panel' + (panel?.kind === 'new' ? ' open' : '')}>
+        <div className="panel-slide-head">
+          <div>
+            <div className="panel-slide-title">Nouveau client</div>
+            <div className="panel-slide-sub">Ajouter une entreprise que vous facturez</div>
+          </div>
+          <button className="icon-btn" onClick={closePanel} aria-label="Fermer">
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+
+        <form id="new-client-form" className="panel-body" onSubmit={handleAddClient}>
+          <div className="form-group">
+            <label className="form-label">Raison sociale</label>
+            <input className="form-input" placeholder="ex. Faso Energy" value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Contact principal</label>
+            <input className="form-input" placeholder="ex. Awa Bamba" value={form.contact}
+              onChange={e => setForm(f => ({ ...f, contact: e.target.value }))} />
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Email</label>
+              <input className="form-input" type="email" placeholder="contact@entreprise.bf" value={form.email}
+                onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Téléphone</label>
+              <input className="form-input" type="tel" placeholder="70 00 00 00" value={form.phone}
+                onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Ville</label>
+              <input className="form-input" placeholder="Ouagadougou" value={form.city}
+                onChange={e => setForm(f => ({ ...f, city: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Statut</label>
+              <select className="form-input" value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value as ClientStatus }))}>
+                <option value="active">Actif</option>
+                <option value="lead">Prospect</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">
+              IFU <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 500 }}>— optionnel</span>
+            </label>
+            <input className="form-input" placeholder="00012345 B" value={form.ifu}
+              onChange={e => setForm(f => ({ ...f, ifu: e.target.value }))} />
+          </div>
+        </form>
+
+        <div className="panel-footer">
+          <button type="button" className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={closePanel}>
+            Annuler
+          </button>
+          <button type="submit" form="new-client-form" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+            <Icon name="check" size={15} />
+            Ajouter
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,407 @@
+import { useState, useMemo } from 'react';
+import Icon from '../components/Icon';
+import { useApp } from '../context/AppContext';
+import { CLIENTS, fmt } from '../data';
+import type { PayMethod, PayStatus, Payment } from '../lib/schemas';
+
+type FilterKey = 'all' | 'cash' | 'wave' | 'momo' | 'pending';
+
+const METHOD_META: Record<PayMethod, { label: string; icon: string; cls: string; sub: string }> = {
+  cash: { label: 'Cash',         icon: 'cash',          cls: 'm-cash', sub: 'En personne'    },
+  wave: { label: 'Wave',         icon: 'wave',          cls: 'm-wave', sub: 'Transfert Wave'  },
+  momo: { label: 'Mobile Money', icon: 'device-mobile', cls: 'm-momo', sub: 'MTN / Orange'    },
+};
+
+const INITIAL_PAYMENTS: Payment[] = [
+  { id: 'PAI-2052', date: "Aujourd'hui, 10h42", client: 'TK', inv: 'FAC-0007', method: 'momo', ref: 'MTN · ****7741',     amount: 780_000,   status: 'pending'   },
+  { id: 'PAI-2051', date: "Aujourd'hui, 09h14", client: 'SB', inv: 'FAC-0010', method: 'momo', ref: 'Orange · ****2210',  amount: 1_200_000, status: 'completed' },
+  { id: 'PAI-2050', date: "Aujourd'hui, 08h30", client: 'OT', inv: 'FAC-0012', method: 'wave', ref: 'Wave · #WV8842',     amount: 960_000,   status: 'completed' },
+  { id: 'PAI-2049', date: 'Hier',               client: 'BF', inv: 'FAC-0013', method: 'cash', ref: 'Reçu #0211',         amount: 320_000,   status: 'completed' },
+  { id: 'PAI-2048', date: '4 juin',             client: 'NC', inv: 'FAC-0014', method: 'wave', ref: 'Wave · #WV8790',     amount: 280_000,   status: 'completed' },
+  { id: 'PAI-2047', date: '3 juin',             client: 'TK', inv: 'FAC-0006', method: 'momo', ref: 'MTN · ****5532',     amount: 720_000,   status: 'completed' },
+  { id: 'PAI-2046', date: '2 juin',             client: 'AM', inv: 'FAC-0004', method: 'cash', ref: 'Reçu #0208',         amount: 600_000,   status: 'completed' },
+  { id: 'PAI-2045', date: '1er juin',           client: 'OT', inv: 'FAC-0011', method: 'wave', ref: 'Wave · #WV8703',     amount: 1_240_000, status: 'completed' },
+];
+
+const STATUS_LABEL: Record<PayStatus, string> = {
+  completed: 'Effectué',
+  pending:   'En attente',
+  failed:    'Échoué',
+};
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all',     label: 'Tous'          },
+  { key: 'momo',    label: 'Mobile Money'  },
+  { key: 'wave',    label: 'Wave'          },
+  { key: 'cash',    label: 'Cash'          },
+  { key: 'pending', label: 'En attente'    },
+];
+
+const REF_META: Record<PayMethod, { label: string; placeholder: string }> = {
+  cash: { label: 'Numéro de reçu',    placeholder: 'Reçu #0212'         },
+  wave: { label: 'Référence Wave',    placeholder: '#WV0000'             },
+  momo: { label: 'ID de transaction', placeholder: 'Réf MTN / Orange'   },
+};
+
+function fmtCompact(n: number) {
+  if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1) + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(n);
+}
+
+export default function PaymentsPage() {
+  const { invoices, showToast } = useApp();
+  const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
+  const [filter, setFilter]     = useState<FilterKey>('all');
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  // Form state
+  const [method, setMethod]   = useState<PayMethod>('cash');
+  const [invId, setInvId]     = useState('');
+  const [amount, setAmount]   = useState('');
+  const [ref, setRef]         = useState('');
+  const [date, setDate]       = useState(new Date().toISOString().split('T')[0]);
+
+  const openInvoices = invoices.filter(i => i.status === 'pending' || i.status === 'overdue');
+
+  // Metrics
+  const completed = payments.filter(p => p.status === 'completed');
+  const total     = completed.reduce((s, p) => s + p.amount, 0);
+  const byMethod  = { cash: 0, wave: 0, momo: 0 } as Record<PayMethod, number>;
+  completed.forEach(p => { byMethod[p.method] += p.amount; });
+  const share = (m: PayMethod) => total ? Math.round((byMethod[m] / total) * 100) : 0;
+
+  const counts: Record<FilterKey, number> = {
+    all:     payments.length,
+    cash:    payments.filter(p => p.method === 'cash').length,
+    wave:    payments.filter(p => p.method === 'wave').length,
+    momo:    payments.filter(p => p.method === 'momo').length,
+    pending: payments.filter(p => p.status === 'pending').length,
+  };
+
+  const filtered = useMemo(() => {
+    if (filter === 'pending') return payments.filter(p => p.status === 'pending');
+    if (filter !== 'all')     return payments.filter(p => p.method === filter);
+    return payments;
+  }, [payments, filter]);
+
+  function openPanel() {
+    setMethod('cash'); setInvId(''); setAmount(''); setRef('');
+    setDate(new Date().toISOString().split('T')[0]);
+    setPanelOpen(true);
+  }
+
+  function closePanel() { setPanelOpen(false); }
+
+  function handlePickInvoice(id: string) {
+    setInvId(id);
+    const inv = invoices.find(i => i.id === id);
+    if (inv) setAmount(String(inv.amount));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!invId) { showToast('Sélectionnez une facture', true); return; }
+    const amt = parseFloat(amount) || 0;
+    if (amt <= 0) { showToast('Saisissez un montant', true); return; }
+
+    const maxNum = Math.max(...payments.map(p => parseInt(p.id.split('-')[1], 10)));
+    const inv = invoices.find(i => i.id === invId);
+    const m   = METHOD_META[method];
+
+    setPayments(prev => [{
+      id:     `PAI-${maxNum + 1}`,
+      date:   "À l'instant",
+      client: inv?.client ?? '?',
+      inv:    invId,
+      method,
+      ref:    ref.trim() || m.sub,
+      amount: amt,
+      status: 'completed',
+    }, ...prev]);
+
+    closePanel();
+    showToast(`Paiement ${m.label} de ${fmt(amt)} XOF enregistré`);
+  }
+
+  return (
+    <>
+      <div className="main">
+        {/* Topbar */}
+        <div className="topbar">
+          <div>
+            <div className="page-title">Paiements</div>
+            <div className="page-sub">Argent reçu sur vos factures</div>
+          </div>
+          <div className="topbar-actions">
+            <button className="btn">
+              <Icon name="download" size={16} />
+              Relevé
+            </button>
+            <button className="btn btn-primary" onClick={openPanel}>
+              <Icon name="plus" size={16} />
+              Enregistrer un paiement
+            </button>
+          </div>
+        </div>
+
+        <div className="content">
+          {/* Metrics */}
+          <div className="metrics">
+            {/* Feature card — total received */}
+            <div className="metric-card pay-feature">
+              <div className="metric-top">
+                <div className="metric-ico pay-ico-white"><Icon name="arrow-down-left" size={15} /></div>
+                <div className="metric-label pay-label-white">Reçu · 30 derniers jours</div>
+              </div>
+              <div className="metric-value pay-val-white tnum">
+                {fmt(total)}<span className="metric-unit pay-unit-white">XOF</span>
+              </div>
+              <div className="metric-change pay-change-white">
+                <span className="pay-up"><Icon name="trending-up" size={13} /> +18% vs mois dernier</span>
+              </div>
+            </div>
+
+            {/* Mobile Money */}
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico momo"><Icon name="device-mobile" size={15} /></div>
+                <div className="metric-label">Mobile Money</div>
+              </div>
+              <div className="metric-value tnum">
+                {fmtCompact(byMethod.momo)}<span className="metric-unit">XOF</span>
+              </div>
+              <div className="share-bar">
+                <div className="share-fill" style={{ width: `${share('momo')}%`, background: 'var(--pm-momo)' }} />
+              </div>
+              <div className="metric-change neutral">{share('momo')}% du volume</div>
+            </div>
+
+            {/* Wave */}
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico wave"><Icon name="wave" size={15} /></div>
+                <div className="metric-label">Wave</div>
+              </div>
+              <div className="metric-value tnum">
+                {fmtCompact(byMethod.wave)}<span className="metric-unit">XOF</span>
+              </div>
+              <div className="share-bar">
+                <div className="share-fill" style={{ width: `${share('wave')}%`, background: 'var(--pm-wave)' }} />
+              </div>
+              <div className="metric-change neutral">{share('wave')}% du volume</div>
+            </div>
+
+            {/* Cash */}
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico cash"><Icon name="cash" size={15} /></div>
+                <div className="metric-label">Cash</div>
+              </div>
+              <div className="metric-value tnum">
+                {fmtCompact(byMethod.cash)}<span className="metric-unit">XOF</span>
+              </div>
+              <div className="share-bar">
+                <div className="share-fill" style={{ width: `${share('cash')}%`, background: 'var(--pm-cash)' }} />
+              </div>
+              <div className="metric-change neutral">{share('cash')}% du volume</div>
+            </div>
+          </div>
+
+          {/* Section header + filters */}
+          <div className="section-header">
+            <div className="section-title">Transactions</div>
+            <div className="filters">
+              {FILTERS.map(f => (
+                <button
+                  key={f.key}
+                  className={'filter-chip' + (filter === f.key ? ' active' : '')}
+                  onClick={() => setFilter(f.key)}
+                >
+                  {f.label}<span className="cnt">{counts[f.key]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Payments table */}
+          <div className="pay-table">
+            <div className="table-head pay-grid-cols">
+              <div className="th">Paiement</div>
+              <div className="th">Client &amp; facture</div>
+              <div className="th">Méthode</div>
+              <div className="th right">Montant</div>
+              <div className="th">Statut</div>
+              <div className="th" />
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="table-empty">Aucun paiement ici pour le moment.</div>
+            ) : (
+              filtered.map(p => {
+                const cl = CLIENTS[p.client];
+                const m  = METHOD_META[p.method];
+                return (
+                  <div key={p.id} className="pay-row pay-grid-cols">
+                    {/* Payment ID */}
+                    <div>
+                      <div className="pay-id">{p.id}</div>
+                      <div className="pay-date">{p.date}</div>
+                    </div>
+
+                    {/* Client & invoice */}
+                    <div className="client-cell">
+                      {cl && <div className={`client-av ${cl.av}`}>{p.client}</div>}
+                      <div>
+                        <div className="cell-text">{cl?.name ?? p.client}</div>
+                        <div className="cell-sub">
+                          pour <span className="lnk">#{p.inv}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Method */}
+                    <div className="method-cell">
+                      <div className={`method-ico ${m.cls}`}>
+                        <Icon name={m.icon} size={16} />
+                      </div>
+                      <div>
+                        <div className="method-name">{m.label}</div>
+                        <div className="method-sub">{p.ref}</div>
+                      </div>
+                    </div>
+
+                    {/* Amount */}
+                    <div
+                      className="pay-amount tnum"
+                      style={{
+                        textAlign: 'right',
+                        color: p.status === 'pending' ? 'var(--color-text-tertiary)' : undefined,
+                      }}
+                    >
+                      +{fmt(p.amount)}<span className="cur">XOF</span>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <span className={`status-pill s-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="row-actions" onClick={e => e.stopPropagation()}>
+                      <button className="icon-btn" title="Reçu">
+                        <Icon name="file-text" size={15} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Scrim */}
+      <div className={'scrim' + (panelOpen ? ' open' : '')} onClick={closePanel} />
+
+      {/* Record payment panel */}
+      <div className={'new-inv-panel' + (panelOpen ? ' open' : '')}>
+        <div className="panel-slide-head">
+          <div>
+            <div className="panel-slide-title">Enregistrer un paiement</div>
+            <div className="panel-slide-sub">Saisir un encaissement hors ligne</div>
+          </div>
+          <button className="icon-btn" onClick={closePanel} aria-label="Fermer">
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+
+        <form id="pay-form" className="panel-body" onSubmit={handleSubmit}>
+          {/* Method picker */}
+          <div className="form-group">
+            <label className="form-label">Méthode de paiement</label>
+            <div className="method-pick">
+              {(['cash', 'wave', 'momo'] as PayMethod[]).map(m => (
+                <div
+                  key={m}
+                  className={'mp-opt' + (method === m ? ' active' : '')}
+                  onClick={() => { setMethod(m); setRef(''); }}
+                >
+                  <Icon name={METHOD_META[m].icon} size={20} />
+                  <span>{METHOD_META[m].label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Invoice */}
+          <div className="form-group">
+            <label className="form-label">Facture</label>
+            <select
+              className="form-input"
+              value={invId}
+              onChange={e => handlePickInvoice(e.target.value)}
+              required
+            >
+              <option value="">Sélectionner une facture ouverte…</option>
+              {openInvoices.map(inv => (
+                <option key={inv.id} value={inv.id}>
+                  #{inv.id} — {CLIENTS[inv.client]?.name ?? inv.client} ({fmt(inv.amount)} XOF)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Amount */}
+          <div className="form-group">
+            <label className="form-label">Montant reçu</label>
+            <div className="input-affix">
+              <input
+                type="number"
+                min="0"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="0"
+                required
+              />
+              <span className="suffix">XOF</span>
+            </div>
+          </div>
+
+          {/* Reference */}
+          <div className="form-group">
+            <label className="form-label">{REF_META[method].label}</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder={REF_META[method].placeholder}
+              value={ref}
+              onChange={e => setRef(e.target.value)}
+            />
+          </div>
+
+          {/* Date */}
+          <div className="form-group">
+            <label className="form-label">Date de réception</label>
+            <input
+              className="form-input"
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+            />
+          </div>
+        </form>
+
+        <div className="panel-footer">
+          <button type="button" className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={closePanel}>
+            Annuler
+          </button>
+          <button type="submit" form="pay-form" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+            <Icon name="check" size={15} />
+            Enregistrer
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}

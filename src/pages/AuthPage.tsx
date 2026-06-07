@@ -2,6 +2,8 @@ import { useState } from 'react';
 import Icon from '../components/Icon';
 import { supabase } from '../lib/supabase';
 
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+
 type AuthMode = 'login' | 'signup';
 
 const COUNTRIES = ['Burkina Faso', 'Mali', "Côte d'Ivoire", 'Sénégal', 'Niger'];
@@ -17,7 +19,11 @@ const BillioMark = () => (
   </svg>
 );
 
-export default function AuthPage() {
+interface AuthPageProps {
+  onLogin?: () => void; // used in mock mode; real mode relies on onAuthStateChange
+}
+
+export default function AuthPage({ onLogin }: AuthPageProps = {}) {
   const [mode, setMode] = useState<AuthMode>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -48,6 +54,10 @@ export default function AuthPage() {
 
     setLoading(true);
     try {
+      if (MOCK) {
+        onLogin?.();
+        return;
+      }
       if (isSignup) {
         const { error } = await supabase.auth.signUp({
           email: email.trim(),
@@ -62,7 +72,7 @@ export default function AuthPage() {
         });
         if (error) throw error;
       }
-      // onAuthStateChange in App.tsx handles navigation automatically
+      onLogin?.();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Une erreur est survenue.';
       setAuthError(msg);

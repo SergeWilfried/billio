@@ -1,0 +1,363 @@
+import { useState, useMemo } from 'react';
+import Icon from '../components/Icon';
+import { useApp } from '../context/AppContext';
+import { fmt, fmtCompact } from '../data';
+import type { ProductType, Product } from '../lib/schemas';
+
+type FilterKey = 'all' | ProductType;
+type ViewMode  = 'list' | 'grid';
+
+const INITIAL_PRODUCTS: Product[] = [
+  { id: '1', name: 'Développement web',        sku: 'DEV-WEB',  type: 'service', unit: 'heure',   price: 35_000,  tax: 18, used: 38, ico: 'server',       color: 'ico-blue'   },
+  { id: '2', name: 'Brand & UI design',        sku: 'DSN-UIX',  type: 'service', unit: 'projet',  price: 450_000, tax: 18, used: 12, ico: 'palette',      color: 'ico-violet' },
+  { id: '3', name: 'Dév. appli mobile',        sku: 'DEV-MOB',  type: 'service', unit: 'projet',  price: 600_000, tax: 18, used: 9,  ico: 'device-mobile',color: 'ico-blue'   },
+  { id: '4', name: 'Audit sécurité',           sku: 'SEC-AUD',  type: 'service', unit: 'projet',  price: 400_000, tax: 18, used: 7,  ico: 'shield-check', color: 'ico-amber'  },
+  { id: '5', name: 'Conseil SEO',              sku: 'MKT-SEO',  type: 'service', unit: 'heure',   price: 30_000,  tax: 18, used: 21, ico: 'chart-bar',    color: 'ico-green'  },
+  { id: '6', name: 'Hébergement géré',         sku: 'OPS-HOST', type: 'service', unit: 'mois',    price: 45_000,  tax: 18, used: 31, ico: 'server',       color: 'ico-teal'   },
+  { id: '7', name: 'Licence SaaS annuelle',    sku: 'LIC-SAAS', type: 'product', unit: 'licence', price: 320_000, tax: 18, used: 14, ico: 'sparkles',     color: 'ico-violet' },
+  { id: '8', name: 'Nom de domaine (.bf)',     sku: 'DOM-BF',   type: 'product', unit: 'an',      price: 18_000,  tax: 18, used: 26, ico: 'world',        color: 'ico-green'  },
+  { id: '9', name: 'Certificat SSL',           sku: 'SEC-SSL',  type: 'product', unit: 'an',      price: 25_000,  tax: 18, used: 19, ico: 'lock',         color: 'ico-rose'   },
+];
+
+const UNITS = ['heure', 'jour', 'projet', 'mois', 'an', 'article', 'licence'];
+
+function TypePill({ type }: { type: ProductType }) {
+  return type === 'service'
+    ? <span className="type-pill t-service"><Icon name="briefcase" size="1em" ariaHidden /> Service</span>
+    : <span className="type-pill t-product"><Icon name="tag" size="1em" ariaHidden /> Produit</span>;
+}
+
+export default function ProductsPage() {
+  const { showToast } = useApp();
+
+  const [products, setProducts]     = useState<Product[]>(INITIAL_PRODUCTS);
+  const [filter, setFilter]         = useState<FilterKey>('all');
+  const [view, setView]             = useState<ViewMode>('list');
+  const [search, setSearch]         = useState('');
+  const [panelOpen, setPanelOpen]   = useState(false);
+
+  // New item form state
+  const [fType,  setFType]  = useState<ProductType>('service');
+  const [fName,  setFName]  = useState('');
+  const [fSku,   setFSku]   = useState('');
+  const [fDesc,  setFDesc]  = useState('');
+  const [fPrice, setFPrice] = useState(50_000);
+  const [fUnit,  setFUnit]  = useState('heure');
+  const [fTax,   setFTax]   = useState(18);
+
+  const metrics = useMemo(() => {
+    const services = products.filter(p => p.type === 'service').length;
+    const goods    = products.filter(p => p.type === 'product').length;
+    const revenue  = products.reduce((s, p) => s + p.price * p.used, 0);
+    return { total: products.length, services, goods, revenue };
+  }, [products]);
+
+  const filterCounts = useMemo(() => ({
+    all: products.length,
+    service: products.filter(p => p.type === 'service').length,
+    product: products.filter(p => p.type === 'product').length,
+  }), [products]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return products.filter(p => {
+      if (filter !== 'all' && p.type !== filter) return false;
+      if (q && !(p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [products, filter, search]);
+
+  const maxUsed = useMemo(() => Math.max(...products.map(p => p.used), 1), [products]);
+
+  const openPanel = () => {
+    setFType('service'); setFName(''); setFSku('');
+    setFDesc(''); setFPrice(50_000); setFUnit('heure'); setFTax(18);
+    setPanelOpen(true);
+  };
+
+  const submitItem = () => {
+    if (!fName.trim()) { showToast('Donnez un nom à cet article.', true); return; }
+    const item: Product = {
+      id: crypto.randomUUID(),
+      name: fName.trim(),
+      sku: fSku.trim() || '—',
+      type: fType,
+      unit: fUnit,
+      price: fPrice,
+      tax: fTax,
+      used: 0,
+      ico: fType === 'service' ? 'briefcase' : 'tag',
+      color: fType === 'service' ? 'ico-blue' : 'ico-green',
+    };
+    setProducts(prev => [item, ...prev]);
+    setPanelOpen(false);
+    showToast(`"${item.name}" ajouté au catalogue`);
+  };
+
+  return (
+    <>
+      <div className="main">
+        <div className="topbar">
+          <div>
+            <div className="page-title">Produits &amp; Services</div>
+            <div className="page-sub">Articles réutilisables pour vos factures et devis</div>
+          </div>
+          <div className="topbar-actions">
+            <button className="btn"><Icon name="download" ariaHidden /> Exporter</button>
+            <button className="btn btn-primary" onClick={openPanel}>
+              <Icon name="plus" ariaHidden /> Nouvel article
+            </button>
+          </div>
+        </div>
+
+        <div className="content">
+          {/* Metrics */}
+          <div className="metrics">
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico blue"><Icon name="package" size={15} ariaHidden /></div>
+                <div className="metric-label">Articles au catalogue</div>
+              </div>
+              <div className="metric-value tnum">{metrics.total}<span className="metric-unit" /></div>
+              <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+2 ce mois</span></div>
+            </div>
+
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico violet"><Icon name="briefcase" size={15} ariaHidden /></div>
+                <div className="metric-label">Services</div>
+              </div>
+              <div className="metric-value tnum">{metrics.services}<span className="metric-unit" /></div>
+              <div className="metric-change" style={{ color: 'var(--color-text-secondary)' }}>facturés au temps ou au projet</div>
+            </div>
+
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico green"><Icon name="tag" size={15} ariaHidden /></div>
+                <div className="metric-label">Produits</div>
+              </div>
+              <div className="metric-value tnum">{metrics.goods}<span className="metric-unit" /></div>
+              <div className="metric-change" style={{ color: 'var(--color-text-secondary)' }}>articles à prix fixe</div>
+            </div>
+
+            <div className="metric-card">
+              <div className="metric-top">
+                <div className="metric-ico amber"><Icon name="cash" size={15} ariaHidden /></div>
+                <div className="metric-label">Revenu catalogue</div>
+              </div>
+              <div className="metric-value tnum">{fmtCompact(metrics.revenue)}<span className="metric-unit">XOF</span></div>
+              <div className="metric-change" style={{ color: 'var(--color-text-secondary)' }}>cumulé, toutes factures</div>
+            </div>
+          </div>
+
+          {/* Toolbar */}
+          <div className="section-header">
+            <div className="section-title">Catalogue</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="search-box">
+                <Icon name="search" ariaHidden />
+                <input
+                  type="text"
+                  placeholder="Rechercher…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <div className="filters">
+                {([['all', 'Tous'], ['service', 'Services'], ['product', 'Produits']] as [FilterKey, string][]).map(([key, label]) => (
+                  <button
+                    key={key}
+                    className={`filter-chip${filter === key ? ' active' : ''}`}
+                    onClick={() => setFilter(key)}
+                  >
+                    {label}<span className="cnt">{filterCounts[key] ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="view-toggle">
+                <button
+                  className={view === 'list' ? 'active' : ''}
+                  aria-label="Vue liste"
+                  onClick={() => setView('list')}
+                >
+                  <Icon name="list" ariaHidden />
+                </button>
+                <button
+                  className={view === 'grid' ? 'active' : ''}
+                  aria-label="Vue grille"
+                  onClick={() => setView('grid')}
+                >
+                  <Icon name="layout-grid" ariaHidden />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* List view */}
+          {view === 'list' && (
+            <div className="prod-table">
+              <div className="table-head prod-grid-cols">
+                <div className="th">Article</div>
+                <div className="th">Type</div>
+                <div className="th">Unité</div>
+                <div className="th right">Prix unitaire</div>
+                <div className="th">Utilisé</div>
+                <div className="th" />
+              </div>
+              {visible.length === 0 ? (
+                <div className="table-empty">Aucun article ne correspond à la recherche.</div>
+              ) : visible.map(p => (
+                <div key={p.id} className="prod-row prod-grid-cols">
+                  <div className="prod-name-cell">
+                    <div className={`prod-ico ${p.color}`}>
+                      <Icon name={p.ico} ariaHidden />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="prod-name">{p.name}</div>
+                      <div className="prod-sku">{p.sku}</div>
+                    </div>
+                  </div>
+                  <div><TypePill type={p.type} /></div>
+                  <div className="cell-unit">par {p.unit}</div>
+                  <div className="price tnum" style={{ textAlign: 'right' }}>
+                    {fmt(p.price)}<span className="cur">XOF</span>
+                  </div>
+                  <div className="used-cell">
+                    <div className="used-top tnum">{p.used}× <span>utilisé</span></div>
+                    <div className="bar-track">
+                      <div className="bar-fill" style={{ width: `${Math.round((p.used / maxUsed) * 100)}%` }} />
+                    </div>
+                  </div>
+                  <div className="row-actions">
+                    <button className="icon-btn" aria-label="Modifier" onClick={e => e.stopPropagation()}>
+                      <Icon name="edit" size={15} ariaHidden />
+                    </button>
+                    <button className="icon-btn" aria-label="Plus" onClick={e => e.stopPropagation()}>
+                      <Icon name="dots" size={15} ariaHidden />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Grid view */}
+          {view === 'grid' && (
+            <div className="prod-grid">
+              {visible.length === 0 ? (
+                <div className="table-empty" style={{ gridColumn: '1 / -1' }}>Aucun article ne correspond à la recherche.</div>
+              ) : visible.map(p => (
+                <div key={p.id} className="prod-card">
+                  <div className="pc-top">
+                    <div className={`prod-ico ${p.color}`}><Icon name={p.ico} ariaHidden /></div>
+                    <TypePill type={p.type} />
+                  </div>
+                  <div className="pc-name">{p.name}</div>
+                  <div className="pc-sku">{p.sku}</div>
+                  <div className="pc-price tnum">
+                    {fmt(p.price)}<span className="cur">XOF</span>
+                    <span className="per"> / {p.unit}</span>
+                  </div>
+                  <div className="pc-foot">
+                    <div className="pc-used"><b className="tnum">{p.used}×</b> sur factures</div>
+                    <button className="icon-btn" aria-label="Modifier" onClick={e => e.stopPropagation()}>
+                      <Icon name="edit" size={15} ariaHidden />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Slide-over: New item */}
+      <div className={`scrim${panelOpen ? ' open' : ''}`} onClick={() => setPanelOpen(false)} />
+      <div className={`new-inv-panel${panelOpen ? ' open' : ''}`} role="dialog" aria-label="Nouvel article" aria-modal="true">
+        <div className="panel-slide-head">
+          <div>
+            <div className="panel-slide-title">Nouvel article</div>
+            <div className="panel-slide-sub">Enregistrez-le une fois, réutilisez sur toute facture</div>
+          </div>
+          <button className="icon-btn" onClick={() => setPanelOpen(false)} aria-label="Fermer">
+            <Icon name="x" size={15} ariaHidden />
+          </button>
+        </div>
+
+        <div className="panel-body">
+          {/* Type selector */}
+          <div className="form-group">
+            <label className="form-label">Type</label>
+            <div className="seg">
+              <button
+                className={`seg-opt${fType === 'service' ? ' active' : ''}`}
+                onClick={() => setFType('service')}
+              >
+                <Icon name="briefcase" ariaHidden /> Service
+              </button>
+              <button
+                className={`seg-opt${fType === 'product' ? ' active' : ''}`}
+                onClick={() => setFType('product')}
+              >
+                <Icon name="package" ariaHidden /> Produit
+              </button>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Nom</label>
+            <input type="text" className="form-input" placeholder="ex. Développement web"
+              value={fName} onChange={e => setFName(e.target.value)} />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">SKU / Référence</label>
+            <input type="text" className="form-input" placeholder="ex. DEV-WEB"
+              value={fSku} onChange={e => setFSku(e.target.value)} />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Description</label>
+            <textarea className="form-input" rows={2} placeholder="Courte description affichée sur la ligne de facture…"
+              value={fDesc} onChange={e => setFDesc(e.target.value)} style={{ resize: 'none', lineHeight: 1.5 }} />
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Prix unitaire</label>
+              <div className="input-affix">
+                <input type="number" min={0} value={fPrice}
+                  onChange={e => setFPrice(parseFloat(e.target.value) || 0)} />
+                <span className="suffix">XOF</span>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Par</label>
+              <select className="form-input" value={fUnit} onChange={e => setFUnit(e.target.value)}>
+                {UNITS.map(u => <option key={u}>{u}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">TVA par défaut</label>
+            <div className="input-affix">
+              <input type="number" min={0} value={fTax}
+                onChange={e => setFTax(parseFloat(e.target.value) || 0)} />
+              <span className="suffix">%</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="panel-footer">
+          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setPanelOpen(false)}>
+            Annuler
+          </button>
+          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={submitItem}>
+            <Icon name="check" ariaHidden /> Enregistrer
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}

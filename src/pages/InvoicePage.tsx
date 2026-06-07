@@ -1,0 +1,279 @@
+import { useParams, useNavigate } from 'react-router-dom';
+import Icon from '../components/Icon';
+import { useApp } from '../context/AppContext';
+import { CLIENTS, fmt, STATUS_LABEL } from '../data';
+import type { Status } from '../data';
+
+// Mock line items — real data would come from backend per invoice
+const MOCK_LINES = [
+  { desc: 'UI/UX design — phase 2', note: 'Wireframes, hi-fi screens, mise à jour du design system', qty: 1, price: 300_000 },
+  { desc: 'Développement front-end', note: 'Build responsive, librairie de composants', qty: 8, price: 35_000 },
+  { desc: 'AQ & livraison', note: 'Tests cross-navigateurs, déploiement', qty: 1, price: 80_000 },
+];
+
+type DotKind = 'paid' | 'sent' | 'overdue' | 'viewed' | '';
+interface TlEntry { dot: DotKind; text: string; time: string; }
+
+function timelineForStatus(status: Status, clientName: string): TlEntry[] {
+  const created: TlEntry = { dot: '', text: 'Créée par Serge W.', time: '18 mai 2026, 16h55' };
+  if (status === 'draft') return [created];
+  const sent: TlEntry = { dot: 'sent', text: 'Envoyée par e-mail', time: '18 mai 2026, 17h02' };
+  if (status === 'paid') {
+    return [
+      { dot: 'paid',   text: `Paiement reçu de ${clientName}`, time: '5 juin 2026, 14h00' },
+      { dot: 'viewed', text: `Consultée par ${clientName}`,    time: '20 mai 2026, 9h18' },
+      sent, created,
+    ];
+  }
+  if (status === 'overdue') {
+    return [
+      { dot: 'sent',    text: `Relance envoyée à ${clientName}`, time: '4 juin 2026, 15h40' },
+      { dot: 'overdue', text: 'Facture passée en retard',        time: '2 juin 2026, automatique' },
+      { dot: 'viewed',  text: `Consultée par ${clientName}`,     time: '20 mai 2026, 9h18' },
+      sent, created,
+    ];
+  }
+  return [
+    { dot: 'viewed', text: `Consultée par ${clientName}`, time: '20 mai 2026, 9h18' },
+    sent, created,
+  ];
+}
+
+const BillioLogoSvg = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M5.5 3.2h10.2c.6 0 1.1.2 1.5.6l3 3c.4.4.6.9.6 1.5v12c0 .7-.6 1.1-1.2.8l-1.6-.8-1.7.9c-.3.2-.7.2-1 0l-1.6-.9-1.7.9c-.3.2-.7.2-1 0l-1.6-.9-1.7.9c-.3.2-.7.2-1 0l-1.6-.9-1.6.8c-.6.3-1.3-.1-1.3-.8V4.7c0-.8.7-1.5 1.5-1.5z" fill="#fff" fillOpacity="0.96"/>
+    <path d="M8 8.2h6M8 11.4h7M8 14.6h4" stroke="#185FA5" strokeWidth="1.6" strokeLinecap="round"/>
+  </svg>
+);
+
+export default function InvoicePage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { invoices, setInvoices, showToast } = useApp();
+
+  const invoice = invoices.find(i => i.id === id);
+  if (!invoice) {
+    return (
+      <div className="main">
+        <div className="topbar">
+          <div className="crumbs">
+            <button className="crumb-back" onClick={() => navigate('/invoices')} aria-label="Retour">
+              <Icon name="arrow-left" ariaHidden />
+            </button>
+            <div className="crumb-text">Facture introuvable</div>
+          </div>
+        </div>
+        <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)' }}>
+          La facture #{id} n'existe pas.
+        </div>
+      </div>
+    );
+  }
+
+  const client    = CLIENTS[invoice.client];
+  const subtotal  = MOCK_LINES.reduce((s, li) => s + li.qty * li.price, 0);
+  const tax       = Math.round(subtotal * 0.18);
+  const total     = subtotal + tax;
+  const isOverdue = invoice.status === 'overdue';
+  const timeline  = timelineForStatus(invoice.status, client.name);
+
+  const handleSendReminder = () => showToast(`Relance envoyée à ${client.name}`);
+  const handleDuplicate    = () => showToast('Facture dupliquée en brouillon');
+  const handleDelete       = () => {
+    if (window.confirm(`Supprimer la facture #${invoice.id} ? Cette action est irréversible.`)) {
+      setInvoices(prev => prev.filter(i => i.id !== invoice.id));
+      showToast('Facture supprimée');
+      navigate('/invoices');
+    }
+  };
+
+  return (
+    <div className="main">
+      {/* Topbar — breadcrumb variant */}
+      <div className="topbar">
+        <div className="crumbs">
+          <button className="crumb-back" onClick={() => navigate('/invoices')} aria-label="Retour aux factures">
+            <Icon name="arrow-left" ariaHidden />
+          </button>
+          <div className="crumb-text">
+            <button className="crumb-link" onClick={() => navigate('/invoices')}>Factures</button>
+            {' / '}<b>#{invoice.id}</b>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <button className="btn" onClick={() => window.print()}>
+            <Icon name="printer" ariaHidden /> Télécharger PDF
+          </button>
+          <button className="btn">
+            <Icon name="edit" ariaHidden /> Modifier
+          </button>
+          {(isOverdue || invoice.status === 'pending') && (
+            <button className="btn btn-primary" onClick={handleSendReminder}>
+              <Icon name="send" ariaHidden /> Envoyer une relance
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="content">
+        <div className="detail-grid">
+
+          {/* Invoice paper */}
+          <div className="paper">
+            <div className="pp-top">
+              <div className="pp-biz">
+                <div className="pp-logo" aria-hidden="true"><BillioLogoSvg /></div>
+                <div>
+                  <div className="pp-biz-name">Studio Wend SARL</div>
+                  <div className="pp-biz-meta">
+                    Av. Kwame Nkrumah, Immeuble Baobab<br />
+                    Ouagadougou, Burkina Faso<br />
+                    IFU 00012345 B · RCCM BF-OUA-2021-B-1234<br />
+                    contact@studiowend.bf · +226 70 12 34 56
+                  </div>
+                </div>
+              </div>
+              <div className="pp-doc">
+                <div className="pp-doc-title">Facture</div>
+                <div className="pp-doc-num">#{invoice.id}</div>
+                <div className={`pp-status st-${invoice.status}`}>{STATUS_LABEL[invoice.status]}</div>
+              </div>
+            </div>
+
+            <div className="pp-parties">
+              <div>
+                <div className="pp-block-label">Facturé à</div>
+                <div className="pp-client-name">{client.name}</div>
+                <div className="pp-client-meta">{client.city}, Burkina Faso</div>
+              </div>
+              <div>
+                <div className="pp-block-label">Détails</div>
+                <div className="pp-meta-grid">
+                  <div className="k">Émis le</div>
+                  <div className="v">{invoice.issued}</div>
+                  <div className="k">Échéance</div>
+                  <div className={`v${isOverdue ? ' due' : ''}`}>{invoice.due.replace('Éch. ', '')}</div>
+                  <div className="k">Conditions</div>
+                  <div className="v">Net 14 jours</div>
+                  <div className="k">Référence</div>
+                  <div className="v">{invoice.subject}</div>
+                </div>
+              </div>
+            </div>
+
+            <table className="li-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th className="r">Qté</th>
+                  <th className="r">Prix unitaire</th>
+                  <th className="r">Montant</th>
+                </tr>
+              </thead>
+              <tbody>
+                {MOCK_LINES.map((li, i) => (
+                  <tr key={i}>
+                    <td>
+                      <div className="li-desc">{li.desc}</div>
+                      {li.note && <div className="li-note">{li.note}</div>}
+                    </td>
+                    <td className="r">{li.qty}</td>
+                    <td className="r">{fmt(li.price)}</td>
+                    <td className="r">{fmt(li.qty * li.price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="pp-totals">
+              <div className="pp-totals-inner">
+                <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} XOF</span></div>
+                <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} XOF</span></div>
+                <div className="tot-row"><span>Acompte reçu</span><span className="tv">0 XOF</span></div>
+                <div className="tot-row grand"><span>Total dû</span><span className="tv">{fmt(total)} XOF</span></div>
+              </div>
+            </div>
+
+            <div className="pp-pay">
+              <div>
+                <div className="pp-block-label">Modes de paiement</div>
+                <div className="pp-pay-methods">
+                  <div className="pp-pm">
+                    <Icon name="device-mobile" ariaHidden />
+                    <span>Mobile Money — <b>MTN 70 12 34 56</b> · Orange 76 98 76 54</span>
+                  </div>
+                  <div className="pp-pm">
+                    <Icon name="activity" ariaHidden />
+                    <span>Wave — <b>billio.app/pay/{invoice.id.toLowerCase()}</b></span>
+                  </div>
+                  <div className="pp-pm">
+                    <Icon name="building-bank" ariaHidden />
+                    <span>Ecobank — <b>BF76 0001 2345 6789</b></span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="pp-block-label">Notes</div>
+                <div className="pp-note">
+                  Merci pour votre confiance. Paiement à régler sous 14 jours.
+                  Tout retard entraîne une pénalité de 2 % par mois.
+                </div>
+              </div>
+            </div>
+
+            <div className="pp-foot">Studio Wend SARL · Facture générée via Billio · TVA applicable au taux en vigueur</div>
+          </div>
+
+          {/* Rail */}
+          <aside className="rail">
+            <div className="rail-card">
+              <div className="rail-due-label">Montant dû</div>
+              <div className="rail-due-amt tnum">
+                {fmt(total)}<span className="cur">XOF</span>
+              </div>
+              {isOverdue && (
+                <div className="rail-due-sub">
+                  <Icon name="alert-triangle" ariaHidden />
+                  5 jours de retard · éch. {invoice.due.replace('Éch. ', '')}
+                </div>
+              )}
+              <div className="rail-actions">
+                {(isOverdue || invoice.status === 'pending') && (<>
+                  <button className="btn btn-primary btn-block">
+                    <Icon name="cash" ariaHidden /> Enregistrer un paiement
+                  </button>
+                  <button className="btn btn-block" onClick={handleSendReminder}>
+                    <Icon name="send" ariaHidden /> Envoyer une relance
+                  </button>
+                </>)}
+                <button className="btn btn-block" onClick={() => window.print()}>
+                  <Icon name="printer" ariaHidden /> Télécharger PDF
+                </button>
+                <div className="rail-divider" />
+                <button className="btn btn-block" onClick={handleDuplicate}>
+                  <Icon name="copy" ariaHidden /> Dupliquer
+                </button>
+                <button className="btn btn-block btn-ghost btn-danger" onClick={handleDelete}>
+                  <Icon name="trash" ariaHidden /> Supprimer la facture
+                </button>
+              </div>
+            </div>
+
+            <div className="rail-card">
+              <div className="rail-title">Activité</div>
+              {timeline.map((entry, i) => (
+                <div key={i} className="tl-item">
+                  <div className={`tl-dot${entry.dot ? ` ${entry.dot}` : ''}`} />
+                  <div>
+                    <div className="tl-text">{entry.text}</div>
+                    <div className="tl-time">{entry.time}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
