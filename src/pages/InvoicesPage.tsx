@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
+import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
 import {
   CLIENTS, STATUS_LABEL, fmt, nextId, newLineItem,
@@ -186,9 +187,12 @@ export default function InvoicesPage() {
             </div>
 
             {filteredInvoices.length === 0 ? (
-              <div className="table-empty">
-                Aucune facture {filter !== 'all' ? `« ${STATUS_LABEL[filter as Status]} »` : ''}.
-              </div>
+              <EmptyState
+                variant="compact"
+                icon={<Icon name="file-invoice" size={24} ariaHidden />}
+                title={filter !== 'all' ? `Aucune facture « ${STATUS_LABEL[filter as Status]} »` : 'Aucune facture'}
+                description="Créez votre première facture pour commencer à facturer vos clients."
+              />
             ) : filteredInvoices.map(inv => {
               const c = CLIENTS[inv.client];
               return (

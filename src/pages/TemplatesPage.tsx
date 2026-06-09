@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Icon from '../components/Icon';
+import { EmptyState } from '../components/EmptyState';
 import InvoicePaper from '../components/InvoicePaper';
 import type { PaperConfig, PaperLayout, PaperDensity, TableStyle, TotalStyle } from '../components/InvoicePaper';
 
@@ -527,6 +528,16 @@ export default function TemplatesPage() {
               </div>
 
               <div className="tpl-grid">
+                {templates.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <EmptyState
+                      variant="compact"
+                      icon={<Icon name="sparkles" size={24} ariaHidden />}
+                      title="Aucun modèle"
+                      description="Vous n'avez pas encore de modèles. Créez-en un pour gagner du temps."
+                    />
+                  </div>
+                )}
                 {templates.map(tpl => (
                   <TemplateCard
                     key={tpl.id}

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
+import { EmptyState, EmptyInline } from '../components/EmptyState';
 import { fmt } from '../data';
 import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '../lib/schemas';
 
@@ -238,7 +239,12 @@ export default function ClientsPage() {
             </div>
 
             {filtered.length === 0 ? (
-              <div className="table-empty">Aucun client ne correspond à votre recherche.</div>
+              <EmptyState
+                variant="compact"
+                icon={<Icon name="users" size={24} ariaHidden />}
+                title="Aucun client trouvé"
+                description="Aucun client ne correspond à votre recherche. Essayez d'autres termes."
+              />
             ) : (
               filtered.map(cl => (
                 <div
@@ -361,9 +367,7 @@ export default function ClientsPage() {
               <div className="detail-block">
                 <div className="detail-block-title">Factures récentes</div>
                 {(RECENT_INV[detailClient.code] ?? []).length === 0 ? (
-                  <div style={{ fontSize: 12.5, color: 'var(--color-text-tertiary)', padding: '6px 0' }}>
-                    Aucune facture pour ce client.
-                  </div>
+                  <EmptyInline message="Aucune facture pour ce client." />
                 ) : (
                   (RECENT_INV[detailClient.code] ?? []).map(inv => (
                     <div key={inv.id} className="mini-inv">

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
+import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
 import { fmt, fmtCompact } from '../data';
 import type { ProductType, Product } from '../lib/schemas';
@@ -205,7 +206,12 @@ export default function ProductsPage() {
                 <div className="th" />
               </div>
               {visible.length === 0 ? (
-                <div className="table-empty">Aucun article ne correspond à la recherche.</div>
+                <EmptyState
+                  variant="compact"
+                  icon={<Icon name="package" size={24} ariaHidden />}
+                  title="Aucun article trouvé"
+                  description="Aucun article ne correspond à la recherche. Modifiez vos filtres."
+                />
               ) : visible.map(p => (
                 <div key={p.id} className="prod-row prod-grid-cols">
                   <div className="prod-name-cell">
@@ -245,7 +251,14 @@ export default function ProductsPage() {
           {view === 'grid' && (
             <div className="prod-grid">
               {visible.length === 0 ? (
-                <div className="table-empty" style={{ gridColumn: '1 / -1' }}>Aucun article ne correspond à la recherche.</div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <EmptyState
+                    variant="compact"
+                    icon={<Icon name="package" size={24} ariaHidden />}
+                    title="Aucun article trouvé"
+                    description="Aucun article ne correspond à la recherche. Modifiez vos filtres."
+                  />
+                </div>
               ) : visible.map(p => (
                 <div key={p.id} className="prod-card">
                   <div className="pc-top">

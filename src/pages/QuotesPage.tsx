@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
+import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
 import { CLIENTS, fmt, newLineItem } from '../data';
 import type { LineItem, QuoteStatus, Quote } from '../lib/schemas';
@@ -242,7 +243,12 @@ export default function QuotesPage() {
             </div>
 
             {filtered.length === 0 ? (
-              <div className="table-empty">Aucun devis dans cette catégorie.</div>
+              <EmptyState
+                variant="compact"
+                icon={<Icon name="file-text" size={24} ariaHidden />}
+                title="Aucun devis"
+                description="Aucun devis dans cette catégorie. Créez un devis pour commencer."
+              />
             ) : (
               filtered.map(q => {
                 const cl = CLIENTS[q.client];

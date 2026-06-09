@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
+import { EmptyInline } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
 import { fmt, fmtCompact, CLIENTS } from '../data';
 import type { ActivityPart } from '../data';
@@ -101,6 +102,10 @@ export default function DashboardPage() {
           <button className="panel-link" onClick={() => navigate('/invoices')}>Tout voir</button>
         </div>
         <div className="invoice-table" style={{ marginBottom: 18 }}>
+          {invoices.length === 0 ? (
+            <EmptyInline message="Aucune facture récente." />
+          ) : (
+          <>
           <div className="table-head grid-cols">
             <div className="th">Facture</div>
             <div className="th">Client</div>
@@ -140,6 +145,8 @@ export default function DashboardPage() {
               </div>
             );
           })}
+          </>
+          )}
         </div>
 
         {/* Bottom panels */}
@@ -150,7 +157,9 @@ export default function DashboardPage() {
               <div className="panel-title">Activité récente</div>
               <button className="panel-link">Tout voir</button>
             </div>
-            {activity.slice(0, 5).map((item, i) => (
+            {activity.length === 0 ? (
+              <EmptyInline message="Aucune activité récente." />
+            ) : activity.slice(0, 5).map((item, i) => (
               <div key={i} className="activity-item">
                 <div className={`act-dot ${item.kind}`} />
                 <div>
@@ -167,7 +176,9 @@ export default function DashboardPage() {
               <div className="panel-title">Meilleurs clients par revenu</div>
               <button className="panel-link" onClick={() => navigate('/clients')}>Gérer</button>
             </div>
-            {topClients.map(({ code, client, sum, n, barPct }) => (
+            {topClients.length === 0 ? (
+              <EmptyInline message="Aucune donnée client disponible." />
+            ) : topClients.map(({ code, client, sum, n, barPct }) => (
               <div key={code} className="client-item">
                 <div className={`client-av lg ${client.av}`}>{code}</div>
                 <div className="client-info">

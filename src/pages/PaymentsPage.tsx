@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
+import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
 import { CLIENTS, fmt } from '../data';
 import type { PayMethod, PayStatus, Payment } from '../lib/schemas';
@@ -257,7 +258,12 @@ export default function PaymentsPage() {
             </div>
 
             {filtered.length === 0 ? (
-              <div className="table-empty">Aucun paiement ici pour le moment.</div>
+              <EmptyState
+                variant="compact"
+                icon={<Icon name="cash" size={24} ariaHidden />}
+                title="Aucun paiement"
+                description="Aucun paiement ici pour le moment. Les paiements reçus apparaîtront ici."
+              />
             ) : (
               filtered.map(p => {
                 const cl = CLIENTS[p.client];
