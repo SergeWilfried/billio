@@ -9,9 +9,9 @@ export default defineConfig({
     sourcemap: true,
   },
   plugins: [react(), sentryVitePlugin({
-    org: process.env.SENTRY_ORG,
-    project: process.env.SENTRY_PROJECT,
-    authToken: process.env.SENTRY_AUTH_TOKEN,
+    org: process.env.VITE_SENTRY_ORG,
+    project: process.env.VITE_SENTRY_PROJECT,
+    authToken: process.env.VITE_SENTRY_AUTH_TOKEN,
     telemetry: false,
   }), VitePWA({
     registerType: 'autoUpdate',
