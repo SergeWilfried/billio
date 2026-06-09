@@ -12,6 +12,8 @@ import ProductsPage from './pages/ProductsPage';
 import ClientsPage from './pages/ClientsPage';
 import PaymentsPage from './pages/PaymentsPage';
 import QuotesPage from './pages/QuotesPage';
+import TemplatesPage from './pages/TemplatesPage';
+import SettingsPage from './pages/SettingsPage';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
@@ -58,8 +60,9 @@ export default function App() {
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />
           <Route path="/payments" element={<PaymentsPage />} />
-          <Route path="/quotes"   element={<QuotesPage />} />
-          <Route path="/settings" element={<PlaceholderPage title="Paramètres" />} />
+          <Route path="/quotes"     element={<QuotesPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
+          <Route path="/settings"  element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>

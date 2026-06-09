@@ -4,23 +4,24 @@ import { useApp } from '../context/AppContext';
 import { CLIENTS, fmt } from '../data';
 import type { PayMethod, PayStatus, Payment } from '../lib/schemas';
 
-type FilterKey = 'all' | 'cash' | 'wave' | 'momo' | 'pending';
+type FilterKey = 'all' | 'cash' | 'wave' | 'momo' | 'card' | 'online' | 'pending';
 
 const METHOD_META: Record<PayMethod, { label: string; icon: string; cls: string; sub: string }> = {
   cash: { label: 'Cash',         icon: 'cash',          cls: 'm-cash', sub: 'En personne'    },
   wave: { label: 'Wave',         icon: 'wave',          cls: 'm-wave', sub: 'Transfert Wave'  },
   momo: { label: 'Mobile Money', icon: 'device-mobile', cls: 'm-momo', sub: 'MTN / Orange'    },
+  card: { label: 'Carte',        icon: 'credit-card',   cls: 'm-card', sub: 'Visa / Mastercard' },
 };
 
 const INITIAL_PAYMENTS: Payment[] = [
-  { id: 'PAI-2052', date: "Aujourd'hui, 10h42", client: 'TK', inv: 'FAC-0007', method: 'momo', ref: 'MTN · ****7741',     amount: 780_000,   status: 'pending'   },
-  { id: 'PAI-2051', date: "Aujourd'hui, 09h14", client: 'SB', inv: 'FAC-0010', method: 'momo', ref: 'Orange · ****2210',  amount: 1_200_000, status: 'completed' },
-  { id: 'PAI-2050', date: "Aujourd'hui, 08h30", client: 'OT', inv: 'FAC-0012', method: 'wave', ref: 'Wave · #WV8842',     amount: 960_000,   status: 'completed' },
-  { id: 'PAI-2049', date: 'Hier',               client: 'BF', inv: 'FAC-0013', method: 'cash', ref: 'Reçu #0211',         amount: 320_000,   status: 'completed' },
-  { id: 'PAI-2048', date: '4 juin',             client: 'NC', inv: 'FAC-0014', method: 'wave', ref: 'Wave · #WV8790',     amount: 280_000,   status: 'completed' },
-  { id: 'PAI-2047', date: '3 juin',             client: 'TK', inv: 'FAC-0006', method: 'momo', ref: 'MTN · ****5532',     amount: 720_000,   status: 'completed' },
-  { id: 'PAI-2046', date: '2 juin',             client: 'AM', inv: 'FAC-0004', method: 'cash', ref: 'Reçu #0208',         amount: 600_000,   status: 'completed' },
-  { id: 'PAI-2045', date: '1er juin',           client: 'OT', inv: 'FAC-0011', method: 'wave', ref: 'Wave · #WV8703',     amount: 1_240_000, status: 'completed' },
+  { id: 'PAI-2052', date: "Aujourd'hui, 10h42", client: 'TK', inv: 'FAC-0007', method: 'momo', ref: 'MTN · ****7741',    amount: 780_000,   status: 'pending',   source: 'manual'  },
+  { id: 'PAI-2051', date: "Aujourd'hui, 09h14", client: 'SB', inv: 'FAC-0010', method: 'card', ref: 'ch_3PXyZ2',         amount: 1_200_000, status: 'completed', source: 'online'  },
+  { id: 'PAI-2050', date: "Aujourd'hui, 08h30", client: 'OT', inv: 'FAC-0012', method: 'wave', ref: 'Wave · #WV8842',    amount: 960_000,   status: 'completed', source: 'online'  },
+  { id: 'PAI-2049', date: 'Hier',               client: 'BF', inv: 'FAC-0013', method: 'cash', ref: 'Reçu #0211',        amount: 320_000,   status: 'completed', source: 'manual'  },
+  { id: 'PAI-2048', date: '4 juin',             client: 'NC', inv: 'FAC-0014', method: 'momo', ref: 'Orange · ****2210', amount: 280_000,   status: 'completed', source: 'online'  },
+  { id: 'PAI-2047', date: '3 juin',             client: 'TK', inv: 'FAC-0006', method: 'momo', ref: 'MTN · ****5532',    amount: 720_000,   status: 'completed', source: 'manual'  },
+  { id: 'PAI-2046', date: '2 juin',             client: 'AM', inv: 'FAC-0004', method: 'cash', ref: 'Reçu #0208',        amount: 600_000,   status: 'completed', source: 'manual'  },
+  { id: 'PAI-2045', date: '1er juin',           client: 'OT', inv: 'FAC-0011', method: 'wave', ref: 'Wave · #WV8703',    amount: 1_240_000, status: 'completed', source: 'online'  },
 ];
 
 const STATUS_LABEL: Record<PayStatus, string> = {
@@ -31,16 +32,19 @@ const STATUS_LABEL: Record<PayStatus, string> = {
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all',     label: 'Tous'          },
+  { key: 'online',  label: 'En ligne'      },
   { key: 'momo',    label: 'Mobile Money'  },
   { key: 'wave',    label: 'Wave'          },
+  { key: 'card',    label: 'Carte'         },
   { key: 'cash',    label: 'Cash'          },
   { key: 'pending', label: 'En attente'    },
 ];
 
 const REF_META: Record<PayMethod, { label: string; placeholder: string }> = {
-  cash: { label: 'Numéro de reçu',    placeholder: 'Reçu #0212'         },
-  wave: { label: 'Référence Wave',    placeholder: '#WV0000'             },
-  momo: { label: 'ID de transaction', placeholder: 'Réf MTN / Orange'   },
+  cash: { label: 'Numéro de reçu',    placeholder: 'Reçu #0212'          },
+  wave: { label: 'Référence Wave',    placeholder: '#WV0000'              },
+  momo: { label: 'ID de transaction', placeholder: 'Réf MTN / Orange'    },
+  card: { label: 'Référence Paystack', placeholder: 'ch_3PXyZ...'         },
 };
 
 function fmtCompact(n: number) {
@@ -56,34 +60,39 @@ export default function PaymentsPage() {
   const [panelOpen, setPanelOpen] = useState(false);
 
   // Form state
-  const [method, setMethod]   = useState<PayMethod>('cash');
-  const [invId, setInvId]     = useState('');
-  const [amount, setAmount]   = useState('');
-  const [ref, setRef]         = useState('');
-  const [date, setDate]       = useState(new Date().toISOString().split('T')[0]);
+  const [method, setMethod] = useState<PayMethod>('cash');
+  const [invId, setInvId]   = useState('');
+  const [amount, setAmount] = useState('');
+  const [ref, setRef]       = useState('');
+  const [date, setDate]     = useState(new Date().toISOString().split('T')[0]);
 
   const openInvoices = invoices.filter(i => i.status === 'pending' || i.status === 'overdue');
 
   // Metrics
   const completed = payments.filter(p => p.status === 'completed');
   const total     = completed.reduce((s, p) => s + p.amount, 0);
-  const byMethod  = { cash: 0, wave: 0, momo: 0 } as Record<PayMethod, number>;
+  const byMethod  = { cash: 0, wave: 0, momo: 0, card: 0 } as Record<PayMethod, number>;
   completed.forEach(p => { byMethod[p.method] += p.amount; });
   const share = (m: PayMethod) => total ? Math.round((byMethod[m] / total) * 100) : 0;
 
   const counts: Record<FilterKey, number> = {
     all:     payments.length,
+    online:  payments.filter(p => p.source === 'online').length,
     cash:    payments.filter(p => p.method === 'cash').length,
     wave:    payments.filter(p => p.method === 'wave').length,
     momo:    payments.filter(p => p.method === 'momo').length,
+    card:    payments.filter(p => p.method === 'card').length,
     pending: payments.filter(p => p.status === 'pending').length,
   };
 
   const filtered = useMemo(() => {
     if (filter === 'pending') return payments.filter(p => p.status === 'pending');
+    if (filter === 'online')  return payments.filter(p => p.source === 'online');
     if (filter !== 'all')     return payments.filter(p => p.method === filter);
     return payments;
   }, [payments, filter]);
+
+  const onlineCount = payments.filter(p => p.source === 'online').length;
 
   function openPanel() {
     setMethod('cash'); setInvId(''); setAmount(''); setRef('');
@@ -118,6 +127,7 @@ export default function PaymentsPage() {
       ref:    ref.trim() || m.sub,
       amount: amt,
       status: 'completed',
+      source: 'manual',
     }, ...prev]);
 
     closePanel();
@@ -192,19 +202,19 @@ export default function PaymentsPage() {
               <div className="metric-change neutral">{share('wave')}% du volume</div>
             </div>
 
-            {/* Cash */}
+            {/* Card */}
             <div className="metric-card">
               <div className="metric-top">
-                <div className="metric-ico cash"><Icon name="cash" size={15} /></div>
-                <div className="metric-label">Cash</div>
+                <div className="metric-ico card"><Icon name="credit-card" size={15} /></div>
+                <div className="metric-label">Carte</div>
               </div>
               <div className="metric-value tnum">
-                {fmtCompact(byMethod.cash)}<span className="metric-unit">XOF</span>
+                {fmtCompact(byMethod.card)}<span className="metric-unit">XOF</span>
               </div>
               <div className="share-bar">
-                <div className="share-fill" style={{ width: `${share('cash')}%`, background: 'var(--pm-cash)' }} />
+                <div className="share-fill" style={{ width: `${share('card')}%`, background: 'var(--pm-card)' }} />
               </div>
-              <div className="metric-change neutral">{share('cash')}% du volume</div>
+              <div className="metric-change neutral">{share('card')}% du volume</div>
             </div>
           </div>
 
@@ -224,6 +234,17 @@ export default function PaymentsPage() {
             </div>
           </div>
 
+          {/* Reconciliation banner — shown when online payments exist */}
+          {onlineCount > 0 && (
+            <div className="recon-banner">
+              <div className="rb-ico"><Icon name="bolt" size={18} /></div>
+              <div className="rb-text">
+                <b>Les paiements en ligne se rapprochent automatiquement</b>
+                Connecté via Paystack — chaque paiement en ligne est associé à la facture correspondante en temps réel.
+              </div>
+            </div>
+          )}
+
           {/* Payments table */}
           <div className="pay-table">
             <div className="table-head pay-grid-cols">
@@ -241,6 +262,7 @@ export default function PaymentsPage() {
               filtered.map(p => {
                 const cl = CLIENTS[p.client];
                 const m  = METHOD_META[p.method];
+                const isOnline = p.source === 'online';
                 return (
                   <div key={p.id} className="pay-row pay-grid-cols">
                     {/* Payment ID */}
@@ -267,7 +289,9 @@ export default function PaymentsPage() {
                       </div>
                       <div>
                         <div className="method-name">{m.label}</div>
-                        <div className="method-sub">{p.ref}</div>
+                        <div className="method-sub">
+                          {isOnline ? 'via Paystack' : p.ref}
+                        </div>
                       </div>
                     </div>
 
@@ -283,8 +307,11 @@ export default function PaymentsPage() {
                     </div>
 
                     {/* Status */}
-                    <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span className={`status-pill s-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+                      {isOnline && p.status === 'completed' && (
+                        <span className="auto-chip"><Icon name="bolt" size={11} /> Auto</span>
+                      )}
                     </div>
 
                     {/* Actions */}
@@ -321,7 +348,7 @@ export default function PaymentsPage() {
           <div className="form-group">
             <label className="form-label">Méthode de paiement</label>
             <div className="method-pick">
-              {(['cash', 'wave', 'momo'] as PayMethod[]).map(m => (
+              {(['cash', 'wave', 'momo', 'card'] as PayMethod[]).map(m => (
                 <div
                   key={m}
                   className={'mp-opt' + (method === m ? ' active' : '')}

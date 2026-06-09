@@ -6,7 +6,8 @@ import { z } from 'zod';
 
 export const invoiceStatusSchema = z.enum(['paid', 'pending', 'overdue', 'draft']);
 export const clientStatusSchema  = z.enum(['active', 'lead', 'inactive']);
-export const payMethodSchema     = z.enum(['cash', 'wave', 'momo']);
+export const payMethodSchema     = z.enum(['cash', 'wave', 'momo', 'card']);
+export const paySourceSchema     = z.enum(['online', 'manual']);
 export const payStatusSchema     = z.enum(['completed', 'pending', 'failed']);
 export const productTypeSchema   = z.enum(['service', 'product']);
 export const quoteStatusSchema   = z.enum(['draft', 'sent', 'accepted', 'declined', 'expired', 'invoiced']);
@@ -62,6 +63,7 @@ export const paymentSchema = z.object({
   ref:    z.string(),
   amount: z.number().min(0),
   status: payStatusSchema,
+  source: paySourceSchema.default('manual'),
 });
 
 export const productSchema = z.object({
@@ -137,6 +139,7 @@ export const newPaymentFormSchema = z.object({
   amount: z.number().positive('Le montant doit être supérieur à 0'),
   ref:    z.string(),
   date:   z.string().min(1, 'Date requise'),
+  source: paySourceSchema.default('manual'),
 });
 
 export const newProductFormSchema = z.object({
@@ -167,6 +170,7 @@ export const newQuoteFormSchema = z.object({
 export type InvoiceStatus  = z.infer<typeof invoiceStatusSchema>;
 export type ClientStatus   = z.infer<typeof clientStatusSchema>;
 export type PayMethod      = z.infer<typeof payMethodSchema>;
+export type PaySource      = z.infer<typeof paySourceSchema>;
 export type PayStatus      = z.infer<typeof payStatusSchema>;
 export type ProductType    = z.infer<typeof productTypeSchema>;
 export type QuoteStatus    = z.infer<typeof quoteStatusSchema>;

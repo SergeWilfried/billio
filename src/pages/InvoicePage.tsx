@@ -39,6 +39,35 @@ function timelineForStatus(status: Status, clientName: string): TlEntry[] {
   ];
 }
 
+function QrCodeSvg() {
+  return (
+    <svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect width="60" height="60" fill="white"/>
+      {/* top-left finder */}
+      <rect x="4" y="4" width="22" height="22" rx="3" fill="#185FA5"/>
+      <rect x="8" y="8" width="14" height="14" rx="1.5" fill="white"/>
+      <rect x="11" y="11" width="8" height="8" rx="1" fill="#185FA5"/>
+      {/* top-right finder */}
+      <rect x="34" y="4" width="22" height="22" rx="3" fill="#185FA5"/>
+      <rect x="38" y="8" width="14" height="14" rx="1.5" fill="white"/>
+      <rect x="41" y="11" width="8" height="8" rx="1" fill="#185FA5"/>
+      {/* bottom-left finder */}
+      <rect x="4" y="34" width="22" height="22" rx="3" fill="#185FA5"/>
+      <rect x="8" y="38" width="14" height="14" rx="1.5" fill="white"/>
+      <rect x="11" y="41" width="8" height="8" rx="1" fill="#185FA5"/>
+      {/* data modules */}
+      <rect x="34" y="34" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="41" y="34" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="34" y="41" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="41" y="41" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="51" y="34" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="34" y="51" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="51" y="51" width="5" height="5" rx="1" fill="#185FA5"/>
+      <rect x="46" y="46" width="5" height="5" rx="1" fill="#185FA5"/>
+    </svg>
+  );
+}
+
 const BillioLogoSvg = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <path d="M5.5 3.2h10.2c.6 0 1.1.2 1.5.6l3 3c.4.4.6.9.6 1.5v12c0 .7-.6 1.1-1.2.8l-1.6-.8-1.7.9c-.3.2-.7.2-1 0l-1.6-.9-1.7.9c-.3.2-.7.2-1 0l-1.6-.9-1.7.9c-.3.2-.7.2-1 0l-1.6-.9-1.6.8c-.6.3-1.3-.1-1.3-.8V4.7c0-.8.7-1.5 1.5-1.5z" fill="#fff" fillOpacity="0.96"/>
@@ -189,8 +218,10 @@ export default function InvoicePage() {
               <div className="pp-totals-inner">
                 <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} XOF</span></div>
                 <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} XOF</span></div>
-                <div className="tot-row"><span>Acompte reçu</span><span className="tv">0 XOF</span></div>
-                <div className="tot-row grand"><span>Total dû</span><span className="tv">{fmt(total)} XOF</span></div>
+                {invoice.status === 'paid' && (
+                  <div className="tot-row"><span>Montant payé</span><span className="tv paid-amt">−{fmt(total)} XOF</span></div>
+                )}
+                <div className="tot-row grand"><span>Total dû</span><span className="tv">{invoice.status === 'paid' ? '0' : fmt(total)} XOF</span></div>
               </div>
             </div>
 
@@ -221,6 +252,29 @@ export default function InvoicePage() {
               </div>
             </div>
 
+            {/* Pay online block */}
+            <div className="pp-payonline">
+              <div className="pp-qr" aria-hidden="true">
+                <QrCodeSvg />
+              </div>
+              <div className="pp-po-text">
+                <div className="pp-po-title">Payer en ligne</div>
+                <div className="pp-po-url">billio.app/pay/{invoice.id.toLowerCase()}</div>
+                <div className="pp-po-hint">Scannez le QR ou cliquez sur le lien — Mobile Money, Wave, carte acceptés.</div>
+              </div>
+              <div className="pp-po-btn">
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(`https://billio.app/pay/${invoice.id.toLowerCase()}`);
+                    showToast('Lien copié');
+                  }}
+                >
+                  <Icon name="external-link" size={14} /> Ouvrir
+                </button>
+              </div>
+            </div>
+
             <div className="pp-foot">Studio Wend SARL · Facture générée via Billio · TVA applicable au taux en vigueur</div>
           </div>
 
@@ -241,6 +295,21 @@ export default function InvoicePage() {
                 {(isOverdue || invoice.status === 'pending') && (<>
                   <button className="btn btn-primary btn-block">
                     <Icon name="cash" ariaHidden /> Enregistrer un paiement
+                  </button>
+                  <button
+                    className="btn btn-block"
+                    onClick={() => window.open(`https://billio.app/pay/${invoice.id.toLowerCase()}`, '_blank')}
+                  >
+                    <Icon name="external-link" ariaHidden /> Ouvrir la page de paiement
+                  </button>
+                  <button
+                    className="btn btn-block"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(`https://billio.app/pay/${invoice.id.toLowerCase()}`);
+                      showToast('Lien de paiement copié');
+                    }}
+                  >
+                    <Icon name="link" ariaHidden /> Copier le lien
                   </button>
                   <button className="btn btn-block" onClick={handleSendReminder}>
                     <Icon name="send" ariaHidden /> Envoyer une relance

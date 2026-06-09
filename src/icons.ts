@@ -52,6 +52,13 @@ export const ICONS: Record<string, string> = {
   "printer": '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
   "device-mobile": '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
   "activity": '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  "bolt": '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
+  "link": '<path d="M10 14a3.5 3.5 0 0 0 5 0l4-4a3.5 3.5 0 0 0-5-5l-2 2"/><path d="M14 10a3.5 3.5 0 0 0-5 0l-4 4a3.5 3.5 0 0 0 5 5l2-2"/>',
+  "external-link": '<path d="M12 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/><path d="m11 13 9-9"/><path d="M15 4h5v5"/>',
+  "plug-connected": '<path d="M2 13h4"/><path d="M18 13h4"/><path d="M7.78 4.78a3 3 0 0 0-4.24 4.24l2.12 2.12a3 3 0 0 0 4.24 0l4.24-4.24a3 3 0 0 0 0-4.24"/><path d="M14.22 19.22a3 3 0 0 0 4.24-4.24l-2.12-2.12a3 3 0 0 0-4.24 0l-4.24 4.24a3 3 0 0 0 0 4.24"/>',
+  "refresh": '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',
+  "circle-check": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  "arrow-up-right": '<path d="M7 17 17 7"/><path d="M7 7h10v10"/>',
   "building-bank": '<path d="M2 21h20"/><path d="M5 11V21"/><path d="M12 11V21"/><path d="M19 11V21"/><path d="m3 11 9-8 9 8"/>',
   "copy": '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v1"/>',
 };

@@ -10,17 +10,24 @@ const BillioMark = () => (
   </svg>
 );
 
-const NAV_WORKSPACE: { icon: string; label: string; to: string }[] = [
+type NavItem = { icon: string; label: string; to: string };
+
+const NAV_WORKSPACE: NavItem[] = [
   { icon: 'layout-dashboard', label: 'Tableau de bord', to: '/dashboard' },
-  { icon: 'receipt',          label: 'Factures',        to: '/invoices' },
-  { icon: 'users',            label: 'Clients',         to: '/clients' },
-  { icon: 'package',          label: 'Produits',        to: '/products' },
+  { icon: 'receipt',          label: 'Factures',        to: '/invoices'  },
+  { icon: 'users',            label: 'Clients',         to: '/clients'   },
+  { icon: 'package',          label: 'Produits',        to: '/products'  },
+  { icon: 'layout-grid',      label: 'Modèles',         to: '/templates' },
 ];
 
-const NAV_FINANCE: { icon: string; label: string; to: string }[] = [
-  { icon: 'chart-bar',   label: 'Rapports',  to: '/reports' },
+const NAV_FINANCE: NavItem[] = [
+  { icon: 'chart-bar',   label: 'Rapports',  to: '/reports'  },
   { icon: 'credit-card', label: 'Paiements', to: '/payments' },
-  { icon: 'file-text',   label: 'Devis',     to: '/quotes' },
+  { icon: 'file-text',   label: 'Devis',     to: '/quotes'   },
+];
+
+const NAV_ACCOUNT: NavItem[] = [
+  { icon: 'settings', label: 'Paramètres', to: '/settings' },
 ];
 
 export default function Sidebar({ onLogout }: { onLogout: () => void }) {
@@ -43,6 +50,7 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
       </div>
 
       <nav className="sidebar-nav">
+        <div className="nav-section">Workspace</div>
         {NAV_WORKSPACE.map(({ icon, label, to }) => (
           <NavLink
             key={to}
@@ -57,6 +65,7 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
           </NavLink>
         ))}
 
+        <div className="nav-section">Finance</div>
         {NAV_FINANCE.map(({ icon, label, to }) => (
           <NavLink
             key={to}
@@ -68,9 +77,17 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
           </NavLink>
         ))}
 
-        <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
-          <Icon name="settings" ariaHidden />Paramètres
-        </NavLink>
+        <div className="nav-section">Compte</div>
+        {NAV_ACCOUNT.map(({ icon, label, to }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+          >
+            <Icon name={icon} ariaHidden />
+            {label}
+          </NavLink>
+        ))}
       </nav>
 
       <div className="sidebar-bottom">
