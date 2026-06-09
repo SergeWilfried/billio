@@ -13,7 +13,8 @@
       "Read(//Users/serge/.claude/skills/cloudflare/references/static-assets/**)",
       "Read(//Users/serge/.claude/skills/cloudflare/references/workers/**)",
       "Bash(npx wrangler *)",
-      "Bash(bunx wrangler *)"
+      "Bash(bunx wrangler *)",
+      "Bash(npm run *)"
     ]
   }
 }

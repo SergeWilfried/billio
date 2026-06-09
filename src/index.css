@@ -1025,7 +1025,7 @@ select.form-input {
 .gallery-intro { display: flex; align-items: flex-start; gap: 13px; padding: 15px 17px; background: linear-gradient(120deg, var(--brand-tint), #F4F9FE 70%); border: 0.5px solid #CFE4F7; border-radius: var(--border-radius-lg); margin-bottom: 22px; }
 .gi-ico { width: 38px; height: 38px; border-radius: 10px; background: #fff; color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; box-shadow: var(--shadow-sm); }
 .gi-title { font-size: 13.5px; font-weight: 700; color: var(--brand-dark); }
-.gi-sub { font-size: 12.5px; color: #2E6FA8; margin-top: 2px; line-height: 1.5; max-width: 70ch; }
+.gi-sub { font-size: 12.5px; color: #2E6FA8; margin-top: 2px; line-height: 1.5; }
 
 .gallery-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
 .gallery-title { font-size: 14px; font-weight: 700; }

@@ -252,11 +252,54 @@ function BusinessSection() {
   );
 }
 
+const TERMS_OPTIONS = ['À réception', 'Net 7 jours', 'Net 14 jours', 'Net 30 jours'];
+
 /* ─── Invoicing ─────────────────────────────────────────────────── */
-function InvoicingSection({ onSave }: { onSave: () => void }) {
+function InvoicingSection() {
+  const { orgId, showToast } = useApp();
+
+  const [prefix,    setPrefix]    = useState('INV-');
+  const [nextNum,   setNextNum]   = useState('0001');
+  const [terms,     setTerms]     = useState('Net 14 jours');
+  const [taxRate,   setTaxRate]   = useState(18);
+  const [footer,    setFooter]    = useState('');
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+
   const [autoReminders, setAutoReminders] = useState(true);
-  const [attachPdf, setAttachPdf]         = useState(true);
-  const [lateFees, setLateFees]           = useState(false);
+  const [attachPdf,     setAttachPdf]     = useState(true);
+  const [lateFees,      setLateFees]      = useState(false);
+
+  useEffect(() => {
+    if (!orgId) return;
+    supabase
+      .from('organizations')
+      .select('inv_prefix, inv_next_number, payment_terms, default_tax_rate, invoice_footer')
+      .eq('id', orgId)
+      .single()
+      .then(({ data, error }) => {
+        if (error) { console.warn('[settings] invoicing fetch:', error.message); setLoading(false); return; }
+        if (!data) return;
+        setPrefix(data.inv_prefix        ?? 'INV-');
+        setNextNum(data.inv_next_number  ?? '0001');
+        setTerms(data.payment_terms      ?? 'Net 14 jours');
+        setTaxRate(Number(data.default_tax_rate ?? 18));
+        setFooter(data.invoice_footer    ?? '');
+        setLoading(false);
+      });
+  }, [orgId]);
+
+  async function handleSave() {
+    if (!orgId) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from('organizations')
+      .update({ inv_prefix: prefix, inv_next_number: nextNum, payment_terms: terms, default_tax_rate: taxRate, invoice_footer: footer })
+      .eq('id', orgId);
+    setSaving(false);
+    if (error) { showToast(error.message, true); return; }
+    showToast('Paramètres de facturation enregistrés');
+  }
 
   return (
     <>
@@ -269,22 +312,38 @@ function InvoicingSection({ onSave }: { onSave: () => void }) {
           <div className="s-field-row">
             <div className="s-field">
               <label className="s-label">Préfixe numéro</label>
-              <input className="form-input" defaultValue="INV-" />
-              <div className="s-hint">Prochain numéro : <b>#INV-0042</b></div>
+              <input className="form-input" value={prefix} onChange={e => setPrefix(e.target.value)} disabled={loading} />
+              <div className="s-hint">Prochain numéro : <b>#{prefix}{nextNum}</b></div>
             </div>
-            <div className="s-field"><label className="s-label">Prochain numéro</label><input className="form-input tnum" defaultValue="0042" /></div>
+            <div className="s-field">
+              <label className="s-label">Prochain numéro</label>
+              <input className="form-input tnum" value={nextNum} onChange={e => setNextNum(e.target.value)} disabled={loading} />
+            </div>
           </div>
           <div className="s-field-row">
-            <div className="s-field"><label className="s-label">Conditions de paiement</label>
-              <select className="form-input"><option>Net 14 jours</option><option>Net 7 jours</option><option>Net 30 jours</option><option>À réception</option></select>
+            <div className="s-field">
+              <label className="s-label">Conditions de paiement</label>
+              <select className="form-input" value={terms} onChange={e => setTerms(e.target.value)} disabled={loading}>
+                {TERMS_OPTIONS.map(t => <option key={t}>{t}</option>)}
+              </select>
             </div>
-            <div className="s-field"><label className="s-label">TVA par défaut</label>
-              <div className="input-affix"><input defaultValue="18" type="number" /><span className="suffix">%</span></div>
+            <div className="s-field">
+              <label className="s-label">TVA par défaut</label>
+              <div className="input-affix">
+                <input value={taxRate} onChange={e => setTaxRate(Number(e.target.value))} type="number" min={0} max={100} disabled={loading} />
+                <span className="suffix">%</span>
+              </div>
             </div>
           </div>
-          <div className="s-field"><label className="s-label">Pied de page facture</label>
-            <textarea className="form-input" rows={2} defaultValue="Merci pour votre confiance. Paiement à régler sous 14 jours." />
+          <div className="s-field">
+            <label className="s-label">Pied de page facture</label>
+            <textarea className="form-input" rows={2} value={footer} onChange={e => setFooter(e.target.value)} disabled={loading} />
           </div>
+        </div>
+        <div className="s-card-foot">
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
         </div>
       </div>
       <div className="s-card">
@@ -297,7 +356,7 @@ function InvoicingSection({ onSave }: { onSave: () => void }) {
               <div className="s-row-sub">Suivis automatiques selon un calendrier configuré.</div>
             </div>
             <div className="s-row-aside">
-              <button className="btn btn-sm" onClick={() => {}}>Configurer</button>
+              <button className="btn btn-sm">Configurer</button>
               <Toggle on={autoReminders} onChange={setAutoReminders} />
             </div>
           </div>
@@ -318,7 +377,6 @@ function InvoicingSection({ onSave }: { onSave: () => void }) {
             <div className="s-row-aside"><Toggle on={lateFees} onChange={setLateFees} /></div>
           </div>
         </div>
-        <div className="s-card-foot"><button className="btn btn-primary" onClick={onSave}>Enregistrer</button></div>
       </div>
     </>
   );
@@ -552,35 +610,161 @@ function ProvidersSection({ onSave }: { onSave: () => void }) {
   );
 }
 
+const AV_CLASSES = ['av-a', 'av-b', 'av-c', 'av-d', 'av-e', 'av-f'] as const;
+
+const ROLE_LABELS: Record<string, string> = {
+  owner:      'Propriétaire',
+  admin:      'Administrateur',
+  member:     'Membre',
+  accountant: 'Comptable',
+  observer:   'Observateur',
+};
+
+interface TeamMember {
+  user_id:    string;
+  role:       string;
+  email:      string;
+  first_name: string;
+  last_name:  string;
+  joined_at:  string;
+}
+
+interface PendingInvite {
+  id:         string;
+  token:      string;
+  email:      string;
+  role:       string;
+  expires_at: string;
+}
+
+function memberInitials(m: TeamMember) {
+  if (m.first_name || m.last_name)
+    return `${m.first_name[0] ?? ''}${m.last_name[0] ?? ''}`.toUpperCase() || '?';
+  return m.email.slice(0, 2).toUpperCase();
+}
+
+function memberName(m: TeamMember) {
+  if (m.first_name || m.last_name) return `${m.first_name} ${m.last_name}`.trim();
+  return m.email.split('@')[0];
+}
+
 /* ─── Team ──────────────────────────────────────────────────────── */
 function TeamSection() {
+  const { orgId, userId, showToast } = useApp();
+
+  const [members,  setMembers]  = useState<TeamMember[]>([]);
+  const [pending,  setPending]  = useState<PendingInvite[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    Promise.all([
+      supabase.rpc('get_org_team', { p_org_id: orgId }),
+      supabase
+        .from('pending_invitations')
+        .select('id, token, email, role, expires_at')
+        .eq('org_id', orgId)
+        .eq('status', 'pending'),
+    ]).then(([teamRes, invRes]) => {
+      if (teamRes.error) console.warn('[settings] team fetch:', teamRes.error.message);
+      else setMembers((teamRes.data as TeamMember[]) ?? []);
+      if (invRes.error) console.warn('[settings] invites fetch:', invRes.error.message);
+      else setPending((invRes.data as PendingInvite[]) ?? []);
+      setLoading(false);
+    });
+  }, [orgId]);
+
+  function inviteUrl(token: string) {
+    return `${window.location.origin}/invite/${token}`;
+  }
+
+  function copyLink(token: string) {
+    navigator.clipboard.writeText(inviteUrl(token));
+    setCopiedId(token);
+    setTimeout(() => setCopiedId(null), 2000);
+  }
+
+  async function revokeInvite(id: string) {
+    const { error } = await supabase.from('pending_invitations').delete().eq('id', id);
+    if (error) { showToast(error.message, true); return; }
+    setPending(prev => prev.filter(p => p.id !== id));
+    showToast('Invitation révoquée');
+  }
+
   return (
-    <div className="s-card">
-      <div className="s-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div className="s-card-title">Membres de l'équipe</div>
-          <div className="s-card-desc">Personnes ayant accès à ce workspace Billio.</div>
-        </div>
-        <button className="btn btn-sm btn-primary"><Icon name="plus" size={14} /> Inviter</button>
-      </div>
-      <div className="s-card-body">
-        {[
-          { initials: 'SW', cls: 'av-a', name: 'Serge W.', note: '(vous)', email: 'serge@studiowend.bf', role: 'Propriétaire', owner: true },
-          { initials: 'AK', cls: 'av-b', name: 'Awa K.',   note: '',      email: 'awa@studiowend.bf',   role: 'Comptable',    owner: false },
-          { initials: 'IT', cls: 'av-c', name: 'Ibrahim T.', note: '',    email: 'ibrahim@studiowend.bf', role: 'Membre',     owner: false },
-        ].map(m => (
-          <div key={m.email} className="s-team-row">
-            <div className={`s-team-av ${m.cls}`}>{m.initials}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="s-team-name">{m.name} {m.note && <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 400 }}>{m.note}</span>}</div>
-              <div className="s-team-email">{m.email}</div>
-            </div>
-            <span className={'s-role-badge' + (m.owner ? ' owner' : '')}>{m.role}</span>
-            <button className="icon-btn" disabled={m.owner}><Icon name="dots" size={15} /></button>
+    <>
+      <div className="s-card">
+        <div className="s-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div className="s-card-title">Membres de l'équipe</div>
+            <div className="s-card-desc">Personnes ayant accès à ce workspace Billio.</div>
           </div>
-        ))}
+        </div>
+        <div className="s-card-body">
+          {loading && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13, padding: '8px 0' }}>Chargement…</div>}
+          {members.map((m, i) => {
+            const isMe = m.user_id === userId;
+            return (
+              <div key={m.user_id} className="s-team-row">
+                <div className={`s-team-av ${AV_CLASSES[i % AV_CLASSES.length]}`}>{memberInitials(m)}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="s-team-name">
+                    {memberName(m)}
+                    {isMe && <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 400 }}> (vous)</span>}
+                  </div>
+                  <div className="s-team-email">{m.email}</div>
+                </div>
+                <span className={'s-role-badge' + (m.role === 'owner' ? ' owner' : '')}>
+                  {ROLE_LABELS[m.role] ?? m.role}
+                </span>
+                <button className="icon-btn" disabled={isMe || m.role === 'owner'}>
+                  <Icon name="dots" size={15} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      {(pending.length > 0 || !loading) && (
+        <div className="s-card">
+          <div className="s-card-head">
+            <div className="s-card-title">Invitations en attente</div>
+            <div className="s-card-desc">Partagez le lien avec votre collaborateur pour qu'il rejoigne le workspace.</div>
+          </div>
+          <div className="s-card-body">
+            {pending.length === 0
+              ? <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13 }}>Aucune invitation en attente.</div>
+              : pending.map((p, i) => (
+                <div key={p.id} className="s-team-row">
+                  <div className={`s-team-av ${AV_CLASSES[i % AV_CLASSES.length]}`} style={{ opacity: 0.5 }}>
+                    {p.email[0]?.toUpperCase() ?? '?'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="s-team-name">{p.email}</div>
+                    <div className="s-team-email" style={{ fontFamily: 'monospace', fontSize: 11, userSelect: 'all' }}>
+                      {inviteUrl(p.token)}
+                    </div>
+                  </div>
+                  <span className="s-role-badge">{ROLE_LABELS[p.role] ?? p.role}</span>
+                  <button
+                    className="btn btn-sm"
+                    title="Copier le lien"
+                    onClick={() => copyLink(p.token)}
+                  >
+                    {copiedId === p.token ? <><Icon name="check" size={13} /> Copié</> : <><Icon name="link" size={13} /> Copier</>}
+                  </button>
+                  <button className="icon-btn" title="Révoquer" onClick={() => revokeInvite(p.id)}>
+                    <Icon name="trash" size={15} />
+                  </button>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -667,7 +851,7 @@ export default function SettingsPage() {
           <div className="s-col">
             {tab === 'profile'       && <ProfileSection />}
             {tab === 'business'      && <BusinessSection />}
-            {tab === 'invoicing'     && <InvoicingSection     onSave={onSave} />}
+            {tab === 'invoicing'     && <InvoicingSection />}
             {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
             {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
             {tab === 'team'          && <TeamSection />}

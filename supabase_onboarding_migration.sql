@@ -29,7 +29,13 @@ create table if not exists public.pending_invitations (
 
 alter table public.pending_invitations enable row level security;
 
--- Authenticated members can manage their org's invitations
+-- Drop and recreate all policies (idempotent re-run)
+drop policy if exists "invitations: members can read own org"  on public.pending_invitations;
+drop policy if exists "invitations: admins/owners can insert"  on public.pending_invitations;
+drop policy if exists "invitations: admins/owners can update"  on public.pending_invitations;
+drop policy if exists "invitations: admins/owners can delete"  on public.pending_invitations;
+
+-- Authenticated members can read their org's invitations
 create policy "invitations: members can read own org"
   on public.pending_invitations for select to authenticated
   using (org_id in (select public.my_org_ids()));
@@ -150,4 +156,33 @@ begin
      set status = 'accepted'
    where token = p_token;
 end;
+$$;
+
+-- ── Team member listing (bypasses RLS on auth.users) ────────
+-- Returns members of the org with their name/email from auth.users.
+-- Caller must be a member of the org (enforced inside).
+create or replace function public.get_org_team(p_org_id uuid)
+returns table (
+  user_id    uuid,
+  role       text,
+  email      text,
+  first_name text,
+  last_name  text,
+  joined_at  timestamptz
+)
+language sql stable security definer
+set search_path = public
+as $$
+  select
+    m.user_id,
+    m.role,
+    u.email,
+    coalesce(u.raw_user_meta_data->>'first_name', u.raw_user_meta_data->>'firstName', '') as first_name,
+    coalesce(u.raw_user_meta_data->>'last_name',  u.raw_user_meta_data->>'lastName',  '') as last_name,
+    m.created_at
+  from org_members m
+  join auth.users u on u.id = m.user_id
+  where m.org_id = p_org_id
+    and p_org_id in (select public.my_org_ids())
+  order by m.created_at;
 $$;
