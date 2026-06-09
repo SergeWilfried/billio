@@ -19,7 +19,7 @@ function dbToProduct(row: Record<string, unknown>): Product {
   };
 }
 
-export async function fetchProducts(_userId: string): Promise<Product[]> {
+export async function fetchProducts(_orgId: string): Promise<Product[]> {
   if (MOCK) return [...INITIAL_PRODUCTS];
   const { data, error } = await supabase
     .from('products')
@@ -30,7 +30,7 @@ export async function fetchProducts(_userId: string): Promise<Product[]> {
 }
 
 export async function createProduct(
-  userId: string,
+  orgId: string,
   payload: Omit<Product, 'used'>,
 ): Promise<Product> {
   if (MOCK) return { ...payload, used: 0 };
@@ -38,7 +38,7 @@ export async function createProduct(
     .from('products')
     .insert({
       id:      payload.id,
-      user_id: userId,
+      org_id:  orgId,
       name:    payload.name,
       sku:     payload.sku,
       type:    payload.type,

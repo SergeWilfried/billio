@@ -18,7 +18,7 @@ function dbToPayment(row: Record<string, unknown>): Payment {
   };
 }
 
-export async function fetchPayments(_userId: string): Promise<Payment[]> {
+export async function fetchPayments(_orgId: string): Promise<Payment[]> {
   if (MOCK) return [...INITIAL_PAYMENTS];
   const { data, error } = await supabase
     .from('payments')
@@ -29,7 +29,7 @@ export async function fetchPayments(_userId: string): Promise<Payment[]> {
 }
 
 export async function createPayment(
-  userId: string,
+  orgId: string,
   payload: Omit<Payment, 'source'> & { source?: Payment['source'] },
 ): Promise<Payment> {
   const source = payload.source ?? 'manual';
@@ -38,7 +38,7 @@ export async function createPayment(
     .from('payments')
     .insert({
       id:          payload.id,
-      user_id:     userId,
+      org_id:      orgId,
       date:        payload.date,
       client_code: payload.client,
       inv_id:      payload.inv,

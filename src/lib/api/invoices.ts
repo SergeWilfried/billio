@@ -16,7 +16,7 @@ function dbToInvoice(row: Record<string, unknown>): Invoice {
   };
 }
 
-export async function fetchInvoices(_userId: string): Promise<Invoice[]> {
+export async function fetchInvoices(_orgId: string): Promise<Invoice[]> {
   if (MOCK) return [...INITIAL_INVOICES];
   const { data, error } = await supabase
     .from('invoices')
@@ -27,7 +27,7 @@ export async function fetchInvoices(_userId: string): Promise<Invoice[]> {
 }
 
 export async function createInvoice(
-  userId: string,
+  orgId: string,
   payload: Pick<Invoice, 'id' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'status'>,
 ): Promise<Invoice> {
   if (MOCK) return { ...payload };
@@ -35,7 +35,7 @@ export async function createInvoice(
     .from('invoices')
     .insert({
       id:          payload.id,
-      user_id:     userId,
+      org_id:      orgId,
       subject:     payload.subject,
       client_code: payload.client,
       issued_at:   payload.issued,

@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { useApp } from '../context/AppContext';
-import { removeInvoice, updateInvoice } from '../lib/api/invoices';
+import { removeInvoice } from '../lib/api/invoices';
 import { fmt, fmtDate, STATUS_LABEL } from '../data';
 import type { Status } from '../data';
 
@@ -79,7 +79,7 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, showToast, clientsMap, userId } = useApp();
+  const { invoices, setInvoices, showToast, clientsMap, } = useApp();
 
   const invoice = invoices.find(i => i.id === id);
   if (!invoice) {
@@ -118,11 +118,11 @@ export default function InvoicePage() {
     }
   };
 
-  const handleMarkPaid = async () => {
-    setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
-    await updateInvoice(invoice.id, { status: 'paid' });
-    showToast('Facture marquée comme payée');
-  };
+  // const handleMarkPaid = async () => {
+  //   setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
+  //   await updateInvoice(invoice.id, { status: 'paid' });
+  //   showToast('Facture marquée comme payée');
+  // };
 
   return (
     <div className="main">

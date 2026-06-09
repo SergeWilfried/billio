@@ -14,7 +14,7 @@ function dbToActivity(row: Record<string, unknown>): Activity {
   };
 }
 
-export async function fetchActivities(_userId: string): Promise<Activity[]> {
+export async function fetchActivities(_orgId: string): Promise<Activity[]> {
   if (MOCK) return [...INITIAL_ACTIVITY];
   const { data, error } = await supabase
     .from('activities')
@@ -26,14 +26,14 @@ export async function fetchActivities(_userId: string): Promise<Activity[]> {
 }
 
 export async function createActivity(
-  userId: string,
+  orgId: string,
   payload: Pick<Activity, 'kind' | 'parts'>,
 ): Promise<Activity> {
   const now = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   if (MOCK) return { ...payload, time: "À l'instant" };
   const { error } = await supabase
     .from('activities')
-    .insert({ user_id: userId, kind: payload.kind, parts: payload.parts });
+    .insert({ org_id: orgId, kind: payload.kind, parts: payload.parts });
   if (error) throw error;
   return { ...payload, time: now };
 }

@@ -4,7 +4,7 @@ import { EmptyState, EmptyInline } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
 import { createClient } from '../lib/api/clients';
 import { fmt } from '../data';
-import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '../lib/schemas';
+import type { ClientStatus, InvoiceStatus, NewClientForm } from '../lib/schemas';
 
 type FilterKey = 'all' | 'active' | 'lead' | 'balance';
 

@@ -20,7 +20,7 @@ function dbToClient(row: Record<string, unknown>): ClientRecord {
   };
 }
 
-export async function fetchClients(_userId: string): Promise<ClientRecord[]> {
+export async function fetchClients(_orgId: string): Promise<ClientRecord[]> {
   if (MOCK) return [...INITIAL_CLIENTS];
   const { data, error } = await supabase
     .from('clients')
@@ -31,14 +31,14 @@ export async function fetchClients(_userId: string): Promise<ClientRecord[]> {
 }
 
 export async function createClient(
-  userId: string,
+  orgId: string,
   payload: Omit<ClientRecord, 'invoices' | 'billed' | 'balance'> & { ifu?: string },
 ): Promise<ClientRecord> {
   if (MOCK) return { ...payload, invoices: 0, billed: 0, balance: 0 };
   const { data, error } = await supabase
     .from('clients')
     .insert({
-      user_id:        userId,
+      org_id:         orgId,
       code:           payload.code,
       av:             payload.av,
       name:           payload.name,

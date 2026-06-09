@@ -23,6 +23,7 @@ interface AppContextValue {
   clientsMap:  Record<string, Client>;
   // Auth
   userId:      string;
+  orgId:       string;
   userLabel:   string;
   userInitials:string;
   // UI
@@ -44,6 +45,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [quotes,    setQuotes]    = useState<Quote[]>(MOCK ? INITIAL_QUOTES : []);
 
   const [userId,       setUserId]       = useState('mock-user');
+  const [orgId,        setOrgId]        = useState('mock-org');
   const [userLabel,    setUserLabel]    = useState('');
   const [userInitials, setUserInitials] = useState('??');
   const [loading,      setLoading]      = useState(!MOCK);
@@ -84,14 +86,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserInitials(name.slice(0, 2).toUpperCase());
       }
 
+      // Resolve the user's org (first membership found)
+      const { data: membership } = await supabase
+        .from('org_members')
+        .select('org_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single();
+      const resolvedOrgId = membership?.org_id ?? '';
+      setOrgId(resolvedOrgId);
+
       try {
         const [inv, cli, pay, prod, quo, act] = await Promise.all([
-          fetchInvoices(user.id),
-          fetchClients(user.id),
-          fetchPayments(user.id),
-          fetchProducts(user.id),
-          fetchQuotes(user.id),
-          fetchActivities(user.id),
+          fetchInvoices(resolvedOrgId),
+          fetchClients(resolvedOrgId),
+          fetchPayments(resolvedOrgId),
+          fetchProducts(resolvedOrgId),
+          fetchQuotes(resolvedOrgId),
+          fetchActivities(resolvedOrgId),
         ]);
         setInvoices(inv);
         setClients(cli);
@@ -127,6 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       quotes,    setQuotes,
       clientsMap,
       userId,
+      orgId,
       userLabel, userInitials,
       loading,
       toastMsg, toastVisible, toastError,

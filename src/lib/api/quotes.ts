@@ -19,7 +19,7 @@ function dbToQuote(row: Record<string, unknown>): Quote {
   };
 }
 
-export async function fetchQuotes(_userId: string): Promise<Quote[]> {
+export async function fetchQuotes(_orgId: string): Promise<Quote[]> {
   if (MOCK) return [...INITIAL_QUOTES];
   const { data, error } = await supabase
     .from('quotes')
@@ -30,7 +30,7 @@ export async function fetchQuotes(_userId: string): Promise<Quote[]> {
 }
 
 export async function createQuote(
-  userId: string,
+  orgId: string,
   payload: Pick<Quote, 'id' | 'subject' | 'client' | 'issued' | 'valid' | 'amount' | 'status'>,
 ): Promise<Quote> {
   const daysLeft = (new Date(payload.valid).getTime() - Date.now()) / 86_400_000;
@@ -40,7 +40,7 @@ export async function createQuote(
     .from('quotes')
     .insert({
       id:          payload.id,
-      user_id:     userId,
+      org_id:      orgId,
       subject:     payload.subject,
       client_code: payload.client,
       issued_at:   payload.issued,
