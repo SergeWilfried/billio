@@ -2,20 +2,12 @@ import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
-import { CLIENTS, fmt, newLineItem } from '../data';
+import { createQuote, updateQuote } from '../lib/api/quotes';
+import { fmt, fmtDate, newLineItem } from '../data';
 import type { LineItem, QuoteStatus, Quote } from '../lib/schemas';
 
 type FilterKey = 'all' | QuoteStatus;
 
-const INITIAL_QUOTES: Quote[] = [
-  { id: 'DEV-0118', subject: 'Refonte site web — périmètre complet',  client: 'TK', issued: '4 juin',  valid: '18 juin', expSoon: true,  amount: 1_250_000, status: 'sent'     },
-  { id: 'DEV-0117', subject: 'Intégration API core banking',          client: 'SB', issued: '2 juin',  valid: '16 juin', expSoon: false, amount: 3_400_000, status: 'accepted' },
-  { id: 'DEV-0116', subject: 'Contrat sécurité annuel',               client: 'AM', issued: '30 mai',  valid: '13 juin', expSoon: false, amount: 1_800_000, status: 'sent'     },
-  { id: 'DEV-0115', subject: 'Application mobile — phase 1',          client: 'OT', issued: '27 mai',  valid: '10 juin', expSoon: false, amount: 2_150_000, status: 'accepted' },
-  { id: 'DEV-0114', subject: 'Boutique e-commerce',                   client: 'BF', issued: '22 mai',  valid: '5 juin',  expSoon: false, amount: 680_000,   status: 'expired'  },
-  { id: 'DEV-0113', subject: 'Audit infrastructure IT',               client: 'MF', issued: '20 mai',  valid: '3 juin',  expSoon: false, amount: 920_000,   status: 'declined' },
-  { id: 'DEV-0112', subject: 'Pack identité visuelle',                client: 'TK', issued: '16 mai',  valid: '30 mai',  expSoon: false, amount: 450_000,   status: 'draft'    },
-];
 
 const STATUS_LABEL: Record<QuoteStatus, string> = {
   draft:    'Brouillon',
@@ -49,8 +41,7 @@ function fmtCompact(n: number) {
 const TVA = 0.18;
 
 export default function QuotesPage() {
-  const { showToast } = useApp();
-  const [quotes, setQuotes] = useState<Quote[]>(INITIAL_QUOTES);
+  const { showToast, quotes, setQuotes, clientsMap, userId } = useApp();
   const [filter, setFilter] = useState<FilterKey>('all');
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -111,31 +102,23 @@ export default function QuotesPage() {
     }));
   }
 
-  function submitQuote(status: 'draft' | 'sent') {
+  async function submitQuote(status: 'draft' | 'sent') {
     if (!fClient) { showToast('Sélectionnez un client', true); return; }
     if (subtotal <= 0) { showToast('Ajoutez au moins un article', true); return; }
-    const id = nextQuoteId(quotes);
-    const cl = CLIENTS[fClient];
-    setQuotes(prev => [{
-      id,
-      subject: fSubject.trim() || 'Devis sans titre',
-      client: fClient,
-      issued: "Aujourd'hui",
-      valid:  fValid,
-      expSoon: status === 'sent',
-      amount: total,
-      status,
-    }, ...prev]);
+    const id      = nextQuoteId(quotes);
+    const cName   = clientsMap[fClient]?.name ?? fClient;
+    const payload = { id, subject: fSubject.trim() || 'Devis sans titre', client: fClient, issued: fDate, valid: fValid, amount: total, status };
+    const newQuote: Quote = { ...payload, expSoon: status === 'sent' };
+    setQuotes(prev => [newQuote, ...prev]);
+    await createQuote(userId, payload);
     closePanel();
-    showToast(status === 'sent'
-      ? `Devis ${id} envoyé à ${cl?.name ?? fClient}`
-      : `Brouillon ${id} enregistré`,
-    );
+    showToast(status === 'sent' ? `Devis ${id} envoyé à ${cName}` : `Brouillon ${id} enregistré`);
   }
 
-  function convertToInvoice(id: string, e: React.MouseEvent) {
+  async function convertToInvoice(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced' } : q));
+    await updateQuote(id, { status: 'invoiced' });
     showToast(`Devis ${id} → facture créée`);
   }
 
@@ -251,7 +234,7 @@ export default function QuotesPage() {
               />
             ) : (
               filtered.map(q => {
-                const cl = CLIENTS[q.client];
+                const cl = clientsMap[q.client];
                 return (
                   <div key={q.id} className="q-row q-grid-cols">
                     {/* Quote ID + subject */}
@@ -271,12 +254,12 @@ export default function QuotesPage() {
 
                     {/* Valid until */}
                     <div>
-                      <div className="cell-text">{q.valid}</div>
+                      <div className="cell-text">{fmtDate(q.valid)}</div>
                       {q.status === 'sent' && q.expSoon
                         ? <div className="cell-sub warn">Expire bientôt</div>
                         : q.status === 'expired'
                           ? <div className="cell-sub">Périmé</div>
-                          : <div className="cell-sub">émis le {q.issued}</div>
+                          : <div className="cell-sub">émis le {fmtDate(q.issued)}</div>
                       }
                     </div>
 
@@ -353,7 +336,7 @@ export default function QuotesPage() {
             <label className="form-label">Client</label>
             <select className="form-input" value={fClient} onChange={e => setFClient(e.target.value)}>
               <option value="">Sélectionner un client…</option>
-              {Object.entries(CLIENTS).map(([code, cl]) => (
+              {Object.entries(clientsMap).map(([code, cl]) => (
                 <option key={code} value={code}>{cl.name}</option>
               ))}
             </select>

@@ -15,16 +15,6 @@ const METHOD_META: Record<PayMethod, { label: string; icon: string; cls: string;
   card: { label: 'Carte',        icon: 'credit-card',   cls: 'm-card', sub: 'Visa / Mastercard' },
 };
 
-const INITIAL_PAYMENTS: Payment[] = [
-  { id: 'PAI-2052', date: "Aujourd'hui, 10h42", client: 'TK', inv: 'FAC-0007', method: 'momo', ref: 'MTN · ****7741',    amount: 780_000,   status: 'pending',   source: 'manual'  },
-  { id: 'PAI-2051', date: "Aujourd'hui, 09h14", client: 'SB', inv: 'FAC-0010', method: 'card', ref: 'ch_3PXyZ2',         amount: 1_200_000, status: 'completed', source: 'online'  },
-  { id: 'PAI-2050', date: "Aujourd'hui, 08h30", client: 'OT', inv: 'FAC-0012', method: 'wave', ref: 'Wave · #WV8842',    amount: 960_000,   status: 'completed', source: 'online'  },
-  { id: 'PAI-2049', date: 'Hier',               client: 'BF', inv: 'FAC-0013', method: 'cash', ref: 'Reçu #0211',        amount: 320_000,   status: 'completed', source: 'manual'  },
-  { id: 'PAI-2048', date: '4 juin',             client: 'NC', inv: 'FAC-0014', method: 'momo', ref: 'Orange · ****2210', amount: 280_000,   status: 'completed', source: 'online'  },
-  { id: 'PAI-2047', date: '3 juin',             client: 'TK', inv: 'FAC-0006', method: 'momo', ref: 'MTN · ****5532',    amount: 720_000,   status: 'completed', source: 'manual'  },
-  { id: 'PAI-2046', date: '2 juin',             client: 'AM', inv: 'FAC-0004', method: 'cash', ref: 'Reçu #0208',        amount: 600_000,   status: 'completed', source: 'manual'  },
-  { id: 'PAI-2045', date: '1er juin',           client: 'OT', inv: 'FAC-0011', method: 'wave', ref: 'Wave · #WV8703',    amount: 1_240_000, status: 'completed', source: 'online'  },
-];
 
 const STATUS_LABEL: Record<PayStatus, string> = {
   completed: 'Effectué',
@@ -56,8 +46,7 @@ function fmtCompact(n: number) {
 }
 
 export default function PaymentsPage() {
-  const { invoices, showToast } = useApp();
-  const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
+  const { invoices, payments, setPayments, showToast, clientsMap, userId } = useApp();
   const [filter, setFilter]     = useState<FilterKey>('all');
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -110,19 +99,20 @@ export default function PaymentsPage() {
     if (inv) setAmount(String(inv.amount));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!invId) { showToast('Sélectionnez une facture', true); return; }
     const amt = parseFloat(amount) || 0;
     if (amt <= 0) { showToast('Saisissez un montant', true); return; }
 
-    const maxNum = Math.max(...payments.map(p => parseInt(p.id.split('-')[1], 10)));
+    const maxNum = payments.length
+      ? Math.max(...payments.map(p => parseInt(p.id.split('-')[1], 10)))
+      : 2052;
     const inv = invoices.find(i => i.id === invId);
     const m   = METHOD_META[method];
-
-    setPayments(prev => [{
+    const newPayment: Payment = {
       id:     `PAI-${maxNum + 1}`,
-      date:   "À l'instant",
+      date,
       client: inv?.client ?? '?',
       inv:    invId,
       method,
@@ -130,8 +120,10 @@ export default function PaymentsPage() {
       amount: amt,
       status: 'completed',
       source: 'manual',
-    }, ...prev]);
+    };
 
+    setPayments(prev => [newPayment, ...prev]);
+    await createPayment(userId, newPayment);
     closePanel();
     showToast(`Paiement ${m.label} de ${fmt(amt)} XOF enregistré`);
   }
@@ -267,7 +259,7 @@ export default function PaymentsPage() {
               />
             ) : (
               filtered.map(p => {
-                const cl = CLIENTS[p.client];
+                const cl = clientsMap[p.client];
                 const m  = METHOD_META[p.method];
                 const isOnline = p.source === 'online';
                 return (
@@ -275,7 +267,7 @@ export default function PaymentsPage() {
                     {/* Payment ID */}
                     <div>
                       <div className="pay-id">{p.id}</div>
-                      <div className="pay-date">{p.date}</div>
+                      <div className="pay-date">{fmtDate(p.date)}</div>
                     </div>
 
                     {/* Client & invoice */}
@@ -380,7 +372,7 @@ export default function PaymentsPage() {
               <option value="">Sélectionner une facture ouverte…</option>
               {openInvoices.map(inv => (
                 <option key={inv.id} value={inv.id}>
-                  #{inv.id} — {CLIENTS[inv.client]?.name ?? inv.client} ({fmt(inv.amount)} XOF)
+                  #{inv.id} — {clientsMap[inv.client]?.name ?? inv.client} ({fmt(inv.amount)} XOF)
                 </option>
               ))}
             </select>

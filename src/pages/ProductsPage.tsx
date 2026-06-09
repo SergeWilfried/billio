@@ -2,23 +2,13 @@ import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
+import { createProduct } from '../lib/api/products';
 import { fmt, fmtCompact } from '../data';
 import type { ProductType, Product } from '../lib/schemas';
 
 type FilterKey = 'all' | ProductType;
 type ViewMode  = 'list' | 'grid';
 
-const INITIAL_PRODUCTS: Product[] = [
-  { id: '1', name: 'Développement web',        sku: 'DEV-WEB',  type: 'service', unit: 'heure',   price: 35_000,  tax: 18, used: 38, ico: 'server',       color: 'ico-blue'   },
-  { id: '2', name: 'Brand & UI design',        sku: 'DSN-UIX',  type: 'service', unit: 'projet',  price: 450_000, tax: 18, used: 12, ico: 'palette',      color: 'ico-violet' },
-  { id: '3', name: 'Dév. appli mobile',        sku: 'DEV-MOB',  type: 'service', unit: 'projet',  price: 600_000, tax: 18, used: 9,  ico: 'device-mobile',color: 'ico-blue'   },
-  { id: '4', name: 'Audit sécurité',           sku: 'SEC-AUD',  type: 'service', unit: 'projet',  price: 400_000, tax: 18, used: 7,  ico: 'shield-check', color: 'ico-amber'  },
-  { id: '5', name: 'Conseil SEO',              sku: 'MKT-SEO',  type: 'service', unit: 'heure',   price: 30_000,  tax: 18, used: 21, ico: 'chart-bar',    color: 'ico-green'  },
-  { id: '6', name: 'Hébergement géré',         sku: 'OPS-HOST', type: 'service', unit: 'mois',    price: 45_000,  tax: 18, used: 31, ico: 'server',       color: 'ico-teal'   },
-  { id: '7', name: 'Licence SaaS annuelle',    sku: 'LIC-SAAS', type: 'product', unit: 'licence', price: 320_000, tax: 18, used: 14, ico: 'sparkles',     color: 'ico-violet' },
-  { id: '8', name: 'Nom de domaine (.bf)',     sku: 'DOM-BF',   type: 'product', unit: 'an',      price: 18_000,  tax: 18, used: 26, ico: 'world',        color: 'ico-green'  },
-  { id: '9', name: 'Certificat SSL',           sku: 'SEC-SSL',  type: 'product', unit: 'an',      price: 25_000,  tax: 18, used: 19, ico: 'lock',         color: 'ico-rose'   },
-];
 
 const UNITS = ['heure', 'jour', 'projet', 'mois', 'an', 'article', 'licence'];
 
@@ -29,9 +19,7 @@ function TypePill({ type }: { type: ProductType }) {
 }
 
 export default function ProductsPage() {
-  const { showToast } = useApp();
-
-  const [products, setProducts]     = useState<Product[]>(INITIAL_PRODUCTS);
+  const { showToast, products, setProducts, userId } = useApp();
   const [filter, setFilter]         = useState<FilterKey>('all');
   const [view, setView]             = useState<ViewMode>('list');
   const [search, setSearch]         = useState('');
@@ -76,21 +64,22 @@ export default function ProductsPage() {
     setPanelOpen(true);
   };
 
-  const submitItem = () => {
+  const submitItem = async () => {
     if (!fName.trim()) { showToast('Donnez un nom à cet article.', true); return; }
     const item: Product = {
-      id: crypto.randomUUID(),
-      name: fName.trim(),
-      sku: fSku.trim() || '—',
-      type: fType,
-      unit: fUnit,
+      id:    crypto.randomUUID(),
+      name:  fName.trim(),
+      sku:   fSku.trim() || '—',
+      type:  fType,
+      unit:  fUnit,
       price: fPrice,
-      tax: fTax,
-      used: 0,
-      ico: fType === 'service' ? 'briefcase' : 'tag',
+      tax:   fTax,
+      used:  0,
+      ico:   fType === 'service' ? 'briefcase' : 'tag',
       color: fType === 'service' ? 'ico-blue' : 'ico-green',
     };
     setProducts(prev => [item, ...prev]);
+    await createProduct(userId, item);
     setPanelOpen(false);
     showToast(`"${item.name}" ajouté au catalogue`);
   };
