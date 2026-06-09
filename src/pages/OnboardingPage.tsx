@@ -5,7 +5,7 @@ import { useApp } from '../context/AppContext';
 import './OnboardingPage.css';
 
 /* ── types ── */
-interface TeamInvite { email: string; role: string }
+interface TeamInvite { id: string; email: string; role: string }
 interface ClientDraft { name: string; email: string; av: string }
 
 const AV = ['av-a', 'av-b', 'av-c', 'av-d', 'av-e', 'av-f'] as const;
@@ -186,9 +186,20 @@ export default function OnboardingPage() {
   /* ── team ── */
   function addTeamMember() {
     if (!teamEmail || !/.+@.+\..+/.test(teamEmail)) { setTeamEmailErr(true); return; }
-    setTeamInvites(prev => [...prev, { email: teamEmail, role: teamRole }]);
+    setTeamInvites(prev => [...prev, { id: crypto.randomUUID(), email: teamEmail, role: teamRole }]);
     setTeamEmail('');
     setTeamEmailErr(false);
+  }
+
+  function inviteUrl(token: string) {
+    return `${window.location.origin}/invite/${token}`;
+  }
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  function copyLink(token: string) {
+    navigator.clipboard.writeText(inviteUrl(token));
+    setCopiedId(token);
+    setTimeout(() => setCopiedId(null), 2000);
   }
 
   function removeTeamMember(i: number) {
@@ -256,6 +267,8 @@ export default function OnboardingPage() {
           .from('pending_invitations')
           .upsert(
             teamInvites.map(t => ({
+              id:         t.id,
+              token:      t.id,
               org_id:     orgId,
               email:      t.email.toLowerCase().trim(),
               role:       ROLE_MAP[t.role] ?? 'member',
@@ -542,12 +555,21 @@ export default function OnboardingPage() {
                     {teamInvites.length === 0
                       ? <div className="ob-empty-note">Aucune invitation pour l'instant. Juste vous — ajoutez des membres ci-dessus ou passez cette étape.</div>
                       : teamInvites.map((t, i) => (
-                        <div key={i} className="ob-entry">
+                        <div key={t.id} className="ob-entry">
                           <div className={`ob-entry-av ${AV[i % AV.length]}`}>{t.email[0]?.toUpperCase() ?? '?'}</div>
                           <div className="ob-entry-main">
                             <div className="ob-entry-name">{t.email}</div>
+                            <div className="ob-entry-sub ob-invite-link">{inviteUrl(t.id)}</div>
                           </div>
                           <div className="ob-entry-role">{t.role}</div>
+                          <button
+                            className={`ob-btn-sm${copiedId === t.id ? ' ob-btn-copied' : ''}`}
+                            type="button"
+                            title="Copier le lien d'invitation"
+                            onClick={() => copyLink(t.id)}
+                          >
+                            {copiedId === t.id ? <Ico name="check" /> : <Ico name="download" />}
+                          </button>
                           <button className="ob-entry-del" onClick={() => removeTeamMember(i)}>
                             <Ico name="trash" />
                           </button>

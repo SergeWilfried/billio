@@ -1,7 +1,5 @@
 -- ============================================================
 -- Billio — onboarding data migration
--- Adds invoice-default columns to organizations and a
--- pending_invitations table for team-invite step.
 -- ============================================================
 
 -- Invoice defaults on organizations
@@ -13,9 +11,10 @@ alter table public.organizations
   add column if not exists default_pay_method   text not null default 'Mobile Money (MTN / Orange / Wave)',
   add column if not exists invoice_footer       text not null default '';
 
--- Pending team invitations (email → org, role, status)
+-- Pending team invitations
 create table if not exists public.pending_invitations (
   id         uuid        primary key default gen_random_uuid(),
+  token      uuid        not null unique default gen_random_uuid(),
   org_id     uuid        not null references public.organizations on delete cascade,
   email      text        not null,
   role       text        not null default 'member'
@@ -30,14 +29,125 @@ create table if not exists public.pending_invitations (
 
 alter table public.pending_invitations enable row level security;
 
+-- Authenticated members can manage their org's invitations
 create policy "invitations: members can read own org"
-  on public.pending_invitations for select
+  on public.pending_invitations for select to authenticated
   using (org_id in (select public.my_org_ids()));
 
+-- Only owners and admins can create/modify/delete invitations
 create policy "invitations: admins/owners can insert"
-  on public.pending_invitations for insert
-  with check (org_id in (select public.my_org_ids()));
+  on public.pending_invitations for insert to authenticated
+  with check (
+    org_id in (
+      select org_id from public.org_members
+       where user_id = auth.uid()
+         and role in ('owner', 'admin')
+    )
+  );
+
+create policy "invitations: admins/owners can update"
+  on public.pending_invitations for update to authenticated
+  using (
+    org_id in (
+      select org_id from public.org_members
+       where user_id = auth.uid()
+         and role in ('owner', 'admin')
+    )
+  );
 
 create policy "invitations: admins/owners can delete"
-  on public.pending_invitations for delete
-  using (org_id in (select public.my_org_ids()));
+  on public.pending_invitations for delete to authenticated
+  using (
+    org_id in (
+      select org_id from public.org_members
+       where user_id = auth.uid()
+         and role in ('owner', 'admin')
+    )
+  );
+
+-- ── Public invite-lookup function (bypasses RLS) ────────────
+-- Returns invite details for the /invite/:token page.
+-- Returns NULL row if token is invalid or expired.
+create or replace function public.get_invite_details(p_token uuid)
+returns table (
+  org_name   text,
+  email      text,
+  role       text,
+  expires_at timestamptz,
+  status     text
+)
+language sql stable security definer
+set search_path = public
+as $$
+  select
+    o.name,
+    i.email,
+    i.role,
+    i.expires_at,
+    i.status
+  from pending_invitations i
+  join organizations o on o.id = i.org_id
+  where i.token = p_token
+    and i.status = 'pending'
+    and i.expires_at > now()
+  limit 1;
+$$;
+
+-- ── Accept invitation (called right after auth.signUp) ───────
+-- Guards:
+--   1. Caller must be the authenticated user passed in p_user_id.
+--   2. Caller's confirmed email must match the invitation email.
+--   3. Token must be pending and not expired.
+create or replace function public.accept_invitation(p_token uuid, p_user_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_org_id       uuid;
+  v_role         text;
+  v_invite_email text;
+  v_caller_email text;
+  v_confirmed_at timestamptz;
+begin
+  -- Guard 1: caller must be the user they claim to be
+  if auth.uid() is distinct from p_user_id then
+    raise exception 'Unauthorized';
+  end if;
+
+  -- Guard 2: caller's email must be confirmed and match the invite
+  select email, confirmed_at
+    into v_caller_email, v_confirmed_at
+    from auth.users
+   where id = auth.uid();
+
+  if v_confirmed_at is null then
+    raise exception 'Email not confirmed';
+  end if;
+
+  select org_id, role, email
+    into v_org_id, v_role, v_invite_email
+    from pending_invitations
+   where token      = p_token
+     and status     = 'pending'
+     and expires_at > now()
+  for update;
+
+  if not found then
+    raise exception 'Invalid or expired invitation';
+  end if;
+
+  if lower(v_caller_email) is distinct from lower(v_invite_email) then
+    raise exception 'Email mismatch: this invitation was sent to a different address';
+  end if;
+
+  -- Accept
+  insert into org_members (org_id, user_id, role)
+    values (v_org_id, p_user_id, v_role)
+    on conflict (org_id, user_id) do nothing;
+
+  update pending_invitations
+     set status = 'accepted'
+   where token = p_token;
+end;
+$$;

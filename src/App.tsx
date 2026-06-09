@@ -6,6 +6,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import AppShell from './components/AppShell';
 import AuthPage from './pages/AuthPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import InvitePage from './pages/InvitePage';
 import OnboardingPage from './pages/OnboardingPage';
 import DashboardPage from './pages/DashboardPage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -63,6 +64,7 @@ export default function App() {
             : <Navigate to="/login" replace />
           }
         />
+        <Route path="/invite/:token" element={<InvitePage />} />
 
         {/* Protected — AppShell is the layout, Outlet renders child routes */}
         <Route
