@@ -9,7 +9,7 @@ import { fetchQuotes }     from '../lib/api/quotes';
 import { fetchActivities } from '../lib/api/activities';
 import type { Invoice, Activity, ClientRecord, Payment, Product, Quote, Client } from '../lib/schemas';
 
-const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'false';
 
 interface AppContextValue {
   // Entities
@@ -26,6 +26,9 @@ interface AppContextValue {
   orgId:       string;
   userLabel:   string;
   userInitials:string;
+  // Onboarding
+  needsOnboarding:    boolean;
+  completeOnboarding: (bizName: string) => void;
   // UI
   loading:     boolean;
   toastMsg:    string;
@@ -44,11 +47,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [products,  setProducts]  = useState<Product[]>(MOCK ? INITIAL_PRODUCTS : []);
   const [quotes,    setQuotes]    = useState<Quote[]>(MOCK ? INITIAL_QUOTES : []);
 
-  const [userId,       setUserId]       = useState('mock-user');
-  const [orgId,        setOrgId]        = useState('mock-org');
-  const [userLabel,    setUserLabel]    = useState('');
-  const [userInitials, setUserInitials] = useState('??');
-  const [loading,      setLoading]      = useState(!MOCK);
+  const [userId,          setUserId]          = useState('mock-user');
+  const [orgId,           setOrgId]           = useState('mock-org');
+  const [userLabel,       setUserLabel]       = useState('');
+  const [userInitials,    setUserInitials]    = useState('??');
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [loading,         setLoading]         = useState(!MOCK);
 
   const [toastMsg,     setToastMsg]     = useState('');
   const [toastVisible, setToastVisible] = useState(false);
@@ -86,7 +90,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserInitials(name.slice(0, 2).toUpperCase());
       }
 
-      // Resolve the user's org (first membership found)
+      // Resolve the user's org and check onboarding status
       const { data: membership } = await supabase
         .from('org_members')
         .select('org_id')
@@ -95,6 +99,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .single();
       const resolvedOrgId = membership?.org_id ?? '';
       setOrgId(resolvedOrgId);
+
+      if (resolvedOrgId) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('onboarding_completed_at')
+          .eq('id', resolvedOrgId)
+          .single();
+        setNeedsOnboarding(!org?.onboarding_completed_at);
+      }
 
       try {
         const [inv, cli, pay, prod, quo, act] = await Promise.all([
@@ -119,6 +132,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     boot();
   }, []);
 
+  const completeOnboarding = useCallback((bizName: string) => {
+    setNeedsOnboarding(false);
+    setUserLabel(prev => prev || bizName);
+  }, []);
+
   const showToast = useCallback((msg: string, isError = false) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToastMsg(msg);
@@ -141,6 +159,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       userId,
       orgId,
       userLabel, userInitials,
+      needsOnboarding, completeOnboarding,
       loading,
       toastMsg, toastVisible, toastError,
       showToast,

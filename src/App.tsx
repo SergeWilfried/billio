@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext';
 import AppShell from './components/AppShell';
 import AuthPage from './pages/AuthPage';
+import OnboardingPage from './pages/OnboardingPage';
 import DashboardPage from './pages/DashboardPage';
 import InvoicesPage from './pages/InvoicesPage';
 import InvoicePage from './pages/InvoicePage';
@@ -15,7 +16,7 @@ import QuotesPage from './pages/QuotesPage';
 import TemplatesPage from './pages/TemplatesPage';
 import SettingsPage from './pages/SettingsPage';
 
-const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'false';
 
 export default function App() {
   const [mockAuthed, setMockAuthed] = useState(false);
@@ -47,9 +48,15 @@ export default function App() {
           }
         />
 
+        {/* Onboarding — full-screen, no AppShell */}
+        <Route
+          path="/onboarding"
+          element={authed ? <OnboardingPage /> : <Navigate to="/login" replace />}
+        />
+
         {/* Protected — AppShell is the layout, Outlet renders child routes */}
         <Route
-          element={authed ? <AppShell onLogout={onLogout} /> : <Navigate to="/login" replace />}
+          element={authed ? <OnboardingGuard><AppShell onLogout={onLogout} /></OnboardingGuard> : <Navigate to="/login" replace />}
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -68,6 +75,13 @@ export default function App() {
       </Routes>
     </AppProvider>
   );
+}
+
+function OnboardingGuard({ children }: { children: React.ReactNode }) {
+  const { needsOnboarding, loading } = useApp();
+  if (loading) return null;
+  if (needsOnboarding) return <Navigate to="/onboarding" replace />;
+  return <>{children}</>;
 }
 
 function PlaceholderPage({ title }: { title: string }) {

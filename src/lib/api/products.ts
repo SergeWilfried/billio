@@ -2,7 +2,7 @@ import { supabase } from '../supabase';
 import { INITIAL_PRODUCTS } from '../../data';
 import type { Product } from '../schemas';
 
-const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'false';
 
 function dbToProduct(row: Record<string, unknown>): Product {
   return {

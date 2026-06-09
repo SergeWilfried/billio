@@ -2,7 +2,7 @@ import { supabase } from '../supabase';
 import { INITIAL_QUOTES } from '../../data';
 import type { Quote } from '../schemas';
 
-const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'false';
 
 function dbToQuote(row: Record<string, unknown>): Quote {
   const validUntil = String(row.valid_until);
