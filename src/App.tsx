@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { AppProvider, useApp } from './context/AppContext';
 import AppShell from './components/AppShell';
 import AuthPage from './pages/AuthPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import OnboardingPage from './pages/OnboardingPage';
 import DashboardPage from './pages/DashboardPage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -19,15 +20,23 @@ import SettingsPage from './pages/SettingsPage';
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 export default function App() {
+  const navigate = useNavigate();
   const [mockAuthed, setMockAuthed] = useState(false);
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [isRecovery, setIsRecovery] = useState(false);
 
   useEffect(() => {
     if (MOCK) return;
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecovery(true);
+        navigate('/reset-password');
+      }
+    });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [navigate]);
 
   if (!MOCK && session === undefined) return null; // resolving auth state
 
@@ -42,9 +51,16 @@ export default function App() {
         {/* Public */}
         <Route
           path="/login"
-          element={authed
+          element={authed && !isRecovery
             ? <Navigate to="/dashboard" replace />
             : <AuthPage onLogin={MOCK ? () => setMockAuthed(true) : undefined} />
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={isRecovery
+            ? <ResetPasswordPage onDone={() => setIsRecovery(false)} />
+            : <Navigate to="/login" replace />
           }
         />
 
