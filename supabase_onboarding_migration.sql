@@ -2,6 +2,15 @@
 -- Billio — onboarding data migration
 -- ============================================================
 
+-- Business-detail columns (from supabase_settings_migration.sql)
+alter table public.organizations
+  add column if not exists ifu      text not null default '',
+  add column if not exists rccm     text not null default '',
+  add column if not exists address  text not null default '',
+  add column if not exists city     text not null default '',
+  add column if not exists country  text not null default 'Burkina Faso',
+  add column if not exists currency text not null default 'XOF';
+
 -- Invoice defaults on organizations
 alter table public.organizations
   add column if not exists inv_prefix           text not null default 'INV-',
