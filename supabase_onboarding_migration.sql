@@ -29,6 +29,10 @@ create table if not exists public.pending_invitations (
 
 alter table public.pending_invitations enable row level security;
 
+-- Add token column if the table was created before this column was introduced
+alter table public.pending_invitations
+  add column if not exists token uuid not null unique default gen_random_uuid();
+
 -- Drop and recreate all policies (idempotent re-run)
 drop policy if exists "invitations: members can read own org"  on public.pending_invitations;
 drop policy if exists "invitations: admins/owners can insert"  on public.pending_invitations;
