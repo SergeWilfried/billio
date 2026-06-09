@@ -222,13 +222,53 @@ export default function OnboardingPage() {
     if (!orgId) return;
     setSaving(true);
     try {
-      await supabase
+      // Step 1 + Step 2 — org details and invoice defaults
+      const { error: orgErr } = await supabase
         .from('organizations')
-        .update({ name: bizName.trim() || 'Mon entreprise', onboarding_completed_at: new Date().toISOString() })
+        .update({
+          name:                  bizName.trim() || 'Mon entreprise',
+          ifu:                   taxId.trim(),
+          rccm:                  rccm.trim(),
+          address:               address.trim(),
+          city:                  city.trim(),
+          country,
+          currency,
+          inv_prefix:            prefix,
+          inv_next_number:       nextNum,
+          payment_terms:         terms,
+          default_tax_rate:      taxRate,
+          default_pay_method:    payMethod,
+          invoice_footer:        footer,
+          onboarding_completed_at: new Date().toISOString(),
+        })
         .eq('id', orgId);
+      if (orgErr) throw orgErr;
 
+      // Step 3 — team invitations
+      if (teamInvites.length > 0) {
+        const ROLE_MAP: Record<string, string> = {
+          'Administrateur': 'admin',
+          'Membre':         'member',
+          'Comptable':      'accountant',
+          'Observateur':    'observer',
+        };
+        const { error: invErr } = await supabase
+          .from('pending_invitations')
+          .upsert(
+            teamInvites.map(t => ({
+              org_id:     orgId,
+              email:      t.email.toLowerCase().trim(),
+              role:       ROLE_MAP[t.role] ?? 'member',
+              invited_by: userId || undefined,
+            })),
+            { onConflict: 'org_id,email', ignoreDuplicates: true }
+          );
+        if (invErr) console.warn('Invitation insert error:', invErr.message);
+      }
+
+      // Step 4 — clients
       if (clients.length > 0) {
-        await supabase.from('clients').insert(
+        const { error: cliErr } = await supabase.from('clients').insert(
           clients.map((c, i) => ({
             org_id:     orgId,
             created_by: userId || undefined,
@@ -243,9 +283,8 @@ export default function OnboardingPage() {
             status:     'active',
           }))
         );
+        if (cliErr) throw cliErr;
       }
-
-      localStorage.setItem(`billio:inv:${orgId}`, JSON.stringify({ prefix, nextNum, terms, taxRate, payMethod, footer }));
 
       completeOnboarding(bizName.trim() || 'Mon entreprise');
       navigate('/dashboard');
