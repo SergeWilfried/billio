@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Icon from '../components/Icon';
 import { supabase } from '../lib/supabase';
 
-const MOCK = import.meta.env.VITE_MOCK_AUTH === 'false';
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 type AuthMode = 'login' | 'signup';
 

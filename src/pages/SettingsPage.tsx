@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Icon from '../components/Icon';
 import { useApp } from '../context/AppContext';
+import { supabase } from '../lib/supabase';
 
 type SettingsTab = 'profile' | 'business' | 'invoicing' | 'reminders' | 'payments' | 'providers' | 'notifications' | 'team' | 'plan';
 
@@ -28,7 +29,65 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 }
 
 /* ─── Profile ──────────────────────────────────────────────────── */
-function ProfileSection({ onSave }: { onSave: () => void }) {
+function ProfileSection() {
+  const { userInitials, showToast } = useApp();
+
+  const [firstName, setFirstName] = useState('');
+  const [lastName,  setLastName]  = useState('');
+  const [title,     setTitle]     = useState('');
+  const [email,     setEmail]     = useState('');
+  const [phone,     setPhone]     = useState('');
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [dirty,     setDirty]     = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      const m = (user.user_metadata ?? {}) as Record<string, string>;
+      setFirstName(m.first_name ?? '');
+      setLastName(m.last_name  ?? '');
+      setTitle(m.title         ?? '');
+      setEmail(user.email      ?? '');
+      setPhone(m.phone         ?? '');
+      setLoading(false);
+    });
+  }, []);
+
+  function field<T>(setter: (v: T) => void) {
+    return (e: React.ChangeEvent<HTMLInputElement>) => {
+      setter(e.target.value as T);
+      setDirty(true);
+    };
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({
+      email,
+      data: { first_name: firstName, last_name: lastName, title, phone },
+    });
+    setSaving(false);
+    if (error) { showToast(error.message, true); return; }
+    setDirty(false);
+    showToast('Profil enregistré');
+  }
+
+  function handleCancel() {
+    setLoading(true);
+    setDirty(false);
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      const m = (user.user_metadata ?? {}) as Record<string, string>;
+      setFirstName(m.first_name ?? '');
+      setLastName(m.last_name  ?? '');
+      setTitle(m.title         ?? '');
+      setEmail(user.email      ?? '');
+      setPhone(m.phone         ?? '');
+      setLoading(false);
+    });
+  }
+
   return (
     <div className="s-card">
       <div className="s-card-head">
@@ -39,43 +98,107 @@ function ProfileSection({ onSave }: { onSave: () => void }) {
         <div className="s-field">
           <label className="s-label">Photo de profil</label>
           <div className="s-avatar-row">
-            <div className="s-avatar-lg">SW</div>
+            <div className="s-avatar-lg">{userInitials}</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-sm"><Icon name="edit" size={14} /> Modifier</button>
-              <button className="btn btn-sm" style={{ background: 'transparent', border: 'none', boxShadow: 'none', color: 'var(--color-text-secondary)' }}>Supprimer</button>
+              <button className="btn btn-sm" disabled><Icon name="edit" size={14} /> Modifier</button>
             </div>
           </div>
         </div>
         <div className="s-field-row">
-          <div className="s-field"><label className="s-label">Nom complet</label><input className="form-input" defaultValue="Serge W." /></div>
-          <div className="s-field"><label className="s-label">Titre</label><input className="form-input" defaultValue="Fondateur" /></div>
+          <div className="s-field">
+            <label className="s-label">Prénom</label>
+            <input className="form-input" value={firstName} onChange={field(setFirstName)} disabled={loading} />
+          </div>
+          <div className="s-field">
+            <label className="s-label">Nom</label>
+            <input className="form-input" value={lastName} onChange={field(setLastName)} disabled={loading} />
+          </div>
         </div>
         <div className="s-field-row">
-          <div className="s-field"><label className="s-label">Adresse e-mail</label><input className="form-input" type="email" defaultValue="serge@studiowend.bf" /></div>
+          <div className="s-field">
+            <label className="s-label">Titre</label>
+            <input className="form-input" value={title} onChange={field(setTitle)} disabled={loading} placeholder="ex. Fondateur" />
+          </div>
           <div className="s-field">
             <label className="s-label">Téléphone</label>
-            <div className="input-affix"><span className="prefix">+226</span><input defaultValue="70 12 34 56" type="tel" /></div>
+            <div className="input-affix">
+              <span className="prefix">+226</span>
+              <input value={phone} onChange={field(setPhone)} type="tel" disabled={loading} />
+            </div>
           </div>
         </div>
-        <div className="s-field-row">
-          <div className="s-field"><label className="s-label">Langue</label>
-            <select className="form-input"><option>Français</option><option>English</option></select>
-          </div>
-          <div className="s-field"><label className="s-label">Fuseau horaire</label>
-            <select className="form-input"><option>GMT (Ouagadougou)</option><option>GMT+1 (Lagos)</option></select>
-          </div>
+        <div className="s-field">
+          <label className="s-label">Adresse e-mail</label>
+          <input className="form-input" type="email" value={email} onChange={field(setEmail)} disabled={loading} />
+          {dirty && email !== '' && <div className="s-hint">Un e-mail de confirmation sera envoyé à la nouvelle adresse.</div>}
         </div>
       </div>
       <div className="s-card-foot">
-        <button className="btn">Annuler</button>
-        <button className="btn btn-primary" onClick={onSave}>Enregistrer</button>
+        <button className="btn" onClick={handleCancel} disabled={saving || !dirty}>Annuler</button>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || !dirty}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
       </div>
     </div>
   );
 }
 
+const COUNTRIES = ['Burkina Faso', "Côte d'Ivoire", 'Mali', 'Niger', 'Sénégal', 'Togo', 'Bénin', 'Guinée'];
+const CURRENCIES = [
+  { value: 'XOF', label: 'XOF — Franc CFA' },
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'USD', label: 'USD — Dollar' },
+  { value: 'GHS', label: 'GHS — Cedi' },
+  { value: 'NGN', label: 'NGN — Naira' },
+];
+
 /* ─── Business ─────────────────────────────────────────────────── */
-function BusinessSection({ onSave }: { onSave: () => void }) {
+function BusinessSection() {
+  const { orgId, showToast } = useApp();
+
+  const [name,     setName]    = useState('');
+  const [ifu,      setIfu]     = useState('');
+  const [rccm,     setRccm]    = useState('');
+  const [address,  setAddress] = useState('');
+  const [city,     setCity]    = useState('');
+  const [country,  setCountry] = useState('Burkina Faso');
+  const [currency, setCurrency]= useState('XOF');
+  const [loading,  setLoading] = useState(true);
+  const [saving,   setSaving]  = useState(false);
+
+  useEffect(() => {
+    if (!orgId) return;
+    supabase
+      .from('organizations')
+      .select('name, ifu, rccm, address, city, country, currency')
+      .eq('id', orgId)
+      .single()
+      .then(({ data, error }) => {
+        if (error) { console.warn('[settings] org fetch:', error.message); setLoading(false); return; }
+        if (!data) return;
+        setName(data.name     ?? '');
+        setIfu(data.ifu       ?? '');
+        setRccm(data.rccm     ?? '');
+        setAddress(data.address ?? '');
+        setCity(data.city     ?? '');
+        setCountry(data.country  ?? 'Burkina Faso');
+        setCurrency(data.currency ?? 'XOF');
+        setLoading(false);
+      });
+  }, [orgId]);
+
+  async function handleSave() {
+    if (!orgId) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from('organizations')
+      .update({ name, ifu, rccm, address, city, country, currency })
+      .eq('id', orgId);
+    setSaving(false);
+    if (error) { showToast(error.message, true); return; }
+    showToast('Entreprise enregistrée');
+  }
+
   return (
     <div className="s-card">
       <div className="s-card-head">
@@ -83,24 +206,47 @@ function BusinessSection({ onSave }: { onSave: () => void }) {
         <div className="s-card-desc">Affichées sur chaque facture et devis que vous envoyez.</div>
       </div>
       <div className="s-card-body">
-        <div className="s-field"><label className="s-label">Raison sociale</label><input className="form-input" defaultValue="Studio Wend SARL" /></div>
-        <div className="s-field-row">
-          <div className="s-field"><label className="s-label">IFU</label><input className="form-input" defaultValue="00012345 B" /></div>
-          <div className="s-field"><label className="s-label">RCCM</label><input className="form-input" defaultValue="BF-OUA-2021-B-1234" /></div>
+        <div className="s-field">
+          <label className="s-label">Raison sociale</label>
+          <input className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={loading} />
         </div>
-        <div className="s-field"><label className="s-label">Adresse</label><input className="form-input" defaultValue="Av. Kwame Nkrumah, Immeuble Baobab" /></div>
-        <div className="s-field-row-3">
-          <div className="s-field"><label className="s-label">Ville</label><input className="form-input" defaultValue="Ouagadougou" /></div>
-          <div className="s-field"><label className="s-label">Pays</label>
-            <select className="form-input"><option>Burkina Faso</option><option>Mali</option><option>Côte d'Ivoire</option><option>Sénégal</option></select>
+        <div className="s-field-row">
+          <div className="s-field">
+            <label className="s-label">IFU</label>
+            <input className="form-input" value={ifu} onChange={e => setIfu(e.target.value)} disabled={loading} placeholder="00012345 B" />
           </div>
-          <div className="s-field"><label className="s-label">Devise</label>
-            <select className="form-input"><option>XOF — Franc CFA</option><option>EUR — Euro</option><option>USD — Dollar</option></select>
+          <div className="s-field">
+            <label className="s-label">RCCM</label>
+            <input className="form-input" value={rccm} onChange={e => setRccm(e.target.value)} disabled={loading} placeholder="BF-OUA-2021-B-1234" />
+          </div>
+        </div>
+        <div className="s-field">
+          <label className="s-label">Adresse</label>
+          <input className="form-input" value={address} onChange={e => setAddress(e.target.value)} disabled={loading} placeholder="Av. Kwame Nkrumah, Immeuble Baobab" />
+        </div>
+        <div className="s-field-row-3">
+          <div className="s-field">
+            <label className="s-label">Ville</label>
+            <input className="form-input" value={city} onChange={e => setCity(e.target.value)} disabled={loading} placeholder="Ouagadougou" />
+          </div>
+          <div className="s-field">
+            <label className="s-label">Pays</label>
+            <select className="form-input" value={country} onChange={e => setCountry(e.target.value)} disabled={loading}>
+              {COUNTRIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="s-field">
+            <label className="s-label">Devise</label>
+            <select className="form-input" value={currency} onChange={e => setCurrency(e.target.value)} disabled={loading}>
+              {CURRENCIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
           </div>
         </div>
       </div>
       <div className="s-card-foot">
-        <button className="btn btn-primary" onClick={onSave}>Enregistrer</button>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
       </div>
     </div>
   );
@@ -519,8 +665,8 @@ export default function SettingsPage() {
 
           {/* Content */}
           <div className="s-col">
-            {tab === 'profile'       && <ProfileSection       onSave={onSave} />}
-            {tab === 'business'      && <BusinessSection      onSave={onSave} />}
+            {tab === 'profile'       && <ProfileSection />}
+            {tab === 'business'      && <BusinessSection />}
             {tab === 'invoicing'     && <InvoicingSection     onSave={onSave} />}
             {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
             {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}

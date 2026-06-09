@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { AppProvider, useApp } from './context/AppContext';
@@ -16,7 +16,7 @@ import QuotesPage from './pages/QuotesPage';
 import TemplatesPage from './pages/TemplatesPage';
 import SettingsPage from './pages/SettingsPage';
 
-const MOCK = import.meta.env.VITE_MOCK_AUTH === 'false';
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 export default function App() {
   const [mockAuthed, setMockAuthed] = useState(false);
@@ -48,40 +48,39 @@ export default function App() {
           }
         />
 
-        {/* Onboarding — full-screen, no AppShell */}
-        <Route
-          path="/onboarding"
-          element={authed ? <OnboardingPage /> : <Navigate to="/login" replace />}
-        />
-
         {/* Protected — AppShell is the layout, Outlet renders child routes */}
         <Route
-          element={authed ? <OnboardingGuard><AppShell onLogout={onLogout} /></OnboardingGuard> : <Navigate to="/login" replace />}
+          element={authed ? <AppShell onLogout={onLogout} /> : <Navigate to="/login" replace />}
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/invoices" element={<InvoicesPage />} />
-          <Route path="/invoices/:id" element={<InvoicePage />} />
-          {/* Stub routes — will get real pages later */}
-          <Route path="/clients"  element={<ClientsPage />} />
-          <Route path="/products" element={<ProductsPage />} />
-          <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />
-          <Route path="/payments" element={<PaymentsPage />} />
-          <Route path="/quotes"     element={<QuotesPage />} />
-          <Route path="/templates" element={<TemplatesPage />} />
-          <Route path="/settings"  element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* Onboarding renders inside AppShell (gets the sidebar), not guarded */}
+          <Route path="/onboarding" element={<OnboardingPage />} />
+
+          {/* All other routes redirect to /onboarding when setup is missing */}
+          <Route element={<OnboardingGuard />}>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/invoices" element={<InvoicesPage />} />
+            <Route path="/invoices/:id" element={<InvoicePage />} />
+            <Route path="/clients"  element={<ClientsPage />} />
+            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />
+            <Route path="/payments" element={<PaymentsPage />} />
+            <Route path="/quotes"     element={<QuotesPage />} />
+            <Route path="/templates" element={<TemplatesPage />} />
+            <Route path="/settings"  element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Route>
         </Route>
       </Routes>
     </AppProvider>
   );
 }
 
-function OnboardingGuard({ children }: { children: React.ReactNode }) {
+function OnboardingGuard() {
   const { needsOnboarding, loading } = useApp();
   if (loading) return null;
   if (needsOnboarding) return <Navigate to="/onboarding" replace />;
-  return <>{children}</>;
+  return <Outlet />;
 }
 
 function PlaceholderPage({ title }: { title: string }) {
