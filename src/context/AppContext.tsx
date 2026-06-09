@@ -1,53 +1,110 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { INITIAL_INVOICES, INITIAL_ACTIVITY } from '../data';
-import type { Invoice, Activity } from '../data';
+import { INITIAL_INVOICES, INITIAL_ACTIVITY, INITIAL_CLIENTS, INITIAL_PAYMENTS, INITIAL_PRODUCTS, INITIAL_QUOTES } from '../data';
+import { fetchInvoices }   from '../lib/api/invoices';
+import { fetchClients }    from '../lib/api/clients';
+import { fetchPayments }   from '../lib/api/payments';
+import { fetchProducts }   from '../lib/api/products';
+import { fetchQuotes }     from '../lib/api/quotes';
+import { fetchActivities } from '../lib/api/activities';
+import type { Invoice, Activity, ClientRecord, Payment, Product, Quote, Client } from '../lib/schemas';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 interface AppContextValue {
-  invoices: Invoice[];
-  setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
-  activity: Activity[];
-  setActivity: React.Dispatch<React.SetStateAction<Activity[]>>;
-  userLabel: string;
-  userInitials: string;
-  toastMsg: string;
-  toastVisible: boolean;
-  toastError: boolean;
-  showToast: (msg: string, isError?: boolean) => void;
+  // Entities
+  invoices:    Invoice[];      setInvoices:    Dispatch<SetStateAction<Invoice[]>>;
+  activity:    Activity[];     setActivity:    Dispatch<SetStateAction<Activity[]>>;
+  clients:     ClientRecord[]; setClients:     Dispatch<SetStateAction<ClientRecord[]>>;
+  payments:    Payment[];      setPayments:    Dispatch<SetStateAction<Payment[]>>;
+  products:    Product[];      setProducts:    Dispatch<SetStateAction<Product[]>>;
+  quotes:      Quote[];        setQuotes:      Dispatch<SetStateAction<Quote[]>>;
+  // Derived lookup: client code → {name, city, av}
+  clientsMap:  Record<string, Client>;
+  // Auth
+  userId:      string;
+  userLabel:   string;
+  userInitials:string;
+  // UI
+  loading:     boolean;
+  toastMsg:    string;
+  toastVisible:boolean;
+  toastError:  boolean;
+  showToast:   (msg: string, isError?: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [invoices, setInvoices] = useState<Invoice[]>(INITIAL_INVOICES);
-  const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
-  const [userLabel, setUserLabel]       = useState('');
+  const [invoices,  setInvoices]  = useState<Invoice[]>(MOCK ? INITIAL_INVOICES : []);
+  const [activity,  setActivity]  = useState<Activity[]>(MOCK ? INITIAL_ACTIVITY : []);
+  const [clients,   setClients]   = useState<ClientRecord[]>(MOCK ? INITIAL_CLIENTS : []);
+  const [payments,  setPayments]  = useState<Payment[]>(MOCK ? INITIAL_PAYMENTS : []);
+  const [products,  setProducts]  = useState<Product[]>(MOCK ? INITIAL_PRODUCTS : []);
+  const [quotes,    setQuotes]    = useState<Quote[]>(MOCK ? INITIAL_QUOTES : []);
+
+  const [userId,       setUserId]       = useState('mock-user');
+  const [userLabel,    setUserLabel]    = useState('');
   const [userInitials, setUserInitials] = useState('??');
-  const [toastMsg, setToastMsg]         = useState('');
+  const [loading,      setLoading]      = useState(!MOCK);
+
+  const [toastMsg,     setToastMsg]     = useState('');
   const [toastVisible, setToastVisible] = useState(false);
-  const [toastError, setToastError]     = useState(false);
+  const [toastError,   setToastError]   = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Derived client lookup
+  const clientsMap = useMemo<Record<string, Client>>(
+    () => Object.fromEntries(clients.map(c => [c.code, { name: c.name, city: c.city, av: c.av }])),
+    [clients],
+  );
+
   useEffect(() => {
-    if (MOCK) { setUserLabel('Serge W.'); setUserInitials('SW'); return; }
-    supabase.auth.getUser().then(({ data }) => {
-      const u = data.user;
-      if (!u) return;
-      const email = u.email ?? '';
-      const meta  = u.user_metadata as Record<string, string> | undefined;
+    if (MOCK) {
+      setUserLabel('Serge W.');
+      setUserInitials('SW');
+      return;
+    }
+
+    async function boot() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
+
+      setUserId(user.id);
+      const email = user.email ?? '';
+      const meta  = user.user_metadata as Record<string, string> | undefined;
       const first = meta?.first_name ?? meta?.firstName ?? '';
       const last  = meta?.last_name  ?? meta?.lastName  ?? '';
       if (first || last) {
         setUserLabel(`${first} ${last}`.trim());
-        setUserInitials(`${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase() || email[0].toUpperCase());
+        setUserInitials(`${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase() || email[0]?.toUpperCase() || '?');
       } else {
         const name = email.split('@')[0];
         setUserLabel(name);
         setUserInitials(name.slice(0, 2).toUpperCase());
       }
-    });
+
+      try {
+        const [inv, cli, pay, prod, quo, act] = await Promise.all([
+          fetchInvoices(user.id),
+          fetchClients(user.id),
+          fetchPayments(user.id),
+          fetchProducts(user.id),
+          fetchQuotes(user.id),
+          fetchActivities(user.id),
+        ]);
+        setInvoices(inv);
+        setClients(cli);
+        setPayments(pay);
+        setProducts(prod);
+        setQuotes(quo);
+        setActivity(act);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    boot();
   }, []);
 
   const showToast = useCallback((msg: string, isError = false) => {
@@ -62,9 +119,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      invoices, setInvoices,
-      activity, setActivity,
+      invoices,  setInvoices,
+      activity,  setActivity,
+      clients,   setClients,
+      payments,  setPayments,
+      products,  setProducts,
+      quotes,    setQuotes,
+      clientsMap,
+      userId,
       userLabel, userInitials,
+      loading,
       toastMsg, toastVisible, toastError,
       showToast,
     }}>

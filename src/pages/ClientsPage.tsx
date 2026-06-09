@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState, EmptyInline } from '../components/EmptyState';
+import { useApp } from '../context/AppContext';
+import { createClient } from '../lib/api/clients';
 import { fmt } from '../data';
 import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '../lib/schemas';
 
@@ -12,46 +14,6 @@ interface MiniInv {
   amt: number;
   status: InvoiceStatus;
 }
-
-const CLIENTS: ClientRecord[] = [
-  { code: 'OT', av: 'av-a', name: 'Orange Télécoms',    contact: 'Fatou Sanogo',      email: 'fatou@orange.bf',          phone: '+226 70 11 22 33', city: 'Ouagadougou',    invoices: 11, billed: 9_400_000, balance: 0,       status: 'active'   },
-  { code: 'SB', av: 'av-b', name: 'Sahel Banque',       contact: 'Mariam Koné',        email: 'm.kone@sahelbanque.bf',    phone: '+226 76 44 55 66', city: 'Bobo-Dioulasso', invoices: 5,  billed: 6_800_000, balance: 0,       status: 'active'   },
-  { code: 'TK', av: 'av-c', name: 'TechKonsult',        contact: 'Adama Ouédraogo',    email: 'adama@techkonsult.bf',     phone: '+226 70 12 34 56', city: 'Ouagadougou',    invoices: 8,  billed: 4_200_000, balance: 780_000, status: 'active'   },
-  { code: 'AM', av: 'av-d', name: 'AgroMali SA',        contact: 'Ibrahima Diarra',    email: 'i.diarra@agromali.ml',     phone: '+223 20 22 33 44', city: 'Bamako',         invoices: 6,  billed: 3_100_000, balance: 450_000, status: 'active'   },
-  { code: 'MF', av: 'av-f', name: 'MinFin Burkina',     contact: 'Salif Traoré',       email: 's.traore@finances.gov.bf', phone: '+226 25 30 60 90', city: 'Ouagadougou',    invoices: 2,  billed: 1_500_000, balance: 0,       status: 'active'   },
-  { code: 'BF', av: 'av-e', name: 'BurkinaFarm',        contact: 'Boukary Zongo',      email: 'b.zongo@burkinafarm.bf',   phone: '+226 78 90 12 34', city: 'Koudougou',      invoices: 3,  billed: 1_200_000, balance: 320_000, status: 'active'   },
-  { code: 'NC', av: 'av-g', name: 'Nieta Cosmetics',    contact: 'Aïcha Diallo',       email: 'aicha@nieta.ml',           phone: '+223 66 77 88 99', city: 'Bamako',         invoices: 1,  billed: 280_000,   balance: 0,       status: 'active'   },
-  { code: 'FE', av: 'av-h', name: 'Faso Energy',        contact: 'Awa Bamba',          email: 'awa.bamba@fasoenergy.bf',  phone: '+226 70 55 66 77', city: 'Ouagadougou',    invoices: 0,  billed: 0,         balance: 0,       status: 'lead'     },
-];
-
-const RECENT_INV: Record<string, MiniInv[]> = {
-  OT: [
-    { id: 'FAC-0038', sub: 'Développement app mobile — sprint 4', amt: 960_000,   status: 'paid'    },
-    { id: 'FAC-0031', sub: 'Mise à niveau réseau',                  amt: 1_240_000, status: 'paid'    },
-  ],
-  SB: [
-    { id: 'FAC-0040', sub: 'Licence intégration ERP',              amt: 1_200_000, status: 'paid'    },
-    { id: 'FAC-0029', sub: 'Migration de données',                  amt: 880_000,   status: 'paid'    },
-  ],
-  TK: [
-    { id: 'FAC-0041', sub: 'Refonte web — phase 2',                amt: 780_000,   status: 'overdue' },
-    { id: 'FAC-0033', sub: 'Refonte web — phase 1',                amt: 720_000,   status: 'paid'    },
-  ],
-  AM: [
-    { id: 'FAC-0039', sub: 'Audit sécurité T2',                    amt: 450_000,   status: 'overdue' },
-    { id: 'FAC-0027', sub: 'Contrat pen-test',                     amt: 600_000,   status: 'paid'    },
-  ],
-  MF: [
-    { id: 'FAC-0036', sub: 'Conseil infrastructure réseau',        amt: 625_000,   status: 'draft'   },
-  ],
-  BF: [
-    { id: 'FAC-0037', sub: 'Abonnement SaaS annuel',               amt: 320_000,   status: 'pending' },
-  ],
-  NC: [
-    { id: 'FAC-0034', sub: 'Pack identité visuelle',               amt: 280_000,   status: 'paid'    },
-  ],
-  FE: [],
-};
 
 const STATUS_LABEL: Record<ClientStatus, string> = {
   active:   'Actif',
@@ -84,7 +46,7 @@ function fmtCompact(n: number) {
 }
 
 export default function ClientsPage() {
-  const [clients, setClients] = useState<ClientRecord[]>(CLIENTS);
+  const { clients, setClients, invoices, userId } = useApp();
   const [filter, setFilter]   = useState<FilterKey>('all');
   const [search, setSearch]   = useState('');
   const [panel, setPanel]     = useState<null | { kind: 'detail'; code: string } | { kind: 'new' }>(null);
@@ -125,19 +87,21 @@ export default function ClientsPage() {
 
   function closePanel() { setPanel(null); }
 
-  function handleAddClient(e: React.FormEvent) {
+  async function handleAddClient(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    const avs = ['av-a','av-b','av-c','av-d','av-e','av-f','av-g','av-h'];
+    const avs   = ['av-a','av-b','av-c','av-d','av-e','av-f','av-g','av-h'];
     const words = form.name.trim().split(/\s+/);
     const code  = ((words[0]?.[0] ?? '') + (words[1]?.[0] ?? '')).toUpperCase() || 'NC';
-    setClients(prev => [{
-      code, av: avs[prev.length % avs.length],
+    const payload = {
+      code, av: avs[clients.length % avs.length],
       name: form.name, contact: form.contact || '—',
       email: form.email || '—', phone: form.phone || '—',
-      city: form.city || '—',
-      invoices: 0, billed: 0, balance: 0, status: form.status,
-    }, ...prev]);
+      city: form.city || '—', ifu: form.ifu,
+      status: form.status,
+    };
+    setClients(prev => [{ ...payload, invoices: 0, billed: 0, balance: 0 }, ...prev]);
+    await createClient(userId, payload);
     setForm(EMPTY_FORM);
     closePanel();
   }
@@ -366,22 +330,28 @@ export default function ClientsPage() {
               {/* Recent invoices */}
               <div className="detail-block">
                 <div className="detail-block-title">Factures récentes</div>
-                {(RECENT_INV[detailClient.code] ?? []).length === 0 ? (
-                  <EmptyInline message="Aucune facture pour ce client." />
-                ) : (
-                  (RECENT_INV[detailClient.code] ?? []).map(inv => (
-                    <div key={inv.id} className="mini-inv">
-                      <div>
-                        <div className="mini-id">#{inv.id}</div>
-                        <div className="mini-sub">{inv.sub}</div>
+                {(() => {
+                  const recentInvs: MiniInv[] = invoices
+                    .filter(i => i.client === detailClient.code)
+                    .slice(0, 5)
+                    .map(i => ({ id: i.id, sub: i.subject, amt: i.amount, status: i.status }));
+                  return recentInvs.length === 0 ? (
+                    <EmptyInline message="Aucune facture pour ce client." />
+                  ) : (
+                    recentInvs.map(inv => (
+                      <div key={inv.id} className="mini-inv">
+                        <div>
+                          <div className="mini-id">#{inv.id}</div>
+                          <div className="mini-sub">{inv.sub}</div>
+                        </div>
+                        <div className="mini-amt">{fmt(inv.amt)} XOF</div>
+                        <span className={`mini-status st-${inv.status}`}>
+                          {INV_STATUS_LABEL[inv.status]}
+                        </span>
                       </div>
-                      <div className="mini-amt">{fmt(inv.amt)} XOF</div>
-                      <span className={`mini-status st-${inv.status}`}>
-                        {INV_STATUS_LABEL[inv.status]}
-                      </span>
-                    </div>
-                  ))
-                )}
+                    ))
+                  );
+                })()}
               </div>
             </div>
 

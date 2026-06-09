@@ -1,7 +1,8 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { useApp } from '../context/AppContext';
-import { CLIENTS, fmt, STATUS_LABEL } from '../data';
+import { removeInvoice, updateInvoice } from '../lib/api/invoices';
+import { fmt, fmtDate, STATUS_LABEL } from '../data';
 import type { Status } from '../data';
 
 // Mock line items — real data would come from backend per invoice
@@ -78,7 +79,7 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, showToast } = useApp();
+  const { invoices, setInvoices, showToast, clientsMap, userId } = useApp();
 
   const invoice = invoices.find(i => i.id === id);
   if (!invoice) {
@@ -99,7 +100,7 @@ export default function InvoicePage() {
     );
   }
 
-  const client    = CLIENTS[invoice.client];
+  const client    = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
   const subtotal  = MOCK_LINES.reduce((s, li) => s + li.qty * li.price, 0);
   const tax       = Math.round(subtotal * 0.18);
   const total     = subtotal + tax;
@@ -108,12 +109,19 @@ export default function InvoicePage() {
 
   const handleSendReminder = () => showToast(`Relance envoyée à ${client.name}`);
   const handleDuplicate    = () => showToast('Facture dupliquée en brouillon');
-  const handleDelete       = () => {
+  const handleDelete = async () => {
     if (window.confirm(`Supprimer la facture #${invoice.id} ? Cette action est irréversible.`)) {
       setInvoices(prev => prev.filter(i => i.id !== invoice.id));
+      await removeInvoice(invoice.id);
       showToast('Facture supprimée');
       navigate('/invoices');
     }
+  };
+
+  const handleMarkPaid = async () => {
+    setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
+    await updateInvoice(invoice.id, { status: 'paid' });
+    showToast('Facture marquée comme payée');
   };
 
   return (
@@ -179,9 +187,9 @@ export default function InvoicePage() {
                 <div className="pp-block-label">Détails</div>
                 <div className="pp-meta-grid">
                   <div className="k">Émis le</div>
-                  <div className="v">{invoice.issued}</div>
+                  <div className="v">{fmtDate(invoice.issued)}</div>
                   <div className="k">Échéance</div>
-                  <div className={`v${isOverdue ? ' due' : ''}`}>{invoice.due.replace('Éch. ', '')}</div>
+                  <div className={`v${isOverdue ? ' due' : ''}`}>{fmtDate(invoice.due)}</div>
                   <div className="k">Conditions</div>
                   <div className="v">Net 14 jours</div>
                   <div className="k">Référence</div>
@@ -288,7 +296,7 @@ export default function InvoicePage() {
               {isOverdue && (
                 <div className="rail-due-sub">
                   <Icon name="alert-triangle" ariaHidden />
-                  5 jours de retard · éch. {invoice.due.replace('Éch. ', '')}
+                  5 jours de retard · éch. {fmtDate(invoice.due)}
                 </div>
               )}
               <div className="rail-actions">

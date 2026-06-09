@@ -1,0 +1,55 @@
+import { supabase } from '../supabase';
+import { INITIAL_PAYMENTS } from '../../data';
+import type { Payment } from '../schemas';
+
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+
+function dbToPayment(row: Record<string, unknown>): Payment {
+  return {
+    id:     String(row.id),
+    date:   String(row.date),
+    client: String(row.client_code),
+    inv:    String(row.inv_id),
+    method: row.method as Payment['method'],
+    ref:    String(row.ref ?? ''),
+    amount: Number(row.amount),
+    status: (row.status ?? 'completed') as Payment['status'],
+    source: (row.source ?? 'manual') as Payment['source'],
+  };
+}
+
+export async function fetchPayments(_userId: string): Promise<Payment[]> {
+  if (MOCK) return [...INITIAL_PAYMENTS];
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(dbToPayment);
+}
+
+export async function createPayment(
+  userId: string,
+  payload: Omit<Payment, 'source'> & { source?: Payment['source'] },
+): Promise<Payment> {
+  const source = payload.source ?? 'manual';
+  if (MOCK) return { ...payload, source };
+  const { data, error } = await supabase
+    .from('payments')
+    .insert({
+      id:          payload.id,
+      user_id:     userId,
+      date:        payload.date,
+      client_code: payload.client,
+      inv_id:      payload.inv,
+      method:      payload.method,
+      ref:         payload.ref,
+      amount:      payload.amount,
+      status:      payload.status,
+      source,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return dbToPayment(data as Record<string, unknown>);
+}

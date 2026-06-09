@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
+import { createInvoice } from '../lib/api/invoices';
+import { createActivity } from '../lib/api/activities';
 import {
-  CLIENTS, STATUS_LABEL, fmt, nextId, newLineItem,
+  STATUS_LABEL, fmt, fmtDate, fmtDue, nextId, newLineItem,
 } from '../data';
 import type { FilterKey, Status, LineItem } from '../data';
 import type { Activity } from '../lib/schemas';
@@ -18,7 +20,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
-  const { invoices, setInvoices, setActivity, showToast } = useApp();
+  const { invoices, setInvoices, setActivity, showToast, clientsMap, userId } = useApp();
   const navigate = useNavigate();
 
   const [filter, setFilter]     = useState<FilterKey>('all');
@@ -63,31 +65,30 @@ export default function InvoicesPage() {
       ...li, [field]: field === 'desc' ? val : (parseFloat(val) || 0),
     }));
 
-  const sendReminder = (e: React.MouseEvent, id: string) => {
+  const sendReminder = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setActivity((prev: Activity[]) => [
-      { kind: 'sent', parts: [{ text: 'Relance envoyée pour ' }, { text: `#${id}`, bold: true }], time: "À l'instant" },
-      ...prev,
-    ]);
+    const actEntry: Activity = { kind: 'sent', parts: [{ text: 'Relance envoyée pour ' }, { text: `#${id}`, bold: true }], time: "À l'instant" };
+    setActivity((prev: Activity[]) => [actEntry, ...prev]);
+    await createActivity(userId, { kind: actEntry.kind, parts: actEntry.parts });
     showToast(`Relance envoyée pour #${id}`);
   };
 
-  const submitInvoice = (status: 'draft' | 'pending') => {
+  const submitInvoice = async (status: 'draft' | 'pending') => {
     if (!fClient)      { showToast('Veuillez sélectionner un client.', true); return; }
     if (subtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
 
     const id    = nextId(invoices);
-    const cName = CLIENTS[fClient].name;
-    setInvoices(prev => [{
-      id, subject: fSubject.trim() || 'Facture sans titre',
-      client: fClient, issued: '7 juin', due: 'Éch. 21 juin',
-      amount: total, status,
-    }, ...prev]);
+    const cName = clientsMap[fClient]?.name ?? fClient;
+    const newInv = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status };
+    setInvoices(prev => [newInv, ...prev]);
+    await createInvoice(userId, newInv);
 
-    const actEntry: Activity = status === 'pending'
-      ? { kind: 'sent',   parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true }, { text: ' envoyée à ' }, { text: cName, bold: true }], time: "À l'instant" }
-      : { kind: 'viewed', parts: [{ text: 'Brouillon ' }, { text: `#${id}`, bold: true }, { text: ' enregistré pour ' }, { text: cName, bold: true }], time: "À l'instant" };
+    const actPayload = status === 'pending'
+      ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' envoyée à ' }, { text: cName, bold: true as const }] }
+      : { kind: 'viewed' as const, parts: [{ text: 'Brouillon ' }, { text: `#${id}`, bold: true as const }, { text: ' enregistré pour ' }, { text: cName, bold: true as const }] };
+    const actEntry: Activity = { ...actPayload, time: "À l'instant" };
     setActivity((prev: Activity[]) => [actEntry, ...prev]);
+    await createActivity(userId, actPayload);
 
     closePanel();
     showToast(status === 'pending' ? `Facture #${id} envoyée à ${cName}` : `Brouillon #${id} enregistré`);
@@ -194,7 +195,7 @@ export default function InvoicesPage() {
                 description="Créez votre première facture pour commencer à facturer vos clients."
               />
             ) : filteredInvoices.map(inv => {
-              const c = CLIENTS[inv.client];
+              const c = clientsMap[inv.client] ?? { name: inv.client, city: '—', av: 'av-a' };
               return (
                 <div key={inv.id} className="inv-row grid-cols" onClick={() => navigate(`/invoices/${inv.id}`)}>
                   <div>
@@ -209,8 +210,8 @@ export default function InvoicesPage() {
                     </div>
                   </div>
                   <div>
-                    <div className="cell-text">{inv.issued}</div>
-                    <div className="cell-sub">{inv.due}</div>
+                    <div className="cell-text">{fmtDate(inv.issued)}</div>
+                    <div className="cell-sub">{fmtDue(inv.due)}</div>
                   </div>
                   <div className="amount tnum" style={{ textAlign: 'right' }}>
                     {fmt(inv.amount)}<span className="cur">XOF</span>
@@ -263,7 +264,7 @@ export default function InvoicesPage() {
             <label className="form-label">Client</label>
             <select className="form-input" value={fClient} onChange={e => setFClient(e.target.value)}>
               <option value="">Sélectionner un client…</option>
-              {Object.entries(CLIENTS).map(([code, c]) => (
+              {Object.entries(clientsMap).map(([code, c]) => (
                 <option key={code} value={code}>{c.name}</option>
               ))}
             </select>

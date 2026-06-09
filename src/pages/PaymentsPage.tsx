@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
-import { CLIENTS, fmt } from '../data';
+import { createPayment } from '../lib/api/payments';
+import { fmt, fmtDate } from '../data';
 import type { PayMethod, PayStatus, Payment } from '../lib/schemas';
 
 type FilterKey = 'all' | 'cash' | 'wave' | 'momo' | 'card' | 'online' | 'pending';

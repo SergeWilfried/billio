@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { EmptyInline } from '../components/EmptyState';
 import { useApp } from '../context/AppContext';
-import { fmt, fmtCompact, CLIENTS } from '../data';
+import { fmt, fmtCompact, fmtDate, fmtDue } from '../data';
 import type { ActivityPart } from '../data';
 
 function ActivityLine({ parts }: { parts: ActivityPart[] }) {
@@ -15,7 +15,7 @@ function ActivityLine({ parts }: { parts: ActivityPart[] }) {
 }
 
 export default function DashboardPage() {
-  const { invoices, activity } = useApp();
+  const { invoices, activity, clientsMap } = useApp();
   const navigate = useNavigate();
 
   const metrics = useMemo(() => {
@@ -37,7 +37,7 @@ export default function DashboardPage() {
     });
     const ranked = Object.entries(totals).sort(([, a], [, b]) => b.sum - a.sum).slice(0, 4);
     const max    = ranked.length ? ranked[0][1].sum : 1;
-    return ranked.map(([code, d]) => ({ code, client: CLIENTS[code], ...d, barPct: Math.round((d.sum / max) * 100) }));
+    return ranked.map(([code, d]) => ({ code, client: clientsMap[code] ?? { name: code, city: '—', av: 'av-a' }, ...d, barPct: Math.round((d.sum / max) * 100) }));
   }, [invoices]);
 
   return (
@@ -115,7 +115,7 @@ export default function DashboardPage() {
             <div className="th" />
           </div>
           {invoices.slice(0, 4).map(inv => {
-            const c = CLIENTS[inv.client];
+            const c = clientsMap[inv.client] ?? { name: inv.client, city: '—', av: 'av-a' };
             return (
               <div key={inv.id} className="inv-row grid-cols" onClick={() => navigate(`/invoices/${inv.id}`)}>
                 <div>
@@ -130,8 +130,8 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div>
-                  <div className="cell-text">{inv.issued}</div>
-                  <div className="cell-sub">{inv.due}</div>
+                  <div className="cell-text">{fmtDate(inv.issued)}</div>
+                  <div className="cell-sub">{fmtDue(inv.due)}</div>
                 </div>
                 <div className="amount tnum" style={{ textAlign: 'right' }}>
                   {fmt(inv.amount)}<span className="cur">XOF</span>
