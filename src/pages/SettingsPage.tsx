@@ -648,14 +648,168 @@ function memberName(m: TeamMember) {
   return m.email.split('@')[0];
 }
 
+const INVITE_ROLES = [
+  { value: 'admin',      label: 'Administrateur' },
+  { value: 'member',     label: 'Membre'         },
+  { value: 'accountant', label: 'Comptable'      },
+  { value: 'observer',   label: 'Observateur'    },
+];
+
+/* ─── Invite Modal ──────────────────────────────────────────────── */
+interface InviteModalProps {
+  orgId:   string;
+  userId:  string;
+  onClose: () => void;
+  onDone:  (invite: PendingInvite) => void;
+}
+
+function InviteModal({ orgId, userId, onClose, onDone }: InviteModalProps) {
+  const { showToast } = useApp();
+  const [email,    setEmail]    = useState('');
+  const [role,     setRole]     = useState('member');
+  const [emailErr, setEmailErr] = useState(false);
+  const [saving,   setSaving]   = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!/.+@.+\..+/.test(email.trim())) { setEmailErr(true); return; }
+    setSaving(true);
+
+    const token = crypto.randomUUID();
+    const id    = crypto.randomUUID();
+
+    const { error } = await supabase.from('pending_invitations').upsert(
+      { id, token, org_id: orgId, email: email.toLowerCase().trim(), role, invited_by: userId || undefined },
+      { onConflict: 'org_id,email', ignoreDuplicates: false }
+    );
+
+    setSaving(false);
+    if (error) { showToast(error.message, true); return; }
+
+    const invite: PendingInvite = {
+      id,
+      token,
+      email: email.toLowerCase().trim(),
+      role,
+      expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    };
+    onDone(invite);
+    showToast('Invitation créée');
+  }
+
+  // Close on Escape
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', fn);
+    return () => window.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  return (
+    <div className="inv-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="inv-modal" role="dialog" aria-modal="true" aria-label="Inviter un membre">
+        <div className="inv-modal-head">
+          <div className="inv-modal-title">
+            <Icon name="user-plus" size={17} />
+            Inviter un membre
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="Fermer">
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="inv-modal-body">
+            <div className="s-field">
+              <label className="s-label">Adresse e-mail</label>
+              <div className="input-wrap" style={{ position: 'relative' }}>
+                <Icon name="mail" className="lead" size={15} ariaHidden />
+                <input
+                  className={`form-input${emailErr ? ' err' : ''}`}
+                  style={{ paddingLeft: 34 }}
+                  type="email"
+                  placeholder="nom@entreprise.com"
+                  value={email}
+                  autoFocus
+                  onChange={e => { setEmail(e.target.value); setEmailErr(false); }}
+                />
+              </div>
+              {emailErr && <div className="s-hint" style={{ color: 'var(--color-danger)' }}>Adresse e-mail invalide.</div>}
+            </div>
+
+            <div className="s-field" style={{ marginBottom: 0 }}>
+              <label className="s-label">Rôle</label>
+              <select className="form-input" value={role} onChange={e => setRole(e.target.value)}>
+                {INVITE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              <div className="s-hint" style={{ marginTop: 6 }}>
+                {role === 'admin'      && 'Peut gérer les factures, les clients et inviter des membres.'}
+                {role === 'member'     && 'Peut créer et envoyer des factures.'}
+                {role === 'accountant' && 'Accès en lecture aux rapports et aux paiements.'}
+                {role === 'observer'   && 'Accès en lecture seule à tout le workspace.'}
+              </div>
+            </div>
+          </div>
+
+          <div className="inv-modal-foot">
+            <button type="button" className="btn" onClick={onClose}>Annuler</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving
+                ? 'Envoi…'
+                : <><Icon name="send" size={14} /> Créer l'invitation</>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Invite Link Row ───────────────────────────────────────────── */
+interface InviteLinkRowProps {
+  invite:    PendingInvite;
+  index:     number;
+  onRevoke:  (id: string) => void;
+}
+
+function InviteLinkRow({ invite, index, onRevoke }: InviteLinkRowProps) {
+  const [copied, setCopied] = useState(false);
+  const url = `${window.location.origin}/invite/${invite.token}`;
+
+  function copy() {
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="s-team-row inv-link-row">
+      <div className={`s-team-av ${AV_CLASSES[index % AV_CLASSES.length]}`} style={{ opacity: 0.45 }}>
+        {invite.email[0]?.toUpperCase() ?? '?'}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="s-team-name">{invite.email}</div>
+        <div className="inv-link-url" onClick={copy} title="Cliquer pour copier">{url}</div>
+      </div>
+      <span className="s-role-badge">{ROLE_LABELS[invite.role] ?? invite.role}</span>
+      <button className={`btn btn-sm${copied ? ' btn-copied' : ''}`} onClick={copy}>
+        {copied ? <><Icon name="check" size={13} /> Copié</> : <><Icon name="link" size={13} /> Copier</>}
+      </button>
+      <button className="icon-btn" title="Révoquer l'invitation" onClick={() => onRevoke(invite.id)}>
+        <Icon name="trash" size={15} />
+      </button>
+    </div>
+  );
+}
+
 /* ─── Team ──────────────────────────────────────────────────────── */
 function TeamSection() {
   const { orgId, userId, showToast } = useApp();
 
-  const [members,  setMembers]  = useState<TeamMember[]>([]);
-  const [pending,  setPending]  = useState<PendingInvite[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [members,     setMembers]     = useState<TeamMember[]>([]);
+  const [pending,     setPending]     = useState<PendingInvite[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [showInvite,  setShowInvite]  = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
@@ -675,16 +829,6 @@ function TeamSection() {
     });
   }, [orgId]);
 
-  function inviteUrl(token: string) {
-    return `${window.location.origin}/invite/${token}`;
-  }
-
-  function copyLink(token: string) {
-    navigator.clipboard.writeText(inviteUrl(token));
-    setCopiedId(token);
-    setTimeout(() => setCopiedId(null), 2000);
-  }
-
   async function revokeInvite(id: string) {
     const { error } = await supabase.from('pending_invitations').delete().eq('id', id);
     if (error) { showToast(error.message, true); return; }
@@ -694,12 +838,24 @@ function TeamSection() {
 
   return (
     <>
+      {showInvite && orgId && (
+        <InviteModal
+          orgId={orgId}
+          userId={userId}
+          onClose={() => setShowInvite(false)}
+          onDone={invite => { setPending(prev => [...prev, invite]); setShowInvite(false); }}
+        />
+      )}
+
       <div className="s-card">
         <div className="s-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div className="s-card-title">Membres de l'équipe</div>
             <div className="s-card-desc">Personnes ayant accès à ce workspace Billio.</div>
           </div>
+          <button className="btn btn-sm btn-primary" onClick={() => setShowInvite(true)}>
+            <Icon name="user-plus" size={14} /> Inviter
+          </button>
         </div>
         <div className="s-card-body">
           {loading && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13, padding: '8px 0' }}>Chargement…</div>}
@@ -727,43 +883,33 @@ function TeamSection() {
         </div>
       </div>
 
-      {(pending.length > 0 || !loading) && (
-        <div className="s-card">
-          <div className="s-card-head">
+      <div className="s-card">
+        <div className="s-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
             <div className="s-card-title">Invitations en attente</div>
-            <div className="s-card-desc">Partagez le lien avec votre collaborateur pour qu'il rejoigne le workspace.</div>
+            <div className="s-card-desc">Partagez le lien — votre collaborateur pourra créer son compte et rejoindre directement.</div>
           </div>
-          <div className="s-card-body">
-            {pending.length === 0
-              ? <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13 }}>Aucune invitation en attente.</div>
-              : pending.map((p, i) => (
-                <div key={p.id} className="s-team-row">
-                  <div className={`s-team-av ${AV_CLASSES[i % AV_CLASSES.length]}`} style={{ opacity: 0.5 }}>
-                    {p.email[0]?.toUpperCase() ?? '?'}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="s-team-name">{p.email}</div>
-                    <div className="s-team-email" style={{ fontFamily: 'monospace', fontSize: 11, userSelect: 'all' }}>
-                      {inviteUrl(p.token)}
-                    </div>
-                  </div>
-                  <span className="s-role-badge">{ROLE_LABELS[p.role] ?? p.role}</span>
-                  <button
-                    className="btn btn-sm"
-                    title="Copier le lien"
-                    onClick={() => copyLink(p.token)}
-                  >
-                    {copiedId === p.token ? <><Icon name="check" size={13} /> Copié</> : <><Icon name="link" size={13} /> Copier</>}
-                  </button>
-                  <button className="icon-btn" title="Révoquer" onClick={() => revokeInvite(p.id)}>
-                    <Icon name="trash" size={15} />
-                  </button>
-                </div>
-              ))
-            }
-          </div>
+          {pending.length > 0 && (
+            <span className="s-role-badge" style={{ fontVariantNumeric: 'tabular-nums' }}>{pending.length}</span>
+          )}
         </div>
-      )}
+        <div className="s-card-body">
+          {loading
+            ? <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
+            : pending.length === 0
+              ? (
+                <div className="inv-empty">
+                  <Icon name="user-plus" size={22} />
+                  <div className="inv-empty-title">Aucune invitation en attente</div>
+                  <div className="inv-empty-sub">Cliquez sur <b>Inviter</b> pour générer un lien de rejoindre.</div>
+                </div>
+              )
+              : pending.map((p, i) => (
+                <InviteLinkRow key={p.id} invite={p} index={i} onRevoke={revokeInvite} />
+              ))
+          }
+        </div>
+      </div>
     </>
   );
 }

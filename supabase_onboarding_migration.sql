@@ -190,3 +190,45 @@ as $$
     and p_org_id in (select public.my_org_ids())
   order by m.created_at;
 $$;
+
+-- ── Fix: skip auto-org creation for invited users ────────────
+-- The original handle_new_user fires on every signup and creates
+-- a brand-new org. Invited users would end up owning a ghost org
+-- AND being a member of the org they were invited to, causing
+-- AppContext to pick the wrong org on first login.
+-- This patched version skips org creation when a pending invite
+-- exists for the signing-up email.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  new_org_id uuid;
+begin
+  -- If a valid pending invitation exists for this email,
+  -- skip org creation — accept_invitation will link them to the
+  -- correct org after signup completes.
+  if exists (
+    select 1 from public.pending_invitations
+     where lower(email) = lower(new.email)
+       and status       = 'pending'
+       and expires_at   > now()
+  ) then
+    return new;
+  end if;
+
+  insert into public.organizations (name, slug)
+  values (
+    coalesce(new.raw_user_meta_data->>'company_name', split_part(new.email, '@', 1)),
+    lower(regexp_replace(split_part(new.email, '@', 1), '[^a-z0-9]', '-', 'g'))
+      || '-' || substr(gen_random_uuid()::text, 1, 6)
+  )
+  returning id into new_org_id;
+
+  insert into public.org_members (org_id, user_id, role)
+  values (new_org_id, new.id, 'owner');
+
+  return new;
+end;
+$$;
