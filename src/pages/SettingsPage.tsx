@@ -154,7 +154,7 @@ const CURRENCIES = [
 
 /* ─── Business ─────────────────────────────────────────────────── */
 function BusinessSection() {
-  const { orgId, showToast } = useApp();
+  const { orgId, showToast, setOrgSettings } = useApp();
 
   const [name,     setName]    = useState('');
   const [ifu,      setIfu]     = useState('');
@@ -163,6 +163,8 @@ function BusinessSection() {
   const [city,     setCity]    = useState('');
   const [country,  setCountry] = useState('Burkina Faso');
   const [currency, setCurrency]= useState('XOF');
+  const [email,    setEmail]   = useState('');
+  const [phone,    setPhone]   = useState('');
   const [loading,  setLoading] = useState(true);
   const [saving,   setSaving]  = useState(false);
 
@@ -170,7 +172,7 @@ function BusinessSection() {
     if (!orgId) return;
     supabase
       .from('organizations')
-      .select('name, ifu, rccm, address, city, country, currency')
+      .select('name, ifu, rccm, address, city, country, currency, email, phone')
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
@@ -183,6 +185,8 @@ function BusinessSection() {
         setCity(data.city     ?? '');
         setCountry(data.country  ?? 'Burkina Faso');
         setCurrency(data.currency ?? 'XOF');
+        setEmail(data.email   ?? '');
+        setPhone(data.phone   ?? '');
         setLoading(false);
       });
   }, [orgId]);
@@ -192,10 +196,11 @@ function BusinessSection() {
     setSaving(true);
     const { error } = await supabase
       .from('organizations')
-      .update({ name, ifu, rccm, address, city, country, currency })
+      .update({ name, ifu, rccm, address, city, country, currency, email, phone })
       .eq('id', orgId);
     setSaving(false);
     if (error) { showToast(error.message, true); return; }
+    setOrgSettings({ name, ifu, rccm, address, city, country, email, phone });
     showToast('Entreprise enregistrée');
   }
 
@@ -223,6 +228,16 @@ function BusinessSection() {
         <div className="s-field">
           <label className="s-label">Adresse</label>
           <input className="form-input" value={address} onChange={e => setAddress(e.target.value)} disabled={loading} placeholder="Av. Kwame Nkrumah, Immeuble Baobab" />
+        </div>
+        <div className="s-field-row">
+          <div className="s-field">
+            <label className="s-label">Email de contact</label>
+            <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} disabled={loading} placeholder="contact@entreprise.bf" />
+          </div>
+          <div className="s-field">
+            <label className="s-label">Téléphone</label>
+            <input className="form-input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} disabled={loading} placeholder="+226 70 00 00 00" />
+          </div>
         </div>
         <div className="s-field-row-3">
           <div className="s-field">

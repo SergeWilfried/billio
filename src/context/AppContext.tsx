@@ -9,6 +9,17 @@ import { fetchQuotes }     from '../lib/api/quotes';
 import { fetchActivities } from '../lib/api/activities';
 import type { Invoice, Activity, ClientRecord, Payment, Product, Quote, Client } from '../lib/schemas';
 
+export interface OrgSettings {
+  name:    string;
+  address: string;
+  city:    string;
+  country: string;
+  email:   string;
+  phone:   string;
+  ifu:     string;
+  rccm:    string;
+}
+
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 interface AppContextValue {
@@ -21,6 +32,9 @@ interface AppContextValue {
   quotes:      Quote[];        setQuotes:      Dispatch<SetStateAction<Quote[]>>;
   // Derived lookup: client code → {name, city, av}
   clientsMap:  Record<string, Client>;
+  // Org profile (used by invoice templates)
+  orgSettings: OrgSettings;
+  setOrgSettings: Dispatch<SetStateAction<OrgSettings>>;
   // Auth
   userId:      string;
   orgId:       string;
@@ -46,6 +60,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [payments,  setPayments]  = useState<Payment[]>(MOCK ? INITIAL_PAYMENTS : []);
   const [products,  setProducts]  = useState<Product[]>(MOCK ? INITIAL_PRODUCTS : []);
   const [quotes,    setQuotes]    = useState<Quote[]>(MOCK ? INITIAL_QUOTES : []);
+
+  const EMPTY_ORG: OrgSettings = { name: '', address: '', city: '', country: '', email: '', phone: '', ifu: '', rccm: '' };
+  const [orgSettings,     setOrgSettings]     = useState<OrgSettings>(EMPTY_ORG);
 
   const [userId,          setUserId]          = useState(MOCK ? 'mock-user' : '');
   const [orgId,           setOrgId]           = useState(MOCK ? 'mock-org'  : '');
@@ -106,11 +123,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else {
         const { data: org, error: orgErr } = await supabase
           .from('organizations')
-          .select('onboarding_completed_at')
+          .select('name, address, city, country, email, phone, ifu, rccm, onboarding_completed_at')
           .eq('id', resolvedOrgId)
           .single();
         if (orgErr) console.warn('[boot] org fetch error:', orgErr.message);
         setNeedsOnboarding(!org?.onboarding_completed_at);
+        if (org) {
+          setOrgSettings({
+            name:    org.name    ?? '',
+            address: org.address ?? '',
+            city:    org.city    ?? '',
+            country: org.country ?? '',
+            email:   org.email   ?? '',
+            phone:   org.phone   ?? '',
+            ifu:     org.ifu     ?? '',
+            rccm:    org.rccm    ?? '',
+          });
+        }
       }
 
       try {
@@ -160,6 +189,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       products,  setProducts,
       quotes,    setQuotes,
       clientsMap,
+      orgSettings, setOrgSettings,
       userId,
       orgId,
       userLabel, userInitials,

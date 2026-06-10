@@ -79,7 +79,7 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, showToast, clientsMap, } = useApp();
+  const { invoices, setInvoices, showToast, clientsMap, orgSettings } = useApp();
 
   const invoice = invoices.find(i => i.id === id);
   if (!invoice) {
@@ -161,12 +161,15 @@ export default function InvoicePage() {
               <div className="pp-biz">
                 <div className="pp-logo" aria-hidden="true"><BillioLogoSvg /></div>
                 <div>
-                  <div className="pp-biz-name">Studio Wend SARL</div>
+                  <div className="pp-biz-name">{orgSettings.name || 'Mon entreprise'}</div>
                   <div className="pp-biz-meta">
-                    Av. Kwame Nkrumah, Immeuble Baobab<br />
-                    Ouagadougou, Burkina Faso<br />
-                    IFU 00012345 B · RCCM BF-OUA-2021-B-1234<br />
-                    contact@studiowend.bf · +226 70 12 34 56
+                    {[orgSettings.address, orgSettings.city, orgSettings.country].filter(Boolean).join(', ')}
+                    {(orgSettings.ifu || orgSettings.rccm) && (
+                      <><br />{[orgSettings.ifu && `IFU ${orgSettings.ifu}`, orgSettings.rccm && `RCCM ${orgSettings.rccm}`].filter(Boolean).join(' · ')}</>
+                    )}
+                    {(orgSettings.email || orgSettings.phone) && (
+                      <><br />{[orgSettings.email, orgSettings.phone].filter(Boolean).join(' · ')}</>
+                    )}
                   </div>
                 </div>
               </div>
