@@ -130,7 +130,7 @@ declare
   v_confirmed_at timestamptz;
 begin
   -- Guard 1: caller must be the user they claim to be
-  if auth.uid() is distinct from p_user_id then
+  if auth.uid() is null or auth.uid() is distinct from p_user_id then
     raise exception 'Unauthorized';
   end if;
 
