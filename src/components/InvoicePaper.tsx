@@ -23,8 +23,8 @@ export interface PaperConfig {
 // ---------------------------------------------------------------------------
 // Mock invoice data
 // ---------------------------------------------------------------------------
-const BIZ  = { initials: 'SW', name: 'Studio Wend SARL', addr: 'Av. Kwame Nkrumah · Ouagadougou, BF', contact: 'contact@studiowend.bf' };
-const CLI  = { name: 'TechKonsult', city: 'Ouagadougou, Burkina Faso' };
+const BIZ  = { initials: 'SW', name: 'Studio Wend SARL', addr: 'Av. Kwame Nkrumah · Ouagadougou, BF', contact: 'contact@studiowend.bf', ifu: '00012345 B', rccm: 'BF-OUA-2021-B-1234' };
+const CLI  = { name: 'TechKonsult', city: 'Ouagadougou, Burkina Faso', ifu: '00067890 C', rccm: 'BF-OUA-2020-B-5678' };
 const INV  = { id: 'INV-0041', issued: '7 juin 2026', due: '21 juin 2026', subject: 'Refonte web — phase 2' };
 const LINES = [
   { desc: 'UI/UX design — phase 2', note: 'Wireframes, hi-fi screens', qty: 1, price: 300_000 },
@@ -45,6 +45,12 @@ function Parties() {
         <div className="tp-block-label">Facturé à</div>
         <div className="tp-client-name">{CLI.name}</div>
         <div className="tp-client-meta">{CLI.city}</div>
+        {(CLI.ifu || CLI.rccm) && (
+          <div className="tp-compliance-ids">
+            {CLI.ifu  && <span>IFU {CLI.ifu}</span>}
+            {CLI.rccm && <span>RCCM {CLI.rccm}</span>}
+          </div>
+        )}
       </div>
       <div>
         <div className="tp-block-label">Détails</div>
@@ -147,7 +153,16 @@ function ClassicBody({ cfg }: { cfg: PaperConfig }) {
           <div className="tp-logo">{BIZ.initials}</div>
           <div>
             <div className="tp-biz-name">{BIZ.name}</div>
-            <div className="tp-biz-meta">{BIZ.addr}<br />{BIZ.contact}</div>
+            <div className="tp-biz-meta">
+              {BIZ.addr}<br />{BIZ.contact}
+              {(BIZ.ifu || BIZ.rccm) && (
+                <><br /><span className="tp-compliance-ids-inline">
+                  {BIZ.ifu  && <>IFU {BIZ.ifu}</>}
+                  {BIZ.ifu && BIZ.rccm && ' · '}
+                  {BIZ.rccm && <>RCCM {BIZ.rccm}</>}
+                </span></>
+              )}
+            </div>
           </div>
         </div>
         <div className="tp-doc">
@@ -179,7 +194,12 @@ function BandBody({ cfg }: { cfg: PaperConfig }) {
           <div className="tp-band-logo">{BIZ.initials}</div>
           <div>
             <div className="tp-band-name">{BIZ.name}</div>
-            <div className="tp-band-tag">{BIZ.addr}</div>
+            <div className="tp-band-tag">
+              {BIZ.addr}
+              {(BIZ.ifu || BIZ.rccm) && (
+                <> · {BIZ.ifu && <>IFU {BIZ.ifu}</>}{BIZ.ifu && BIZ.rccm && ' · '}{BIZ.rccm && <>RCCM {BIZ.rccm}</>}</>
+              )}
+            </div>
           </div>
         </div>
         <div className="tp-band-right">
@@ -210,7 +230,12 @@ function MinimalBody({ cfg }: { cfg: PaperConfig }) {
       <div className="tp-min-head">
         <div>
           <div className="tp-block-label">{BIZ.name}</div>
-          <div className="tp-client-meta">{BIZ.addr}<br />{BIZ.contact}</div>
+          <div className="tp-client-meta">
+            {BIZ.addr}<br />{BIZ.contact}
+            {(BIZ.ifu || BIZ.rccm) && (
+              <><br />{BIZ.ifu && <>IFU {BIZ.ifu}</>}{BIZ.ifu && BIZ.rccm && ' · '}{BIZ.rccm && <>RCCM {BIZ.rccm}</>}</>
+            )}
+          </div>
           <div className="tp-min-terms">Net 14 jours</div>
         </div>
         <div>
@@ -238,7 +263,12 @@ function SidebarBody({ cfg }: { cfg: PaperConfig }) {
       <div className="tp-aside">
         <div className="tp-aside-logo">{BIZ.initials}</div>
         <div className="tp-aside-name">{BIZ.name}</div>
-        <div className="tp-aside-meta">{BIZ.addr}<br />{BIZ.contact}</div>
+        <div className="tp-aside-meta">
+          {BIZ.addr}<br />{BIZ.contact}
+          {(BIZ.ifu || BIZ.rccm) && (
+            <><br />{BIZ.ifu && <>IFU {BIZ.ifu}</>}{BIZ.ifu && BIZ.rccm && <> · </>}{BIZ.rccm && <>RCCM {BIZ.rccm}</>}</>
+          )}
+        </div>
         <div className="tp-aside-sep" />
         <div className="tp-aside-label">Total dû</div>
         <div className="tp-aside-total">{fmt(TOTAL)}<span>XOF</span></div>
@@ -276,7 +306,12 @@ function ReceiptBody({ cfg }: { cfg: PaperConfig }) {
       <div className="tp-rcpt-head">
         <div className="tp-rcpt-logo">{BIZ.initials}</div>
         <div className="tp-rcpt-name">{BIZ.name}</div>
-        <div className="tp-rcpt-meta">{BIZ.addr}</div>
+        <div className="tp-rcpt-meta">
+          {BIZ.addr}
+          {(BIZ.ifu || BIZ.rccm) && (
+            <><br />{BIZ.ifu && <>IFU {BIZ.ifu}</>}{BIZ.ifu && BIZ.rccm && ' · '}{BIZ.rccm && <>RCCM {BIZ.rccm}</>}</>
+          )}
+        </div>
       </div>
       <div className="tp-rcpt-divider" />
       <div className="tp-rcpt-row">

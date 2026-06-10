@@ -36,7 +36,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 const EMPTY_FORM: NewClientForm = {
-  name: '', contact: '', email: '', phone: '', city: '', status: 'active', ifu: '',
+  name: '', contact: '', email: '', phone: '', city: '', status: 'active', ifu: '', rccm: '',
 };
 
 function fmtCompact(n: number) {
@@ -97,7 +97,7 @@ export default function ClientsPage() {
       code, av: avs[clients.length % avs.length],
       name: form.name, contact: form.contact || '—',
       email: form.email || '—', phone: form.phone || '—',
-      city: form.city || '—', ifu: form.ifu,
+      city: form.city || '—', ifu: form.ifu, rccm: form.rccm,
       status: form.status,
     };
     setClients(prev => [{ ...payload, invoices: 0, billed: 0, balance: 0 }, ...prev]);
@@ -327,6 +327,25 @@ export default function ClientsPage() {
                 </div>
               </div>
 
+              {/* Identifiants fiscaux */}
+              {(detailClient.ifu || detailClient.rccm) && (
+                <div className="detail-block">
+                  <div className="detail-block-title">Identifiants fiscaux</div>
+                  {detailClient.ifu && (
+                    <div className="contact-line">
+                      <Icon name="file-text" size={16} />
+                      <span>IFU&nbsp;<strong>{detailClient.ifu}</strong></span>
+                    </div>
+                  )}
+                  {detailClient.rccm && (
+                    <div className="contact-line">
+                      <Icon name="building" size={16} />
+                      <span>RCCM&nbsp;<strong>{detailClient.rccm}</strong></span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Recent invoices */}
               <div className="detail-block">
                 <div className="detail-block-title">Factures récentes</div>
@@ -418,12 +437,21 @@ export default function ClientsPage() {
               </select>
             </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">
-              IFU <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 500 }}>— optionnel</span>
-            </label>
-            <input className="form-input" placeholder="00012345 B" value={form.ifu}
-              onChange={e => setForm(f => ({ ...f, ifu: e.target.value }))} />
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">
+                IFU <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 500 }}>— optionnel</span>
+              </label>
+              <input className="form-input" placeholder="00012345 B" value={form.ifu}
+                onChange={e => setForm(f => ({ ...f, ifu: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                RCCM <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 500 }}>— optionnel</span>
+              </label>
+              <input className="form-input" placeholder="BF-OUA-2021-B-1234" value={form.rccm}
+                onChange={e => setForm(f => ({ ...f, rccm: e.target.value }))} />
+            </div>
           </div>
         </form>
 

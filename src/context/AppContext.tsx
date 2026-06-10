@@ -61,7 +61,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Derived client lookup
   const clientsMap = useMemo<Record<string, Client>>(
-    () => Object.fromEntries(clients.map(c => [c.code, { name: c.name, city: c.city, av: c.av }])),
+    () => Object.fromEntries(clients.map(c => [c.code, { name: c.name, city: c.city, av: c.av, ifu: c.ifu, rccm: c.rccm }])),
     [clients],
   );
 

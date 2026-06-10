@@ -13,6 +13,8 @@ function dbToClient(row: Record<string, unknown>): ClientRecord {
     email:    String(row.email ?? '—'),
     phone:    String(row.phone ?? '—'),
     city:     String(row.city ?? '—'),
+    ifu:      String(row.ifu ?? ''),
+    rccm:     String(row.rccm ?? ''),
     invoices: Number(row.invoices_count ?? 0),
     billed:   Number(row.billed ?? 0),
     balance:  Number(row.balance ?? 0),
@@ -32,7 +34,7 @@ export async function fetchClients(_orgId: string): Promise<ClientRecord[]> {
 
 export async function createClient(
   orgId: string,
-  payload: Omit<ClientRecord, 'invoices' | 'billed' | 'balance'> & { ifu?: string },
+  payload: Omit<ClientRecord, 'invoices' | 'billed' | 'balance'>,
 ): Promise<ClientRecord> {
   if (MOCK) return { ...payload, invoices: 0, billed: 0, balance: 0 };
   const { data, error } = await supabase
@@ -47,6 +49,7 @@ export async function createClient(
       phone:          payload.phone,
       city:           payload.city,
       ifu:            payload.ifu ?? '',
+      rccm:           payload.rccm ?? '',
       status:         payload.status,
       invoices_count: 0,
       billed:         0,

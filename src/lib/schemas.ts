@@ -38,6 +38,8 @@ export const clientSchema = z.object({
   name: z.string(),
   city: z.string(),
   av:   z.string(),
+  ifu:  z.string().optional(),
+  rccm: z.string().optional(),
 });
 
 export const clientRecordSchema = z.object({
@@ -48,6 +50,8 @@ export const clientRecordSchema = z.object({
   email:    z.string(),
   phone:    z.string(),
   city:     z.string(),
+  ifu:      z.string().optional(),
+  rccm:     z.string().optional(),
   invoices: z.number().int().min(0),
   billed:   z.number().min(0),
   balance:  z.number().min(0),
@@ -113,6 +117,7 @@ export const newClientFormSchema = z.object({
   city:    z.string(),
   status:  clientStatusSchema,
   ifu:     z.string(),
+  rccm:    z.string(),
 });
 
 export const lineItemFormSchema = lineItemSchema.omit({ id: true }).extend({

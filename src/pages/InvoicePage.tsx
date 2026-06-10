@@ -182,6 +182,12 @@ export default function InvoicePage() {
                 <div className="pp-block-label">Facturé à</div>
                 <div className="pp-client-name">{client.name}</div>
                 <div className="pp-client-meta">{client.city}, Burkina Faso</div>
+                {(client.ifu || client.rccm) && (
+                  <div className="pp-compliance-ids">
+                    {client.ifu  && <span>IFU {client.ifu}</span>}
+                    {client.rccm && <span>RCCM {client.rccm}</span>}
+                  </div>
+                )}
               </div>
               <div>
                 <div className="pp-block-label">Détails</div>
