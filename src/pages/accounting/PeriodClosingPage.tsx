@@ -62,27 +62,34 @@ function ProgressRing({ pct }: { pct: number }) {
   );
 }
 
+// The page is scoped to June 2026 (month 6)
+const TARGET_MONTH = 6;
+
 export default function PeriodClosingPage() {
   const { data, loading, closePeriod } = usePeriodClosing();
   const [checks, setChecks] = useState(INITIAL_CHECKS.map(c => ({ ...c })));
   const [closing, setClosing] = useState(false);
+  // Optimistic closed flag: set on button click; also syncs from DB status
+  const [justClosed, setJustClosed] = useState(false);
 
   const entries = data?.entries ?? [];
   const periods = data?.periods ?? [];
 
-  // Derive display periods: first open month is 'current', rest are 'future'
-  const firstOpenMonth = periods.find(p => p.status === 'open')?.month ?? null;
+  // Closed = either DB says so (after reload) or user just clicked close (optimistic)
+  const targetDbPeriod = periods.find(p => p.month === TARGET_MONTH);
+  const closed = justClosed || targetDbPeriod?.status === 'closed';
+
   const displayPeriods = MONTH_LABELS.map((m, i) => {
     const month = i + 1;
     const dbPeriod = periods.find(p => p.month === month);
-    const s = dbPeriod?.status === 'closed' ? 'closed'
-      : month === firstOpenMonth ? 'current'
+    const isTarget = month === TARGET_MONTH;
+    const s = (dbPeriod?.status === 'closed' || (closed && isTarget)) ? 'closed'
+      : isTarget && !closed ? 'current'
       : 'future';
     return { m, s, id: dbPeriod?.id ?? null };
   });
 
-  const currentPeriod = displayPeriods.find(p => p.s === 'current');
-  const closed = currentPeriod?.s === 'current' && periods.find(p => p.month === firstOpenMonth)?.status === 'closed';
+  const currentPeriod = !closed ? displayPeriods.find(p => p.s === 'current') : null;
   const doneCount = checks.filter(c => c.done).length;
   const pct       = Math.round((doneCount / checks.length) * 100);
   const drafts    = entries.filter(e => !e.posted).length;
@@ -125,14 +132,15 @@ export default function PeriodClosingPage() {
           </span>
           <button
             className="btn"
-            disabled={!allDone || closing || !currentPeriod?.id}
+            disabled={closed || !allDone || closing || !currentPeriod?.id}
             onClick={async () => {
               if (!currentPeriod?.id) return;
               setClosing(true);
+              setJustClosed(true);
               try { await closePeriod(currentPeriod.id); } finally { setClosing(false); }
             }}
           >
-            <Icon name="lock" />{closing ? 'Clôture…' : `Clôturer ${currentPeriod?.m ?? ''}`}
+            <Icon name="lock" />{closing ? 'Clôture…' : closed ? 'Clôturé' : `Clôturer ${currentPeriod?.m ?? ''}`}
           </button>
         </div>
       </div>
@@ -220,15 +228,16 @@ export default function PeriodClosingPage() {
 
                 <button
                   className={`btn${allDone ? ' btn-primary' : ''}`}
-                  disabled={!allDone || closing || !currentPeriod?.id}
+                  disabled={closed || !allDone || closing || !currentPeriod?.id}
                   onClick={async () => {
                     if (!currentPeriod?.id) return;
                     setClosing(true);
+                    setJustClosed(true);
                     try { await closePeriod(currentPeriod.id); } finally { setClosing(false); }
                   }}
                   style={{ width: '100%', justifyContent: 'center', marginTop: 16, opacity: allDone ? 1 : 0.5, cursor: allDone ? 'pointer' : 'not-allowed' }}
                 >
-                  <Icon name="lock" />{closing ? 'Clôture en cours…' : `Clôturer ${currentPeriod?.m ?? 'la période'} & reporter à-nouveaux`}
+                  <Icon name="lock" />{closing ? 'Clôture en cours…' : closed ? 'Clôturé ✓' : `Clôturer ${currentPeriod?.m ?? 'la période'} & reporter à-nouveaux`}
                 </button>
 
                 {!allDone && (

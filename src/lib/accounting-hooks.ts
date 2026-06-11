@@ -3,7 +3,7 @@
 // the same data shapes the page components already consume — so page diffs
 // are limited to swapping imports + adding a loading guard.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useApp } from '../context/AppContext';
 import { supabase } from './supabase';
 import {
@@ -43,7 +43,7 @@ const EXERCISE_YEAR = 2026;
 function useAsyncData<T>(
   loader: () => Promise<T>,
   deps: unknown[] = [],
-): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
+): { data: T | null; loading: boolean; error: string | null; reload: () => void; setData: Dispatch<SetStateAction<T | null>> } {
   const [data,    setData]    = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -62,7 +62,7 @@ function useAsyncData<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, ...deps]);
 
-  return { data, loading, error, reload };
+  return { data, loading, error, reload, setData };
 }
 
 // ─── Chart of Accounts ───────────────────────────────────────────────────────
@@ -118,13 +118,29 @@ export function useJournalsData(includeDraft = true) {
   const result = useAsyncData(load, [orgId, includeDraft]);
 
   const postEntry = useCallback(async (entryId: string) => {
-    await postJournalEntry(entryId);
-    result.reload();
+    // Optimistic: flip posted flag immediately so the drawer closes with correct status
+    result.setData(prev => prev ? {
+      ...prev,
+      entries: prev.entries.map(e => e.id === entryId ? { ...e, posted: true } : e),
+    } : null);
+    try {
+      await postJournalEntry(entryId);
+    } finally {
+      result.reload();
+    }
   }, [result]);
 
   const removeEntry = useCallback(async (entryId: string) => {
-    await deleteJournalEntry(entryId);
-    result.reload();
+    // Optimistic: remove from list immediately
+    result.setData(prev => prev ? {
+      ...prev,
+      entries: prev.entries.filter(e => e.id !== entryId),
+    } : null);
+    try {
+      await deleteJournalEntry(entryId);
+    } finally {
+      result.reload();
+    }
   }, [result]);
 
   const saveEntry = useCallback(async (payload: Parameters<typeof createJournalEntry>[1]) => {
@@ -228,8 +244,15 @@ export function useSupplierBills() {
   );
 
   const markPaid = useCallback(async (billId: string) => {
-    await apiBillPaid(billId);
-    result.reload();
+    // Optimistic: flip status to 'paid' immediately so BillDrawer closes with correct state
+    result.setData(prev => prev?.map(b =>
+      b.id === billId ? { ...b, status: 'paid' as const } : b
+    ) ?? null);
+    try {
+      await apiBillPaid(billId);
+    } finally {
+      result.reload();
+    }
   }, [result]);
 
   const createBill = useCallback(async (bill: Omit<SupplierBill, 'id' | 'acctLines'>) => {
