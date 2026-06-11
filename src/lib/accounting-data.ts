@@ -239,8 +239,10 @@ export function clsOf(num: string): number {
   return parseInt(num[0], 10);
 }
 
+const ACCOUNTS_MAP: Map<string, Account> = new Map(ACCOUNTS.map(a => [a.num, a]));
+
 export function acctOf(num: string): Account | undefined {
-  return ACCOUNTS.find(a => a.num === num);
+  return ACCOUNTS_MAP.get(num);
 }
 
 export function openingOf(num: string): number {
