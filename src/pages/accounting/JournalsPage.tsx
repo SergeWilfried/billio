@@ -6,7 +6,7 @@ import DrawerPanel from '../../components/accounting/DrawerPanel';
 import JournalBadge from '../../components/accounting/JournalBadge';
 import { EmptyState } from '../../components/EmptyState';
 import StatusPill from '../../components/accounting/StatusPill';
-import type { JournalEntry, Journal } from '../../lib/accounting-data';
+import type { JournalEntry, Journal, Account } from '../../lib/accounting-data';
 import { fmt, fmtCompact, acctOf } from '../../lib/accounting-data';
 import { useJournalsData } from '../../lib/accounting-hooks';
 import { JournalsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
@@ -30,8 +30,8 @@ interface ComposerLine { acct: string; debit: string; credit: string }
 const EMPTY_LINE: ComposerLine = { acct: '', debit: '', credit: '' };
 
 function EntryDrawer({
-  entry, journals, onClose,
-}: { entry: JournalEntry; journals: Record<string, Journal>; onClose: () => void }) {
+  entry, journals, onClose, onPost,
+}: { entry: JournalEntry; journals: Record<string, Journal>; onClose: () => void; onPost: (id: string) => Promise<void> }) {
   const j = journals[entry.journal];
   const total = entryTotal(entry);
   const balanced = isBalanced(entry);
@@ -66,7 +66,11 @@ function EntryDrawer({
       </div>
 
       {!entry.posted && (
-        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}>
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}
+          onClick={() => onPost(entry.id).then(onClose)}
+        >
           <Icon name="check" />Comptabiliser
         </button>
       )}
@@ -74,13 +78,20 @@ function EntryDrawer({
   );
 }
 
-interface ComposerState { journal: string; label: string; piece: string; lines: ComposerLine[] }
+interface ComposerState { journal: string; date: string; label: string; piece: string; lines: ComposerLine[] }
 
 function Composer({
-  journals, onClose,
-}: { journals: Record<string, Journal>; onClose: () => void }) {
+  journals, accounts, onClose, onSave,
+}: {
+  journals: Record<string, Journal>;
+  accounts: Account[];
+  onClose: () => void;
+  onSave: (p: { journalId: string; periodId: string; date: string; piece: string; label: string; lines: Array<{ accountNum: string; debit: number; credit: number }> }) => Promise<void>;
+}) {
   const [state, setState] = useState<ComposerState>({
-    journal: Object.keys(journals)[0] ?? 'VE', label: '', piece: '', lines: [EMPTY_LINE, EMPTY_LINE],
+    journal: Object.keys(journals)[0] ?? 'VE',
+    date: new Date().toISOString().slice(0, 10),
+    label: '', piece: '', lines: [EMPTY_LINE, EMPTY_LINE],
   });
 
   const debitTotal  = state.lines.reduce((s, l) => s + (parseFloat(l.debit)  || 0), 0);
@@ -92,19 +103,34 @@ function Composer({
   const addLine    = () => setState(p => ({ ...p, lines: [...p.lines, EMPTY_LINE] }));
   const removeLine = (i: number) => setState(p => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }));
 
+  const acctLabel = (num: string) => {
+    const found = accounts.find(a => a.num === num);
+    return found?.label ?? acctOf(num)?.label ?? null;
+  };
+
+  const balanceStatus = debitTotal === 0 ? 'idle' : balanced ? 'ok' : 'err';
+
   return (
     <>
       <div className="acc-scrim open" onClick={onClose} />
-      <div style={{ position: 'absolute', top: 0, right: 0, width: 520, maxWidth: '95%', height: '100%', background: 'var(--color-background-primary)', boxShadow: 'var(--shadow-drawer)', zIndex: 31, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '18px 22px', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ position: 'absolute', top: 0, right: 0, width: 540, maxWidth: '96%', height: '100%', background: 'var(--color-background-primary)', boxShadow: 'var(--shadow-drawer)', zIndex: 31, display: 'flex', flexDirection: 'column' }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: '20px 24px 18px', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>Nouvelle écriture</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>Saisie manuelle double-entrée</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: 'var(--brand)', background: 'var(--brand-tint)', padding: '3px 8px', borderRadius: 6, marginBottom: 8 }}>
+              <Icon name="plus" size={11} />Nouvelle écriture
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.4, lineHeight: 1.2 }}>Saisie manuelle</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 3 }}>Double-entrée · SYSCOHADA</div>
           </div>
-          <button className="acc-drawer-close" onClick={onClose}><Icon name="x" size={16} /></button>
+          <button className="acc-drawer-close" onClick={onClose} style={{ marginTop: 2 }}><Icon name="x" size={16} /></button>
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+
+          {/* ── Row 1: Journal + Libellé ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label className="form-label">Journal</label>
               <select className="form-input" value={state.journal} onChange={e => setState(p => ({ ...p, journal: e.target.value }))}>
@@ -112,50 +138,145 @@ function Composer({
               </select>
             </div>
             <div>
+              <label className="form-label">Libellé</label>
+              <input className="form-input" value={state.label} onChange={e => setState(p => ({ ...p, label: e.target.value }))} placeholder="ex. Facture client — Orange" />
+            </div>
+          </div>
+
+          {/* ── Row 2: Date + Pièce ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 22 }}>
+            <div>
+              <label className="form-label">Date</label>
+              <input className="form-input" type="date" value={state.date} onChange={e => setState(p => ({ ...p, date: e.target.value }))} />
+            </div>
+            <div>
               <label className="form-label">Référence pièce</label>
               <input className="form-input" value={state.piece} onChange={e => setState(p => ({ ...p, piece: e.target.value }))} placeholder="ex. FACT-001" />
             </div>
           </div>
-          <div style={{ marginBottom: 18 }}>
-            <label className="form-label">Libellé</label>
-            <input className="form-input" value={state.label} onChange={e => setState(p => ({ ...p, label: e.target.value }))} placeholder="Description de l'écriture…" />
+
+          {/* ── Lines section ── */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: 'var(--color-text-tertiary)' }}>Lignes</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 32px', gap: 6, fontSize: 9, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--color-text-tertiary)', width: '100%', paddingLeft: 12 }}>
+              <span>Compte</span>
+              <span style={{ textAlign: 'right' }}>Débit</span>
+              <span style={{ textAlign: 'right' }}>Crédit</span>
+              <span />
+            </div>
           </div>
 
-          <div className="dsec-label"><Icon name="list" size={13} />Lignes d'écriture</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px 90px 28px', gap: 6, padding: '0 2px 7px', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-tertiary)', fontWeight: 600 }}>
-            <span>Compte</span><span>Libellé</span><span style={{ textAlign: 'right' }}>Débit</span><span style={{ textAlign: 'right' }}>Crédit</span><span />
+          <div style={{ border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', overflow: 'hidden', marginBottom: 10 }}>
+            {state.lines.map((line, i) => {
+              const label = acctLabel(line.acct);
+              return (
+                <div
+                  key={i}
+                  style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 32px', gap: 0, borderTop: i > 0 ? '0.5px solid var(--color-border-tertiary)' : 'none', alignItems: 'stretch' }}
+                >
+                  {/* Account cell */}
+                  <div style={{ borderRight: '0.5px solid var(--color-border-tertiary)', padding: '6px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
+                    <select
+                      className="form-input"
+                      style={{ fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono, monospace)', border: 'none', background: 'transparent', padding: '0', height: 'auto', color: line.acct ? 'var(--brand)' : 'var(--color-text-tertiary)' }}
+                      value={line.acct}
+                      onChange={e => setLine(i, 'acct', e.target.value)}
+                    >
+                      <option value="">Compte…</option>
+                      {accounts.map(a => (
+                        <option key={a.num} value={a.num}>{a.num} — {a.label}</option>
+                      ))}
+                    </select>
+                    {label && (
+                      <div style={{ fontSize: 10.5, color: 'var(--color-text-tertiary)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+                    )}
+                  </div>
+
+                  {/* Debit */}
+                  <div style={{ borderRight: '0.5px solid var(--color-border-tertiary)' }}>
+                    <input
+                      className="form-input"
+                      type="number" min="0"
+                      style={{ border: 'none', borderRadius: 0, textAlign: 'right', fontSize: 12.5, fontWeight: 600, height: '100%', background: 'transparent' }}
+                      value={line.debit}
+                      onChange={e => setLine(i, 'debit', e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  {/* Credit */}
+                  <div style={{ borderRight: '0.5px solid var(--color-border-tertiary)' }}>
+                    <input
+                      className="form-input"
+                      type="number" min="0"
+                      style={{ border: 'none', borderRadius: 0, textAlign: 'right', fontSize: 12.5, fontWeight: 600, height: '100%', background: 'transparent' }}
+                      value={line.credit}
+                      onChange={e => setLine(i, 'credit', e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => removeLine(i)}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-tertiary)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#FEF2F2'; e.currentTarget.style.color = '#A32D2D'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-tertiary)'; }}
+                  >
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
-          {state.lines.map((line, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px 90px 28px', gap: 6, marginBottom: 7, alignItems: 'center' }}>
-              <input className="form-input" style={{ fontSize: 12 }} value={line.acct} onChange={e => setLine(i, 'acct', e.target.value)} placeholder="401" />
-              <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', padding: '0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {acctOf(line.acct)?.label ?? (line.acct ? '—' : '')}
-              </div>
-              <input className="form-input" style={{ fontSize: 12, textAlign: 'right' }} value={line.debit}  onChange={e => setLine(i, 'debit',  e.target.value)} placeholder="0" />
-              <input className="form-input" style={{ fontSize: 12, textAlign: 'right' }} value={line.credit} onChange={e => setLine(i, 'credit', e.target.value)} placeholder="0" />
-              <button onClick={() => removeLine(i)} style={{ width: 28, height: 30, border: 'none', borderRadius: 6, background: 'transparent', cursor: 'pointer', color: 'var(--color-text-tertiary)', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#FCEBEB'; e.currentTarget.style.color = '#A32D2D'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-tertiary)'; }}>
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-          ))}
-          <button onClick={addLine} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)', cursor: 'pointer', padding: '7px 2px 3px', background: 'none', border: 'none', fontFamily: 'inherit' }}>
+
+          <button
+            onClick={addLine}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)', cursor: 'pointer', padding: '6px 2px', background: 'none', border: 'none', fontFamily: 'inherit' }}
+          >
             <Icon name="plus" size={14} />Ajouter une ligne
           </button>
 
-          <div className={`balance-banner ${balanced ? 'ok' : debitTotal > 0 ? 'err' : ''}`} style={{ marginTop: 16, background: debitTotal === 0 ? 'var(--color-background-secondary)' : undefined, color: debitTotal === 0 ? 'var(--color-text-secondary)' : undefined }}>
-            <Icon name={balanced ? 'circle-check' : debitTotal > 0 ? 'alert-triangle' : 'calculator'} size={16} />
-            <span>D {fmt(debitTotal)}</span>
-            <span style={{ opacity: 0.5 }}>/</span>
-            <span>C {fmt(creditTotal)}</span>
-            {balanced && <span style={{ marginLeft: 'auto', fontSize: 11 }}>✓ équilibré</span>}
+          {/* ── Balance banner ── */}
+          <div
+            style={{
+              marginTop: 16,
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '11px 14px', borderRadius: 'var(--border-radius-md)', fontSize: 12.5, fontWeight: 600,
+              ...(balanceStatus === 'ok'
+                ? { background: '#E7F3E2', color: '#2E7D32', border: '0.5px solid #A5D6A7' }
+                : balanceStatus === 'err'
+                ? { background: '#FEF2F2', color: '#A32D2D', border: '0.5px solid #FCCDD4' }
+                : { background: 'var(--color-background-secondary)', color: 'var(--color-text-secondary)', border: '0.5px solid var(--color-border-tertiary)' }),
+            }}
+          >
+            <Icon name={balanceStatus === 'ok' ? 'circle-check' : balanceStatus === 'err' ? 'alert-triangle' : 'calculator'} size={16} />
+            <span className="mono">Débit {fmt(debitTotal)}</span>
+            <span style={{ opacity: 0.4 }}>·</span>
+            <span className="mono">Crédit {fmt(creditTotal)}</span>
+            {balanced && <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700 }}>Équilibré ✓</span>}
           </div>
         </div>
-        <div style={{ padding: '14px 22px', borderTop: '0.5px solid var(--color-border-tertiary)', display: 'flex', gap: 9 }}>
+
+        {/* ── Footer ── */}
+        <div style={{ padding: '14px 24px', borderTop: '0.5px solid var(--color-border-tertiary)', display: 'flex', gap: 10 }}>
           <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Annuler</button>
-          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!balanced}>
-            <Icon name="check" />Enregistrer
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2, justifyContent: 'center' }}
+            disabled={!balanced}
+            onClick={() => onSave({
+              journalId: state.journal,
+              periodId: '',
+              date: state.date,
+              piece: state.piece,
+              label: state.label,
+              lines: state.lines
+                .filter(l => l.acct && (parseFloat(l.debit) > 0 || parseFloat(l.credit) > 0))
+                .map(l => ({ accountNum: l.acct, debit: parseFloat(l.debit) || 0, credit: parseFloat(l.credit) || 0 })),
+            }).then(onClose)}
+          >
+            <Icon name="check" size={15} />Enregistrer l'écriture
           </button>
         </div>
       </div>
@@ -164,7 +285,7 @@ function Composer({
 }
 
 export default function JournalsPage() {
-  const { data, loading } = useJournalsData(true);
+  const { data, loading, postEntry, saveEntry } = useJournalsData(true);
   const [activeJournal, setActiveJournal] = useState('all');
   const [selected, setSelected] = useState<JournalEntry | null>(null);
   const [showComposer, setShowComposer] = useState(false);
@@ -267,8 +388,8 @@ export default function JournalsPage() {
         </div>
       </div>
 
-      {selected  && <EntryDrawer entry={selected} journals={journals} onClose={() => setSelected(null)} />}
-      {showComposer && <Composer journals={journals} onClose={() => setShowComposer(false)} />}
+      {selected  && <EntryDrawer entry={selected} journals={journals} onClose={() => setSelected(null)} onPost={postEntry} />}
+      {showComposer && <Composer journals={journals} accounts={data?.accounts ?? []} onClose={() => setShowComposer(false)} onSave={saveEntry} />}
     </div>
   );
 }

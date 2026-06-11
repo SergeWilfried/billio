@@ -18,7 +18,10 @@ import {
   postJournalEntry,
   deleteJournalEntry,
   createJournalEntry,
+  createFixedAsset as apiCreateFixedAsset,
   markBillPaid as apiBillPaid,
+  createSupplierBill as apiCreateBill,
+  createAccount as apiCreateAccount,
   closeFiscalPeriod as apiClosePeriod,
 } from './api/accounting';
 import type { FiscalPeriod, AccountBalance } from './api/accounting';
@@ -73,7 +76,7 @@ export interface ChartData {
 
 export function useChartOfAccounts() {
   const { orgId } = useApp();
-  return useAsyncData<ChartData>(async () => {
+  const result = useAsyncData<ChartData>(async () => {
     const [classes, accounts, journals, opening, balances] = await Promise.all([
       fetchAccountClasses(),
       fetchAccounts(orgId),
@@ -83,6 +86,13 @@ export function useChartOfAccounts() {
     ]);
     return { classes, accounts, journals, opening, balances };
   }, [orgId]);
+
+  const addAccount = useCallback(async (account: Account) => {
+    await apiCreateAccount(orgId, account);
+    result.reload();
+  }, [orgId, result]);
+
+  return { ...result, addAccount };
 }
 
 // ─── Journals ────────────────────────────────────────────────────────────────
@@ -172,10 +182,17 @@ export function useFinancialStatements() {
 
 export function useFixedAssets() {
   const { orgId } = useApp();
-  return useAsyncData<FixedAsset[]>(
+  const result = useAsyncData<FixedAsset[]>(
     () => fetchFixedAssets(orgId),
     [orgId],
   );
+
+  const createAsset = useCallback(async (asset: Omit<FixedAsset, 'id'> & { id: string }) => {
+    await apiCreateFixedAsset(orgId, asset);
+    result.reload();
+  }, [orgId, result]);
+
+  return { ...result, createAsset };
 }
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
@@ -192,7 +209,12 @@ export function useSupplierBills() {
     result.reload();
   }, [result]);
 
-  return { ...result, markPaid };
+  const createBill = useCallback(async (bill: Omit<SupplierBill, 'id' | 'acctLines'>) => {
+    await apiCreateBill(orgId, bill);
+    result.reload();
+  }, [orgId, result]);
+
+  return { ...result, markPaid, createBill };
 }
 
 // ─── Tax ──────────────────────────────────────────────────────────────────────

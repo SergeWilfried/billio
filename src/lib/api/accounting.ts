@@ -383,3 +383,38 @@ export async function markBillPaid(billId: string): Promise<void> {
     .eq('id', billId);
   if (error) throw error;
 }
+
+export async function createSupplierBill(
+  orgId: string,
+  bill: Omit<SupplierBill, 'id' | 'acctLines'>,
+): Promise<void> {
+  if (MOCK) return;
+  const { error } = await supabase.from('supplier_bills').insert({
+    org_id:     orgId,
+    supplier:   bill.supplier,
+    city:       bill.city,
+    piece:      bill.piece,
+    date:       bill.date,
+    due_date:   bill.dueDate,
+    ht_amount:  bill.htAmount,
+    tva_amount: bill.tvaAmount,
+    status:     'open',
+  });
+  if (error) throw error;
+}
+
+// ─── Accounts (custom / org-level) ────────────────────────────────────────────
+
+export async function createAccount(
+  orgId: string,
+  account: Account,
+): Promise<void> {
+  if (MOCK) return;
+  const { error } = await supabase.from('accounts').insert({
+    num:    account.num,
+    label:  account.label,
+    nature: account.nature,
+    org_id: orgId,
+  });
+  if (error) throw error;
+}
