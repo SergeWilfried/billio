@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
 import StatusPill from '../../components/accounting/StatusPill';
@@ -75,7 +76,7 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
         ].map(({ label, value, bold, highlight }) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '0.5px solid var(--color-border-tertiary)', background: highlight ? 'var(--brand-tint)' : 'transparent', fontWeight: bold ? 700 : 400, fontSize: 13 }}>
             <span style={{ color: highlight ? 'var(--brand-dark)' : 'var(--color-text-secondary)' }}>{label}</span>
-            <span className="mono">{fmt(value)} XOF</span>
+            <span className="mono">{fmt(value)} F CFA</span>
           </div>
         ))}
       </div>
@@ -126,12 +127,7 @@ export default function SuppliersPage() {
     return m;
   }, [supplierBills]);
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Fournisseurs</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Fournisseurs" variant="accounting" rows={6} />;
 
   return (
     <div className="main" style={{ position: 'relative' }}>
@@ -151,9 +147,9 @@ export default function SuppliersPage() {
 
       <div className="content">
         <KPIStrip items={[
-          { icon: 'truck-delivery', iconBg: '#FCEFE0', iconColor: '#B26A09', label: 'Total à payer', value: fmtCompact(totalPayable), unit: 'XOF', sub: `${supplierBills.filter(b => b.status !== 'paid').length} factures ouvertes` },
-          { icon: 'clock-pause', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Échéances ≤ 7j', value: fmtCompact(dueSoon), unit: 'XOF', sub: 'Règlements urgents' },
-          { icon: 'alert-triangle', iconBg: '#FCEBEB', iconColor: '#A32D2D', label: 'En retard', value: fmtCompact(overdue), unit: 'XOF', sub: 'Dépassement d\'échéance' },
+          { icon: 'truck-delivery', iconBg: '#FCEFE0', iconColor: '#B26A09', label: 'Total à payer', value: fmtCompact(totalPayable), unit: 'F CFA', sub: `${supplierBills.filter(b => b.status !== 'paid').length} factures ouvertes` },
+          { icon: 'clock-pause', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Échéances ≤ 7j', value: fmtCompact(dueSoon), unit: 'F CFA', sub: 'Règlements urgents' },
+          { icon: 'alert-triangle', iconBg: '#FCEBEB', iconColor: '#A32D2D', label: 'En retard', value: fmtCompact(overdue), unit: 'F CFA', sub: 'Dépassement d\'échéance' },
           { icon: 'users', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Fournisseurs actifs', value: suppCount, sub: 'Fournisseurs uniques' },
         ]} />
 
@@ -209,7 +205,7 @@ export default function SuppliersPage() {
                   <div style={{ fontSize: 12.5, textAlign: 'right' }}>
                     <div style={{ fontWeight: 500 }}>{bill.dueDate}</div>
                   </div>
-                  <div className="mono" style={{ textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{fmt(ttc)} <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)' }}>XOF</span></div>
+                  <div className="mono" style={{ textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{fmt(ttc)} <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)' }}>F CFA</span></div>
                   <div style={{ textAlign: 'right' }}><StatusPill status={bill.status} /></div>
                   <div style={{ textAlign: 'right' }}>
                     {bill.status === 'overdue' && <span style={{ fontSize: 11.5, fontWeight: 700, color: '#A32D2D' }}>{Math.abs(days)} j.</span>}

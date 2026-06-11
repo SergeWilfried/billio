@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
 import JournalBadge from '../../components/accounting/JournalBadge';
@@ -61,7 +62,7 @@ function EntryDrawer({
 
       <div className={`balance-banner ${balanced ? 'ok' : 'err'}`}>
         <Icon name={balanced ? 'circle-check' : 'alert-triangle'} size={16} />
-        {balanced ? `Écriture équilibrée · ${fmt(total)} XOF` : 'Écriture déséquilibrée'}
+        {balanced ? `Écriture équilibrée · ${fmt(total)} F CFA` : 'Écriture déséquilibrée'}
       </div>
 
       {!entry.posted && (
@@ -186,12 +187,7 @@ export default function JournalsPage() {
     return m;
   }, [entries]);
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Journaux comptables</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Journaux comptables" variant="accounting" rows={6} />;
 
   return (
     <div className="main" style={{ position: 'relative' }}>
@@ -213,7 +209,7 @@ export default function JournalsPage() {
       <div className="content">
         <KPIStrip items={[
           { icon: 'notebook', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Écritures', value: entries.length, sub: `${postedCount} comptabilisées` },
-          { icon: 'trending-up', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: 'Mouvement total', value: fmtCompact(totalMvt), unit: 'XOF', sub: 'Débit total comptabilisé' },
+          { icon: 'trending-up', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: 'Mouvement total', value: fmtCompact(totalMvt), unit: 'F CFA', sub: 'Débit total comptabilisé' },
           { icon: 'edit', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Brouillons', value: draftCount, sub: 'En attente de comptabilisation' },
           { icon: allBalanced ? 'circle-check' : 'alert-triangle', iconBg: allBalanced ? '#E7F3E2' : '#FCEBEB', iconColor: allBalanced ? '#2E7D32' : '#A32D2D', label: 'Contrôle', value: allBalanced ? 'OK' : 'Erreur', sub: 'Équilibre des écritures' },
         ]} />

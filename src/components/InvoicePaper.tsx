@@ -21,31 +21,35 @@ export interface PaperConfig {
 }
 
 export interface BizInfo {
-  name:    string;
-  address: string;
-  city:    string;
-  country: string;
-  email:   string;
-  phone:   string;
-  ifu:     string;
-  rccm:    string;
+  name:            string;
+  address:         string;
+  city:            string;
+  country:         string;
+  email:           string;
+  phone:           string;
+  ifu:             string;
+  rccm:            string;
+  taxRegime?:      string;
+  divisionFiscale?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Mock fallback data (used when no biz prop supplied)
 // ---------------------------------------------------------------------------
 const MOCK_BIZ: BizInfo = {
-  name:    'Studio Wend SARL',
-  address: 'Av. Kwame Nkrumah · Ouagadougou, BF',
-  city:    'Ouagadougou',
-  country: 'Burkina Faso',
-  email:   'contact@studiowend.bf',
-  phone:   '+226 70 12 34 56',
-  ifu:     '00012345 B',
-  rccm:    'BF-OUA-2021-B-1234',
+  name:            'Studio Wend SARL',
+  address:         'Av. Kwame Nkrumah · Ouagadougou, BF',
+  city:            'Ouagadougou',
+  country:         'Burkina Faso',
+  email:           'contact@studiowend.bf',
+  phone:           '+226 70 12 34 56',
+  ifu:             '00012345 B',
+  rccm:            'BF-OUA-2021-B-1234',
+  taxRegime:       'RNI',
+  divisionFiscale: 'Ouagadougou I',
 };
 
-const CLI   = { name: 'TechKonsult', city: 'Ouagadougou, Burkina Faso', ifu: '00067890 C', rccm: 'BF-OUA-2020-B-5678' };
+const CLI   = { name: 'TechKonsult', city: 'Ouagadougou, Burkina Faso', ifu: '00067890 C', rccm: 'BF-OUA-2020-B-5678', taxRegime: 'RSI' };
 const INV   = { id: 'INV-0041', issued: '7 juin 2026', due: '21 juin 2026', subject: 'Refonte web — phase 2' };
 const LINES = [
   { desc: 'UI/UX design — phase 2', note: 'Wireframes, hi-fi screens', qty: 1, price: 300_000 },
@@ -65,11 +69,13 @@ function BizMeta({ biz }: { biz: BizInfo }) {
   const addr = [biz.address, biz.city, biz.country].filter(Boolean).join(', ');
   const contact = [biz.email, biz.phone].filter(Boolean).join(' · ');
   const compliance = [biz.ifu && `IFU ${biz.ifu}`, biz.rccm && `RCCM ${biz.rccm}`].filter(Boolean).join(' · ');
+  const fiscal = [biz.taxRegime && `${biz.taxRegime}`, biz.divisionFiscale && `${biz.divisionFiscale}`].filter(Boolean).join(' · ');
   return (
     <>
       {addr && <>{addr}<br /></>}
       {contact && <>{contact}<br /></>}
-      {compliance && <span className="tp-compliance-ids-inline">{compliance}</span>}
+      {compliance && <><span className="tp-compliance-ids-inline">{compliance}</span><br /></>}
+      {fiscal && <span className="tp-compliance-ids-inline">{fiscal}</span>}
     </>
   );
 }
@@ -84,10 +90,11 @@ function Parties() {
         <div className="tp-block-label">Facturé à</div>
         <div className="tp-client-name">{CLI.name}</div>
         <div className="tp-client-meta">{CLI.city}</div>
-        {(CLI.ifu || CLI.rccm) && (
+        {(CLI.ifu || CLI.rccm || CLI.taxRegime) && (
           <div className="tp-compliance-ids">
-            {CLI.ifu  && <span>IFU {CLI.ifu}</span>}
-            {CLI.rccm && <span>RCCM {CLI.rccm}</span>}
+            {CLI.ifu       && <span>IFU {CLI.ifu}</span>}
+            {CLI.rccm      && <span>RCCM {CLI.rccm}</span>}
+            {CLI.taxRegime && <span>{CLI.taxRegime}</span>}
           </div>
         )}
       </div>
@@ -135,11 +142,11 @@ function Totals({ cfg }: { cfg: PaperConfig }) {
   return (
     <div className="tp-totals">
       <div className="tp-tot-inner">
-        <div className="tp-tot-row"><span>Sous-total</span><span>{fmt(SUB)} XOF</span></div>
-        {cfg.showTax && <div className="tp-tot-row"><span>TVA (18 %)</span><span>{fmt(TAX)} XOF</span></div>}
-        {cfg.showDiscount && <div className="tp-tot-row"><span>Remise</span><span>0 XOF</span></div>}
+        <div className="tp-tot-row"><span>Sous-total</span><span>{fmt(SUB)} F CFA</span></div>
+        {cfg.showTax && <div className="tp-tot-row"><span>TVA (18 %)</span><span>{fmt(TAX)} F CFA</span></div>}
+        {cfg.showDiscount && <div className="tp-tot-row"><span>Remise</span><span>0 F CFA</span></div>}
         <div className={`tp-tot-grand ${cfg.totalStyle}`}>
-          <span>Total dû</span><span>{fmt(TOTAL)} XOF</span>
+          <span>Total dû</span><span>{fmt(TOTAL)} F CFA</span>
         </div>
       </div>
     </div>
@@ -219,7 +226,12 @@ function ClassicBody({ cfg, biz }: { cfg: PaperConfig; biz: BizInfo }) {
 function BandBody({ cfg, biz }: { cfg: PaperConfig; biz: BizInfo }) {
   const resolved = biz.name ? biz : MOCK_BIZ;
   const addr = [resolved.address, resolved.city].filter(Boolean).join(', ');
-  const compliance = [resolved.ifu && `IFU ${resolved.ifu}`, resolved.rccm && `RCCM ${resolved.rccm}`].filter(Boolean).join(' · ');
+  const compliance = [
+    resolved.ifu && `IFU ${resolved.ifu}`,
+    resolved.rccm && `RCCM ${resolved.rccm}`,
+    resolved.taxRegime && `${resolved.taxRegime}`,
+    resolved.divisionFiscale && `${resolved.divisionFiscale}`,
+  ].filter(Boolean).join(' · ');
   return (
     <>
       <div className="tp-band">
@@ -293,7 +305,7 @@ function SidebarBody({ cfg, biz }: { cfg: PaperConfig; biz: BizInfo }) {
         <div className="tp-aside-meta"><BizMeta biz={resolved} /></div>
         <div className="tp-aside-sep" />
         <div className="tp-aside-label">Total dû</div>
-        <div className="tp-aside-total">{fmt(TOTAL)}<span>XOF</span></div>
+        <div className="tp-aside-total">{fmt(TOTAL)}<span>F CFA</span></div>
         <div className="tp-aside-due">Éch. {INV.due}</div>
         <div className="tp-aside-sep" />
         <div className="tp-aside-label">Paiement</div>
@@ -325,7 +337,12 @@ function SidebarBody({ cfg, biz }: { cfg: PaperConfig; biz: BizInfo }) {
 function ReceiptBody({ cfg, biz }: { cfg: PaperConfig; biz: BizInfo }) {
   const resolved = biz.name ? biz : MOCK_BIZ;
   const addr = [resolved.address, resolved.city].filter(Boolean).join(', ');
-  const compliance = [resolved.ifu && `IFU ${resolved.ifu}`, resolved.rccm && `RCCM ${resolved.rccm}`].filter(Boolean).join(' · ');
+  const compliance = [
+    resolved.ifu && `IFU ${resolved.ifu}`,
+    resolved.rccm && `RCCM ${resolved.rccm}`,
+    resolved.taxRegime && `${resolved.taxRegime}`,
+    resolved.divisionFiscale && `${resolved.divisionFiscale}`,
+  ].filter(Boolean).join(' · ');
   return (
     <div className="tp-rcpt">
       <div className="tp-rcpt-head">
@@ -348,18 +365,18 @@ function ReceiptBody({ cfg, biz }: { cfg: PaperConfig; biz: BizInfo }) {
       {LINES.map((l, i) => (
         <div key={i} className="tp-rcpt-item">
           <div className="tp-rcpt-item-name">{l.desc}</div>
-          <div className="tp-rcpt-item-amt">{fmt(l.qty * l.price)} XOF</div>
+          <div className="tp-rcpt-item-amt">{fmt(l.qty * l.price)} F CFA</div>
           <div className="tp-rcpt-item-sub">{l.note} {cfg.showQty ? `(×${l.qty})` : ''}</div>
         </div>
       ))}
       <div className="tp-rcpt-divider" />
       {cfg.showTax && (
         <div className="tp-rcpt-row">
-          <span>TVA (18 %)</span><span>{fmt(TAX)} XOF</span>
+          <span>TVA (18 %)</span><span>{fmt(TAX)} F CFA</span>
         </div>
       )}
       <div className="tp-rcpt-total">
-        <span>Total dû</span><span>{fmt(TOTAL)} XOF</span>
+        <span>Total dû</span><span>{fmt(TOTAL)} F CFA</span>
       </div>
       <div className="tp-rcpt-divider dashed" />
       <div className="tp-rcpt-pay">Mobile Money · Wave · Virement bancaire</div>

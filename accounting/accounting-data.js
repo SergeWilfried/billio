@@ -1,7 +1,7 @@
 /* ============================================================
    Billio — shared accounting data (SYSCOHADA, Système Normal)
    One source of truth: balanced journal entries → ledger → trial balance.
-   Single entity · Studio Wend SARL · exercice 2026 · XOF
+   Single entity · Studio Wend SARL · exercice 2026 · F CFA
    ============================================================ */
 (function () {
   "use strict";

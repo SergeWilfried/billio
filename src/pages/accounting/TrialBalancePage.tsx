@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react';
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
 import JournalBadge from '../../components/accounting/JournalBadge';
 import { EmptyState } from '../../components/EmptyState';
+import { AccountMovementsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 import type { Account, AccountClass, Journal } from '../../lib/accounting-data';
 import { fmt, fmtCompact, clsOf, movementsOf, closingSigned, openingOf, ledgerOf } from '../../lib/accounting-data';
 import { useTrialBalance } from '../../lib/accounting-hooks';
@@ -40,8 +42,7 @@ function LedgerDrawer({
 
       {ledger.length === 0 ? (
         <EmptyState
-          variant="compact"
-          icon={<Icon name="book-2" size={24} />}
+          illustration={<AccountMovementsEmptyIllustration />}
           title="Aucun mouvement"
           description="Ce compte n'a pas encore de mouvements enregistrés."
         />
@@ -110,12 +111,7 @@ export default function TrialBalancePage() {
 
   const result = totalCreditClose - totalDebitClose;
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Balance générale</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Balance générale" variant="accounting" rows={8} />;
 
   return (
     <div className="main" style={{ position: 'relative' }}>
@@ -141,16 +137,16 @@ export default function TrialBalancePage() {
 
       <div className="content">
         <KPIStrip items={[
-          { icon: 'trending-up', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Mouvement total', value: fmtCompact(totalDebitMvt), unit: 'XOF', sub: 'Débit = Crédit' },
+          { icon: 'trending-up', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Mouvement total', value: fmtCompact(totalDebitMvt), unit: 'F CFA', sub: 'Débit = Crédit' },
           { icon: 'book-2', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'Comptes actifs', value: activeAccounts.length, sub: `${Object.keys(byClass).length} classes` },
-          { icon: 'chart-bar', iconBg: result >= 0 ? '#E7F3E2' : '#FCEBEB', iconColor: result >= 0 ? '#2E7D32' : '#A32D2D', label: 'Résultat', value: fmtCompact(Math.abs(result)), unit: 'XOF', sub: result >= 0 ? 'Bénéfice net' : 'Perte nette' },
+          { icon: 'chart-bar', iconBg: result >= 0 ? '#E7F3E2' : '#FCEBEB', iconColor: result >= 0 ? '#2E7D32' : '#A32D2D', label: 'Résultat', value: fmtCompact(Math.abs(result)), unit: 'F CFA', sub: result >= 0 ? 'Bénéfice net' : 'Perte nette' },
           { icon: isTied ? 'circle-check' : 'alert-triangle', iconBg: isTied ? '#E7F3E2' : '#FCEBEB', iconColor: isTied ? '#2E7D32' : '#A32D2D', label: 'Équilibre', value: isTied ? 'Vérifié' : 'Erreur', sub: isTied ? 'Actif = Passif' : 'Déséquilibre détecté' },
         ]} />
 
         {isTied && (
           <div className="tie-banner">
             <Icon name="circle-check" size={16} />
-            Balance équilibrée · Total actif {fmt(totalDebitClose)} XOF = Total passif {fmt(totalCreditClose)} XOF
+            Balance équilibrée · Total actif {fmt(totalDebitClose)} F CFA = Total passif {fmt(totalCreditClose)} F CFA
           </div>
         )}
 

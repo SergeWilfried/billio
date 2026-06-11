@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
+import { TemplatesEmptyIllustration } from '../components/PageEmptyIllustrations';
 import InvoicePaper from '../components/InvoicePaper';
 import type { PaperConfig, PaperLayout, PaperDensity, TableStyle, TotalStyle, BizInfo } from '../components/InvoicePaper';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
@@ -423,7 +425,9 @@ function EditorControls({ cfg, onChange }: { cfg: PaperConfig; onChange: (c: Pap
 type View = 'gallery' | { kind: 'editor'; id: string };
 
 export default function TemplatesPage() {
-  const { orgSettings } = useApp();
+  const { orgSettings, loading } = useApp();
+
+  if (loading) return <PageSkeleton title="Modèles de factures" subtitle="Personnalisez vos modèles" variant="table-only" rows={4} />;
   const [templates, setTemplates] = useState<Template[]>(INITIAL_TEMPLATES);
   const [view, setView] = useState<View>('gallery');
   const [zoom, setZoom] = useState(100);
@@ -534,8 +538,7 @@ export default function TemplatesPage() {
                 {templates.length === 0 && (
                   <div style={{ gridColumn: '1 / -1' }}>
                     <EmptyState
-                      variant="compact"
-                      icon={<Icon name="sparkles" size={24} ariaHidden />}
+                      illustration={<TemplatesEmptyIllustration />}
                       title="Aucun modèle"
                       description="Vous n'avez pas encore de modèles. Créez-en un pour gagner du temps."
                     />

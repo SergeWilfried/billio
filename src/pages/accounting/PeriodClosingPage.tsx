@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import { closingSigned, fmt } from '../../lib/accounting-data';
 import { usePeriodClosing } from '../../lib/accounting-hooks';
 
@@ -88,12 +89,7 @@ export default function PeriodClosingPage() {
     return produits - charges;
   }, []);
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Clôture de période</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Clôture de période" variant="accounting" rows={5} />;
 
   const CARD = {
     background: 'var(--color-background-primary)',
@@ -247,12 +243,12 @@ export default function PeriodClosingPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '7px 0 9px', fontWeight: 700, borderBottom: '0.5px solid var(--color-border-tertiary)', marginBottom: 3, fontSize: 12.5 }}>
                     <span>Résultat de l'exercice (à ce jour)</span>
                     <span className="mono" style={{ fontWeight: 700, color: result >= 0 ? '#2E7D32' : '#A32D2D' }}>
-                      {result >= 0 ? '+' : ''}{fmt(result)} XOF
+                      {result >= 0 ? '+' : ''}{fmt(result)} F CFA
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '7px 0', fontSize: 12.5 }}>
                     <span style={{ color: 'var(--color-text-secondary)' }}>Report à nouveau d'ouverture</span>
-                    <span className="mono" style={{ fontWeight: 700 }}>870 000 XOF</span>
+                    <span className="mono" style={{ fontWeight: 700 }}>870 000 F CFA</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--color-border-tertiary)' }}>
                     <Icon name="arrows-exchange" size={15} />

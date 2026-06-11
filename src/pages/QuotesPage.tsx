@@ -1,8 +1,11 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
+import { QuotesEmptyIllustration } from '../components/PageEmptyIllustrations';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { createQuote, updateQuote } from '../lib/api/quotes';
+import { saveLineItems } from '../lib/api/line-items';
 import { fmt, fmtDate, newLineItem } from '../data';
 import type { LineItem, QuoteStatus, Quote } from '../lib/schemas';
 
@@ -41,7 +44,9 @@ function fmtCompact(n: number) {
 const TVA = 0.18;
 
 export default function QuotesPage() {
-  const { showToast, quotes, setQuotes, clientsMap, userId } = useApp();
+  const { showToast, quotes, setQuotes, clientsMap, userId, orgId, loading } = useApp();
+
+  if (loading) return <PageSkeleton title="Devis" subtitle="Gérez vos devis" metrics={0} rows={6} />;
   const [filter, setFilter] = useState<FilterKey>('all');
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -110,7 +115,8 @@ export default function QuotesPage() {
     const payload = { id, subject: fSubject.trim() || 'Devis sans titre', client: fClient, issued: fDate, valid: fValid, amount: total, status };
     const newQuote: Quote = { ...payload, expSoon: status === 'sent' };
     setQuotes(prev => [newQuote, ...prev]);
-    await createQuote(userId, payload);
+    await createQuote(orgId, payload);
+    await saveLineItems(orgId, lines, { quoteId: id });
     closePanel();
     showToast(status === 'sent' ? `Devis ${id} envoyé à ${cName}` : `Brouillon ${id} enregistré`);
   }
@@ -153,7 +159,7 @@ export default function QuotesPage() {
                 <div className="metric-label">Devisé (90 jours)</div>
               </div>
               <div className="metric-value tnum">
-                {fmtCompact(totalQuoted)}<span className="metric-unit">XOF</span>
+                {fmtCompact(totalQuoted)}<span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change">
                 <span className="up"><Icon name="trending-up" size={13} /> +8% vs trimestre dernier</span>
@@ -166,7 +172,7 @@ export default function QuotesPage() {
                 <div className="metric-label">En attente de réponse</div>
               </div>
               <div className="metric-value tnum">
-                {fmtCompact(openVal)}<span className="metric-unit">XOF</span>
+                {fmtCompact(openVal)}<span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">
                 {openCount} devis en attente
@@ -192,7 +198,7 @@ export default function QuotesPage() {
                 <div className="metric-label">Acceptés</div>
               </div>
               <div className="metric-value tnum">
-                {fmtCompact(acceptedVal)}<span className="metric-unit">XOF</span>
+                {fmtCompact(acceptedVal)}<span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">prêt à facturer</div>
             </div>
@@ -227,8 +233,7 @@ export default function QuotesPage() {
 
             {filtered.length === 0 ? (
               <EmptyState
-                variant="compact"
-                icon={<Icon name="file-text" size={24} ariaHidden />}
+                illustration={<QuotesEmptyIllustration />}
                 title="Aucun devis"
                 description="Aucun devis dans cette catégorie. Créez un devis pour commencer."
               />
@@ -265,7 +270,7 @@ export default function QuotesPage() {
 
                     {/* Amount */}
                     <div className="amount tnum" style={{ textAlign: 'right' }}>
-                      {fmt(q.amount)}<span className="cur">XOF</span>
+                      {fmt(q.amount)}<span className="cur">F CFA</span>
                     </div>
 
                     {/* Status */}
@@ -415,15 +420,15 @@ export default function QuotesPage() {
           <div className="total-block">
             <div className="total-row">
               <span>Sous-total</span>
-              <span>{fmt(subtotal)} XOF</span>
+              <span>{fmt(subtotal)} F CFA</span>
             </div>
             <div className="total-row">
               <span>TVA (18%)</span>
-              <span>{fmt(tax)} XOF</span>
+              <span>{fmt(tax)} F CFA</span>
             </div>
             <div className="total-row final">
               <span>Total estimé</span>
-              <span>{fmt(total)} XOF</span>
+              <span>{fmt(total)} F CFA</span>
             </div>
           </div>
         </div>

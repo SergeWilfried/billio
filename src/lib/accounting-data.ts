@@ -1,6 +1,6 @@
 /* ============================================================
    Billio — accounting data (SYSCOHADA, Système Normal)
-   Single entity · Studio Wend SARL · exercice 2026 · XOF
+   Single entity · Studio Wend SARL · exercice 2026 · F CFA
    ============================================================ */
 
 export interface AccountClass {

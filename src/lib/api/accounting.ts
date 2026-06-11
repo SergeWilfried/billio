@@ -341,7 +341,7 @@ export async function createFixedAsset(
 ): Promise<void> {
   if (MOCK) return;
   const { error } = await supabase.from('fixed_assets').insert({
-    id:                orgId,
+    id:                asset.id,
     org_id:            orgId,
     name:              asset.name,
     account_num:       asset.acct,

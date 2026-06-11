@@ -4,7 +4,7 @@ import type { ClientRecord } from '../schemas';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
-function dbToClient(row: Record<string, unknown>): ClientRecord {
+export function dbToClient(row: Record<string, unknown>): ClientRecord {
   return {
     code:     String(row.code),
     av:       String(row.av ?? 'av-a'),
@@ -13,8 +13,9 @@ function dbToClient(row: Record<string, unknown>): ClientRecord {
     email:    String(row.email ?? '—'),
     phone:    String(row.phone ?? '—'),
     city:     String(row.city ?? '—'),
-    ifu:      String(row.ifu ?? ''),
-    rccm:     String(row.rccm ?? ''),
+    ifu:       String(row.ifu ?? ''),
+    rccm:      String(row.rccm ?? ''),
+    taxRegime: String(row.tax_regime ?? ''),
     invoices: Number(row.invoices_count ?? 0),
     billed:   Number(row.billed ?? 0),
     balance:  Number(row.balance ?? 0),
@@ -22,11 +23,12 @@ function dbToClient(row: Record<string, unknown>): ClientRecord {
   };
 }
 
-export async function fetchClients(_orgId: string): Promise<ClientRecord[]> {
+export async function fetchClients(orgId: string): Promise<ClientRecord[]> {
   if (MOCK) return [...INITIAL_CLIENTS];
   const { data, error } = await supabase
     .from('clients')
     .select('*')
+    .eq('org_id', orgId)
     .order('name', { ascending: true });
   if (error) throw error;
   return (data ?? []).map(dbToClient);
@@ -50,6 +52,7 @@ export async function createClient(
       city:           payload.city,
       ifu:            payload.ifu ?? '',
       rccm:           payload.rccm ?? '',
+      tax_regime:     payload.taxRegime ?? '',
       status:         payload.status,
       invoices_count: 0,
       billed:         0,
@@ -63,6 +66,24 @@ export async function createClient(
 
 export async function updateClient(code: string, patch: Partial<ClientRecord>): Promise<void> {
   if (MOCK) return;
-  const { error } = await supabase.from('clients').update(patch).eq('code', code);
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.name      !== undefined) dbPatch.name           = patch.name;
+  if (patch.av        !== undefined) dbPatch.av             = patch.av;
+  if (patch.contact   !== undefined) dbPatch.contact        = patch.contact;
+  if (patch.email     !== undefined) dbPatch.email          = patch.email;
+  if (patch.phone     !== undefined) dbPatch.phone          = patch.phone;
+  if (patch.city      !== undefined) dbPatch.city           = patch.city;
+  if (patch.ifu       !== undefined) dbPatch.ifu            = patch.ifu;
+  if (patch.rccm      !== undefined) dbPatch.rccm           = patch.rccm;
+  if (patch.taxRegime !== undefined) dbPatch.tax_regime     = patch.taxRegime;
+  if (patch.status    !== undefined) dbPatch.status         = patch.status;
+  if (Object.keys(dbPatch).length === 0) return;
+  const { error } = await supabase.from('clients').update(dbPatch).eq('code', code);
+  if (error) throw error;
+}
+
+export async function removeClient(code: string): Promise<void> {
+  if (MOCK) return;
+  const { error } = await supabase.from('clients').delete().eq('code', code);
   if (error) throw error;
 }

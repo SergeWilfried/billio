@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { EmptyState, EmptyInline } from '../components/EmptyState';
+import { ClientsEmptyIllustration } from '../components/PageEmptyIllustrations';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { createClient } from '../lib/api/clients';
 import { fmt } from '../data';
@@ -36,7 +38,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 const EMPTY_FORM: NewClientForm = {
-  name: '', contact: '', email: '', phone: '', city: '', status: 'active', ifu: '', rccm: '',
+  name: '', contact: '', email: '', phone: '', city: '', status: 'active', ifu: '', rccm: '', taxRegime: '',
 };
 
 function fmtCompact(n: number) {
@@ -46,7 +48,9 @@ function fmtCompact(n: number) {
 }
 
 export default function ClientsPage() {
-  const { clients, setClients, invoices, userId } = useApp();
+  const { clients, setClients, invoices, orgId, loading } = useApp();
+
+  if (loading) return <PageSkeleton title="Clients" subtitle="Gérez vos clients" variant="table-only" rows={6} />;
   const [filter, setFilter]   = useState<FilterKey>('all');
   const [search, setSearch]   = useState('');
   const [panel, setPanel]     = useState<null | { kind: 'detail'; code: string } | { kind: 'new' }>(null);
@@ -97,11 +101,11 @@ export default function ClientsPage() {
       code, av: avs[clients.length % avs.length],
       name: form.name, contact: form.contact || '—',
       email: form.email || '—', phone: form.phone || '—',
-      city: form.city || '—', ifu: form.ifu, rccm: form.rccm,
+      city: form.city || '—', ifu: form.ifu, rccm: form.rccm, taxRegime: form.taxRegime,
       status: form.status,
     };
     setClients(prev => [{ ...payload, invoices: 0, billed: 0, balance: 0 }, ...prev]);
-    await createClient(userId, payload);
+    await createClient(orgId, payload);
     setForm(EMPTY_FORM);
     closePanel();
   }
@@ -148,7 +152,7 @@ export default function ClientsPage() {
                 <div className="metric-label">Total facturé</div>
               </div>
               <div className="metric-value">
-                {fmtCompact(totalBilled)}<span className="metric-unit">XOF</span>
+                {fmtCompact(totalBilled)}<span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">revenu cumulé</div>
             </div>
@@ -158,7 +162,7 @@ export default function ClientsPage() {
                 <div className="metric-label">Solde impayé</div>
               </div>
               <div className="metric-value">
-                {fmtCompact(outstanding)}<span className="metric-unit">XOF</span>
+                {fmtCompact(outstanding)}<span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">{withBalance} client{withBalance !== 1 ? 's' : ''} avec solde</div>
             </div>
@@ -204,8 +208,7 @@ export default function ClientsPage() {
 
             {filtered.length === 0 ? (
               <EmptyState
-                variant="compact"
-                icon={<Icon name="users" size={24} ariaHidden />}
+                illustration={<ClientsEmptyIllustration />}
                 title="Aucun client trouvé"
                 description="Aucun client ne correspond à votre recherche. Essayez d'autres termes."
               />
@@ -239,10 +242,10 @@ export default function ClientsPage() {
                   {/* Billed */}
                   <div style={{ textAlign: 'right' }}>
                     <div className="billed tnum">
-                      {fmt(cl.billed)}<span className="cur">XOF</span>
+                      {fmt(cl.billed)}<span className="cur">F CFA</span>
                     </div>
                     {cl.balance > 0
-                      ? <div className="billed-sub bal">{fmt(cl.balance)} XOF dû</div>
+                      ? <div className="billed-sub bal">{fmt(cl.balance)} F CFA dû</div>
                       : cl.billed > 0
                         ? <div className="billed-sub clear">Tout réglé</div>
                         : <div className="billed-sub" style={{ color: 'var(--color-text-tertiary)' }}>Aucune facture</div>
@@ -299,13 +302,13 @@ export default function ClientsPage() {
                 <div className="stat-box">
                   <div className="stat-label">Total facturé</div>
                   <div className="stat-val tnum">
-                    {fmtCompact(detailClient.billed)}<span className="cur">XOF</span>
+                    {fmtCompact(detailClient.billed)}<span className="cur">F CFA</span>
                   </div>
                 </div>
                 <div className="stat-box">
                   <div className="stat-label">Solde impayé</div>
                   <div className={'stat-val tnum' + (detailClient.balance > 0 ? ' bal' : '')}>
-                    {fmtCompact(detailClient.balance)}<span className="cur">XOF</span>
+                    {fmtCompact(detailClient.balance)}<span className="cur">F CFA</span>
                   </div>
                 </div>
               </div>
@@ -328,7 +331,7 @@ export default function ClientsPage() {
               </div>
 
               {/* Identifiants fiscaux */}
-              {(detailClient.ifu || detailClient.rccm) && (
+              {(detailClient.ifu || detailClient.rccm || detailClient.taxRegime) && (
                 <div className="detail-block">
                   <div className="detail-block-title">Identifiants fiscaux</div>
                   {detailClient.ifu && (
@@ -341,6 +344,12 @@ export default function ClientsPage() {
                     <div className="contact-line">
                       <Icon name="building" size={16} />
                       <span>RCCM&nbsp;<strong>{detailClient.rccm}</strong></span>
+                    </div>
+                  )}
+                  {detailClient.taxRegime && (
+                    <div className="contact-line">
+                      <Icon name="tag" size={16} />
+                      <span>Régime&nbsp;<strong>{detailClient.taxRegime}</strong></span>
                     </div>
                   )}
                 </div>
@@ -363,7 +372,7 @@ export default function ClientsPage() {
                           <div className="mini-id">#{inv.id}</div>
                           <div className="mini-sub">{inv.sub}</div>
                         </div>
-                        <div className="mini-amt">{fmt(inv.amt)} XOF</div>
+                        <div className="mini-amt">{fmt(inv.amt)} F CFA</div>
                         <span className={`mini-status st-${inv.status}`}>
                           {INV_STATUS_LABEL[inv.status]}
                         </span>
@@ -452,6 +461,18 @@ export default function ClientsPage() {
               <input className="form-input" placeholder="BF-OUA-2021-B-1234" value={form.rccm}
                 onChange={e => setForm(f => ({ ...f, rccm: e.target.value }))} />
             </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">
+              Régime fiscal <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 500 }}>— optionnel</span>
+            </label>
+            <select className="form-input" value={form.taxRegime}
+              onChange={e => setForm(f => ({ ...f, taxRegime: e.target.value }))}>
+              <option value="">— Sélectionner —</option>
+              <option value="RNI">RNI — Régime normal d'imposition (CA ≥ 50M F CFA)</option>
+              <option value="RSI">RSI — Régime simplifié d'imposition (CA 15–50M F CFA)</option>
+              <option value="CME">CME — Contribution des micro-entreprises (CA &lt; 15M F CFA)</option>
+            </select>
           </div>
         </form>
 

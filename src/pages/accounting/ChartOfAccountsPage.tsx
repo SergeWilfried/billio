@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
 import type { Account, AccountClass, Journal } from '../../lib/accounting-data';
@@ -169,12 +170,7 @@ export default function ChartOfAccountsPage() {
   const toggleCollapse = (k: string) =>
     setCollapsed(prev => ({ ...prev, [k]: !prev[k] }));
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Plan comptable</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Plan comptable" variant="accounting" rows={8} />;
 
   return (
     <div className="main" style={{ position: 'relative' }}>
@@ -196,9 +192,9 @@ export default function ChartOfAccountsPage() {
       <div className="content">
         <KPIStrip items={[
           { icon: 'book', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Comptes', value: accounts.length, sub: `${usedClassCount} classes utilisées` },
-          { icon: 'building-bank', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: 'Trésorerie (5x)', value: fmtCompact(cash), unit: 'XOF', sub: 'Banque + caisse' },
-          { icon: 'receipt', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'Créances (411)', value: fmtCompact(recv), unit: 'XOF', sub: 'Clients à encaisser' },
-          { icon: 'truck-delivery', iconBg: '#FCEFE0', iconColor: '#B26A09', label: 'Dettes (401)', value: fmtCompact(pay), unit: 'XOF', sub: 'Fournisseurs à payer' },
+          { icon: 'building-bank', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: 'Trésorerie (5x)', value: fmtCompact(cash), unit: 'F CFA', sub: 'Banque + caisse' },
+          { icon: 'receipt', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'Créances (411)', value: fmtCompact(recv), unit: 'F CFA', sub: 'Clients à encaisser' },
+          { icon: 'truck-delivery', iconBg: '#FCEFE0', iconColor: '#B26A09', label: 'Dettes (401)', value: fmtCompact(pay), unit: 'F CFA', sub: 'Fournisseurs à payer' },
         ]} />
 
         <div className="acc-toolbar">

@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { removeInvoice } from '../lib/api/invoices';
 import { fmt, fmtDate, STATUS_LABEL } from '../data';
@@ -79,7 +80,9 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, showToast, clientsMap, orgSettings } = useApp();
+  const { invoices, setInvoices, showToast, clientsMap, orgSettings, loading } = useApp();
+
+  if (loading) return <PageSkeleton title="Facture" variant="table-only" metrics={0} rows={4} />;
 
   const invoice = invoices.find(i => i.id === id);
   if (!invoice) {
@@ -167,6 +170,9 @@ export default function InvoicePage() {
                     {(orgSettings.ifu || orgSettings.rccm) && (
                       <><br />{[orgSettings.ifu && `IFU ${orgSettings.ifu}`, orgSettings.rccm && `RCCM ${orgSettings.rccm}`].filter(Boolean).join(' · ')}</>
                     )}
+                    {(orgSettings.taxRegime || orgSettings.divisionFiscale) && (
+                      <><br />{[orgSettings.taxRegime && `${orgSettings.taxRegime}`, orgSettings.divisionFiscale && `${orgSettings.divisionFiscale}`].filter(Boolean).join(' · ')}</>
+                    )}
                     {(orgSettings.email || orgSettings.phone) && (
                       <><br />{[orgSettings.email, orgSettings.phone].filter(Boolean).join(' · ')}</>
                     )}
@@ -185,10 +191,11 @@ export default function InvoicePage() {
                 <div className="pp-block-label">Facturé à</div>
                 <div className="pp-client-name">{client.name}</div>
                 <div className="pp-client-meta">{client.city}, Burkina Faso</div>
-                {(client.ifu || client.rccm) && (
+                {(client.ifu || client.rccm || client.taxRegime) && (
                   <div className="pp-compliance-ids">
-                    {client.ifu  && <span>IFU {client.ifu}</span>}
-                    {client.rccm && <span>RCCM {client.rccm}</span>}
+                    {client.ifu       && <span>IFU {client.ifu}</span>}
+                    {client.rccm      && <span>RCCM {client.rccm}</span>}
+                    {client.taxRegime && <span>{client.taxRegime}</span>}
                   </div>
                 )}
               </div>
@@ -233,12 +240,12 @@ export default function InvoicePage() {
 
             <div className="pp-totals">
               <div className="pp-totals-inner">
-                <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} XOF</span></div>
-                <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} XOF</span></div>
+                <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
+                <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>
                 {invoice.status === 'paid' && (
-                  <div className="tot-row"><span>Montant payé</span><span className="tv paid-amt">−{fmt(total)} XOF</span></div>
+                  <div className="tot-row"><span>Montant payé</span><span className="tv paid-amt">−{fmt(total)} F CFA</span></div>
                 )}
-                <div className="tot-row grand"><span>Total dû</span><span className="tv">{invoice.status === 'paid' ? '0' : fmt(total)} XOF</span></div>
+                <div className="tot-row grand"><span>Total dû</span><span className="tv">{invoice.status === 'paid' ? '0' : fmt(total)} F CFA</span></div>
               </div>
             </div>
 
@@ -300,7 +307,7 @@ export default function InvoicePage() {
             <div className="rail-card">
               <div className="rail-due-label">Montant dû</div>
               <div className="rail-due-amt tnum">
-                {fmt(total)}<span className="cur">XOF</span>
+                {fmt(total)}<span className="cur">F CFA</span>
               </div>
               {isOverdue && (
                 <div className="rail-due-sub">

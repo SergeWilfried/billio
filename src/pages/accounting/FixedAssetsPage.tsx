@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
 import { EmptyState } from '../../components/EmptyState';
@@ -44,8 +45,8 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
         {[
           { label: 'Date d\'acquisition', value: asset.acquisitionDate },
           { label: 'Durée d\'utilisation', value: `${asset.usefulLife} ans` },
-          { label: 'Valeur brute', value: `${fmt(grossValue)} XOF` },
-          { label: 'Amort. annuel', value: `${fmt(annualAmort)} XOF` },
+          { label: 'Valeur brute', value: `${fmt(grossValue)} F CFA` },
+          { label: 'Amort. annuel', value: `${fmt(annualAmort)} F CFA` },
         ].map(({ label, value }) => (
           <div key={label} style={{ background: 'var(--color-background-secondary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', padding: '11px 13px' }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--color-text-tertiary)' }}>{label}</div>
@@ -55,8 +56,8 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
         <div style={{ gridColumn: '1/-1', background: 'var(--brand-tint)', borderRadius: 'var(--border-radius-md)', padding: '13px 14px' }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--brand-dark)', marginBottom: 8 }}>Valeur nette comptable</div>
           <DepreciationProgress pct={pct} />
-          <div className="mono" style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, marginTop: 8, color: 'var(--brand-dark)' }}>{fmt(netValue)} <span style={{ fontSize: 13, opacity: 0.7 }}>XOF</span></div>
-          <div style={{ fontSize: 11.5, color: 'var(--brand)', marginTop: 3 }}>Amort. cumulé {fmt(amortCumul)} XOF</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, marginTop: 8, color: 'var(--brand-dark)' }}>{fmt(netValue)} <span style={{ fontSize: 13, opacity: 0.7 }}>F CFA</span></div>
+          <div style={{ fontSize: 11.5, color: 'var(--brand)', marginTop: 3 }}>Amort. cumulé {fmt(amortCumul)} F CFA</div>
         </div>
       </div>
 
@@ -88,12 +89,7 @@ export default function FixedAssetsPage() {
   const totalAmort  = totalGross - totalNet;
   const monthlyAmort = fixedAssets.reduce((s, a) => s + a.grossValue / a.usefulLife / 12, 0);
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Immobilisations</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Immobilisations" variant="accounting" rows={6} />;
 
   return (
     <div className="main" style={{ position: 'relative' }}>
@@ -113,10 +109,10 @@ export default function FixedAssetsPage() {
 
       <div className="content">
         <KPIStrip items={[
-          { icon: 'building-warehouse', iconBg: '#ECE9FB', iconColor: '#5B45C7', label: 'Valeur brute totale', value: fmtCompact(totalGross), unit: 'XOF', sub: `${fixedAssets.length} immobilisations` },
-          { icon: 'trending-down', iconBg: '#FCEBEB', iconColor: '#A32D2D', label: 'Amort. cumulé', value: fmtCompact(totalAmort), unit: 'XOF', sub: 'Dépréciation totale' },
-          { icon: 'chart-bar', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Valeur nette (VNC)', value: fmtCompact(totalNet), unit: 'XOF', sub: 'Valeur résiduelle' },
-          { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Dotation mensuelle', value: fmtCompact(monthlyAmort), unit: 'XOF', sub: 'Amortissement du mois' },
+          { icon: 'building-warehouse', iconBg: '#ECE9FB', iconColor: '#5B45C7', label: 'Valeur brute totale', value: fmtCompact(totalGross), unit: 'F CFA', sub: `${fixedAssets.length} immobilisations` },
+          { icon: 'trending-down', iconBg: '#FCEBEB', iconColor: '#A32D2D', label: 'Amort. cumulé', value: fmtCompact(totalAmort), unit: 'F CFA', sub: 'Dépréciation totale' },
+          { icon: 'chart-bar', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Valeur nette (VNC)', value: fmtCompact(totalNet), unit: 'F CFA', sub: 'Valeur résiduelle' },
+          { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Dotation mensuelle', value: fmtCompact(monthlyAmort), unit: 'F CFA', sub: 'Amortissement du mois' },
         ]} />
 
         <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
@@ -128,12 +124,11 @@ export default function FixedAssetsPage() {
 
           {fixedAssets.length === 0
             ? <EmptyState
-            illustration={<FixedAssetsEmptyIllustration />}
-                title="Aucune immobilisation trouvée"
+                illustration={<FixedAssetsEmptyIllustration />}
+                title="Aucune immobilisation"
                 description="Ajoutez votre première immobilisation pour suivre les amortissements."
               />
-            : null}
-          {fixedAssets.map((asset, i) => {
+            : fixedAssets.map((asset, i) => {
             const net = netValueOf(asset);
             const pct = asset.grossValue > 0 ? ((asset.grossValue - net) / asset.grossValue) * 100 : 0;
             return (

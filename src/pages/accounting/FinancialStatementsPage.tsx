@@ -141,7 +141,7 @@ function IncomeStatement() {
           <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, letterSpacing: 0.8, textTransform: 'uppercase' }}>Résultat net du mois</div>
           <div style={{ fontSize: 13.5, fontWeight: 500, opacity: 0.9, marginTop: 3 }}>{isProfit ? 'Bénéfice' : 'Perte'} · Exercice 2026</div>
         </div>
-        <div className="mono" style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1 }}>{fmt(Math.abs(netResult))} <span style={{ fontSize: 14, opacity: 0.8 }}>XOF</span></div>
+        <div className="mono" style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1 }}>{fmt(Math.abs(netResult))} <span style={{ fontSize: 14, opacity: 0.8 }}>F CFA</span></div>
       </div>
     </div>
   );

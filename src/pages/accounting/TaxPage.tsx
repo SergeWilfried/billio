@@ -1,4 +1,5 @@
 import Icon from '../../components/Icon';
+import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import JournalBadge from '../../components/accounting/JournalBadge';
 import type { JournalEntry } from '../../lib/accounting-data';
@@ -47,12 +48,7 @@ function buildTaxLines(entries: JournalEntry[]): TaxLine[] {
 export default function TaxPage() {
   const { data, loading } = useTaxData();
 
-  if (loading) return (
-    <div className="main">
-      <div className="topbar"><div><div className="page-title">Fiscalité</div></div></div>
-      <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Chargement…</div>
-    </div>
-  );
+  if (loading) return <PageSkeleton title="Fiscalité" variant="accounting" rows={6} />;
 
   const entries  = data?.entries  ?? [];
   const journals = data?.journals ?? {};
@@ -90,9 +86,9 @@ export default function TaxPage() {
 
       <div className="content">
         <KPIStrip items={[
-          { icon: 'receipt', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: '443 — TVA collectée', value: fmtCompact(collected), unit: 'XOF', sub: `${collectedLines.length} écriture${collectedLines.length > 1 ? 's' : ''}` },
-          { icon: 'receipt', iconBg: '#FAEEDA', iconColor: '#B26A09', label: '445 — TVA déductible', value: fmtCompact(deductible), unit: 'XOF', sub: `${deductibleLines.length} écriture${deductibleLines.length > 1 ? 's' : ''}` },
-          { icon: 'percentage', iconBg: netDue >= 0 ? '#E9F0FA' : '#FCEBEB', iconColor: netDue >= 0 ? 'var(--brand)' : '#A32D2D', label: '4441 — TVA nette due', value: fmtCompact(Math.abs(netDue)), unit: 'XOF', sub: netDue >= 0 ? 'À verser à l\'État' : 'Crédit de TVA' },
+          { icon: 'receipt', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: '443 — TVA collectée', value: fmtCompact(collected), unit: 'F CFA', sub: `${collectedLines.length} écriture${collectedLines.length > 1 ? 's' : ''}` },
+          { icon: 'receipt', iconBg: '#FAEEDA', iconColor: '#B26A09', label: '445 — TVA déductible', value: fmtCompact(deductible), unit: 'F CFA', sub: `${deductibleLines.length} écriture${deductibleLines.length > 1 ? 's' : ''}` },
+          { icon: 'percentage', iconBg: netDue >= 0 ? '#E9F0FA' : '#FCEBEB', iconColor: netDue >= 0 ? 'var(--brand)' : '#A32D2D', label: '4441 — TVA nette due', value: fmtCompact(Math.abs(netDue)), unit: 'F CFA', sub: netDue >= 0 ? 'À verser à l\'État' : 'Crédit de TVA' },
           { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Prochaine échéance', value: '15 juil.', sub: 'Déclaration TVA juin 2026' },
         ]} />
 
@@ -153,7 +149,7 @@ export default function TaxPage() {
                 <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>{d.date}</div>
               </div>
               <div className="mono" style={{ fontWeight: 700, fontSize: 13.5, textAlign: 'right' }}>
-                {fmt(d.amount)} <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)' }}>XOF</span>
+                {fmt(d.amount)} <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)' }}>F CFA</span>
               </div>
               <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: d.status === 'pending' ? '#FAEEDA' : 'var(--color-background-secondary)', color: d.status === 'pending' ? '#B26A09' : 'var(--color-text-tertiary)', whiteSpace: 'nowrap' }}>
                 {d.status === 'pending' ? 'À déclarer' : 'À venir'}
