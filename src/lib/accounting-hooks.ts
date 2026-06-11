@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
+import { supabase } from './supabase';
 import {
   fetchAccountClasses,
   fetchAccounts,
@@ -131,6 +132,17 @@ export function useJournalsData(includeDraft = true) {
     result.reload();
   }, [orgId, result]);
 
+  // Realtime: reload on any journal_entries change for this org
+  useEffect(() => {
+    if (MOCK || !orgId) return;
+    const ch = supabase
+      .channel(`journal_entries:${orgId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'journal_entries', filter: `org_id=eq.${orgId}` },
+        () => result.reload())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return { ...result, postEntry, removeEntry, saveEntry };
 }
 
@@ -192,6 +204,17 @@ export function useFixedAssets() {
     result.reload();
   }, [orgId, result]);
 
+  // Realtime: reload on any fixed_assets change for this org
+  useEffect(() => {
+    if (MOCK || !orgId) return;
+    const ch = supabase
+      .channel(`fixed_assets:${orgId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fixed_assets', filter: `org_id=eq.${orgId}` },
+        () => result.reload())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return { ...result, createAsset };
 }
 
@@ -213,6 +236,17 @@ export function useSupplierBills() {
     await apiCreateBill(orgId, bill);
     result.reload();
   }, [orgId, result]);
+
+  // Realtime: reload on any supplier_bills change for this org
+  useEffect(() => {
+    if (MOCK || !orgId) return;
+    const ch = supabase
+      .channel(`supplier_bills:${orgId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supplier_bills', filter: `org_id=eq.${orgId}` },
+        () => result.reload())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { ...result, markPaid, createBill };
 }
