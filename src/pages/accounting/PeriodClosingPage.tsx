@@ -4,12 +4,7 @@ import { PageSkeleton } from '../../components/SkeletonLoader';
 import { closingSigned, fmt } from '../../lib/accounting-data';
 import { usePeriodClosing } from '../../lib/accounting-hooks';
 
-const PERIODS = [
-  { m: 'Jan', s: 'closed' }, { m: 'Fév', s: 'closed' }, { m: 'Mar', s: 'closed' },
-  { m: 'Avr', s: 'closed' }, { m: 'Mai', s: 'closed' }, { m: 'Juin', s: 'current' },
-  { m: 'Juil', s: 'future' }, { m: 'Août', s: 'future' }, { m: 'Sep', s: 'future' },
-  { m: 'Oct', s: 'future' }, { m: 'Nov', s: 'future' }, { m: 'Déc', s: 'future' },
-];
+const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
 
 const INITIAL_CHECKS = [
   { t: 'Rapprochement bancaire', s: 'Solde 521 pointé avec le relevé de banque', tag: 'manual', done: true },
@@ -68,11 +63,26 @@ function ProgressRing({ pct }: { pct: number }) {
 }
 
 export default function PeriodClosingPage() {
-  const { data, loading } = usePeriodClosing();
+  const { data, loading, closePeriod } = usePeriodClosing();
   const [checks, setChecks] = useState(INITIAL_CHECKS.map(c => ({ ...c })));
-  const [closed, setClosed] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   const entries = data?.entries ?? [];
+  const periods = data?.periods ?? [];
+
+  // Derive display periods: first open month is 'current', rest are 'future'
+  const firstOpenMonth = periods.find(p => p.status === 'open')?.month ?? null;
+  const displayPeriods = MONTH_LABELS.map((m, i) => {
+    const month = i + 1;
+    const dbPeriod = periods.find(p => p.month === month);
+    const s = dbPeriod?.status === 'closed' ? 'closed'
+      : month === firstOpenMonth ? 'current'
+      : 'future';
+    return { m, s, id: dbPeriod?.id ?? null };
+  });
+
+  const currentPeriod = displayPeriods.find(p => p.s === 'current');
+  const closed = currentPeriod?.s === 'current' && periods.find(p => p.month === firstOpenMonth)?.status === 'closed';
   const doneCount = checks.filter(c => c.done).length;
   const pct       = Math.round((doneCount / checks.length) * 100);
   const drafts    = entries.filter(e => !e.posted).length;
@@ -113,7 +123,17 @@ export default function PeriodClosingPage() {
             <span className="dot" style={closed ? { background: '#2E7D32' } : {}} />
             {closed ? 'Exercice 2026 · juin clôturé' : 'Exercice 2026 · ouvert'}
           </span>
-          <button className="btn"><Icon name="lock" />Clôturer juin</button>
+          <button
+            className="btn"
+            disabled={!allDone || closing || !currentPeriod?.id}
+            onClick={async () => {
+              if (!currentPeriod?.id) return;
+              setClosing(true);
+              try { await closePeriod(currentPeriod.id); } finally { setClosing(false); }
+            }}
+          >
+            <Icon name="lock" />{closing ? 'Clôture…' : `Clôturer ${currentPeriod?.m ?? ''}`}
+          </button>
         </div>
       </div>
 
@@ -128,8 +148,8 @@ export default function PeriodClosingPage() {
           </div>
           <div style={{ padding: '8px 20px 18px' }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {PERIODS.map((p, i) => (
-                <PeriodCell key={i} m={p.m} status={closed && p.m === 'Juin' ? 'closed' : p.s} />
+              {displayPeriods.map((p, i) => (
+                <PeriodCell key={i} m={p.m} status={p.s} />
               ))}
             </div>
           </div>
@@ -200,11 +220,15 @@ export default function PeriodClosingPage() {
 
                 <button
                   className={`btn${allDone ? ' btn-primary' : ''}`}
-                  disabled={!allDone}
-                  onClick={() => { if (allDone) setClosed(true); }}
+                  disabled={!allDone || closing || !currentPeriod?.id}
+                  onClick={async () => {
+                    if (!currentPeriod?.id) return;
+                    setClosing(true);
+                    try { await closePeriod(currentPeriod.id); } finally { setClosing(false); }
+                  }}
                   style={{ width: '100%', justifyContent: 'center', marginTop: 16, opacity: allDone ? 1 : 0.5, cursor: allDone ? 'pointer' : 'not-allowed' }}
                 >
-                  <Icon name="lock" />Clôturer juin & reporter à-nouveaux
+                  <Icon name="lock" />{closing ? 'Clôture en cours…' : `Clôturer ${currentPeriod?.m ?? 'la période'} & reporter à-nouveaux`}
                 </button>
 
                 {!allDone && (

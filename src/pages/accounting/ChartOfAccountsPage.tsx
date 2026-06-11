@@ -113,12 +113,69 @@ function AccountDrawer({ account, classes, journals, onClose }: {
   );
 }
 
+function NewAccountModal({ classes, onSave, onClose }: { classes: Record<number, import('../../lib/accounting-data').AccountClass>; onSave: (a: Account) => Promise<void>; onClose: () => void }) {
+  const [num, setNum] = useState('');
+  const [label, setLabel] = useState('');
+  const [nature, setNature] = useState<'D' | 'C'>('D');
+  const [saving, setSaving] = useState(false);
+  const valid = num.trim().length >= 3 && label.trim().length > 0;
+
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave({ num: num.trim(), label: label.trim(), nature }); onClose(); } finally { setSaving(false); }
+  };
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 40 }} onClick={onClose} />
+      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 420, background: 'var(--color-background-primary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-drawer)', zIndex: 41, padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Nouveau compte</div>
+          <button className="acc-drawer-close" onClick={onClose}><Icon name="x" size={16} /></button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 12 }}>
+            <div>
+              <label className="form-label">Numéro *</label>
+              <input className="form-input" value={num} onChange={e => setNum(e.target.value)} placeholder="ex. 4118" />
+            </div>
+            <div>
+              <label className="form-label">Nature</label>
+              <select className="form-input" value={nature} onChange={e => setNature(e.target.value as 'D' | 'C')}>
+                <option value="D">Débiteur (D)</option>
+                <option value="C">Créditeur (C)</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="form-label">Libellé *</label>
+            <input className="form-input" value={label} onChange={e => setLabel(e.target.value)} placeholder="ex. Clients douteux" />
+          </div>
+          {num && (
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '8px 12px' }}>
+              Classe {num[0]} · {classes[Number(num[0])]?.name ?? 'Inconnu'}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 9, marginTop: 20 }}>
+          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Annuler</button>
+          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!valid || saving} onClick={handleSave}>
+            <Icon name="plus" size={15} />{saving ? 'Enregistrement…' : 'Créer le compte'}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function ChartOfAccountsPage() {
-  const { data, loading } = useChartOfAccounts();
+  const { data, loading, addAccount } = useChartOfAccounts();
   const [activeClass, setActiveClass] = useState<string>('all');
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<Account | null>(null);
+  const [showNewAccount, setShowNewAccount] = useState(false);
 
   const accounts = data?.accounts ?? [];
   const classes  = data?.classes  ?? {};
@@ -185,7 +242,7 @@ export default function ChartOfAccountsPage() {
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
           <button className="btn"><Icon name="download" />Importer</button>
-          <button className="btn btn-primary"><Icon name="plus" />Nouveau compte</button>
+          <button className="btn btn-primary" onClick={() => setShowNewAccount(true)}><Icon name="plus" />Nouveau compte</button>
         </div>
       </div>
 
@@ -311,6 +368,7 @@ export default function ChartOfAccountsPage() {
       </div>
 
       {selected && <AccountDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} />}
+      {showNewAccount && <NewAccountModal classes={classes} onSave={addAccount} onClose={() => setShowNewAccount(false)} />}
     </div>
   );
 }

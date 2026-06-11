@@ -105,10 +105,93 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
   );
 }
 
+interface BillForm { supplier: string; city: string; piece: string; date: string; dueDate: string; htAmount: string }
+const EMPTY_BILL_FORM: BillForm = { supplier: '', city: '', piece: '', date: new Date().toISOString().slice(0, 10), dueDate: '', htAmount: '' };
+const TVA_RATE = 0.18;
+
+function NewBillDrawer({ onSave, onClose }: { onSave: (f: BillForm) => Promise<void>; onClose: () => void }) {
+  const [form, setForm] = useState<BillForm>(EMPTY_BILL_FORM);
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof BillForm, v: string) => setForm(p => ({ ...p, [k]: v }));
+  const ht = parseFloat(form.htAmount) || 0;
+  const tva = Math.round(ht * TVA_RATE);
+  const valid = form.supplier.trim() && form.piece.trim() && form.dueDate && ht > 0;
+
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave(form); onClose(); } finally { setSaving(false); }
+  };
+
+  return (
+    <DrawerPanel open onClose={onClose} title="Nouvelle facture fournisseur" subtitle="Enregistrement d'une dette">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label className="form-label">Fournisseur *</label>
+          <input className="form-input" value={form.supplier} onChange={e => set('supplier', e.target.value)} placeholder="Nom du fournisseur" />
+        </div>
+        <div>
+          <label className="form-label">Ville</label>
+          <input className="form-input" value={form.city} onChange={e => set('city', e.target.value)} placeholder="Abidjan" />
+        </div>
+        <div>
+          <label className="form-label">Référence pièce *</label>
+          <input className="form-input" value={form.piece} onChange={e => set('piece', e.target.value)} placeholder="FACT-2026-001" />
+        </div>
+        <div>
+          <label className="form-label">Date facture</label>
+          <input className="form-input" type="date" value={form.date} onChange={e => set('date', e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">Date d'échéance *</label>
+          <input className="form-input" type="date" value={form.dueDate} onChange={e => set('dueDate', e.target.value)} />
+        </div>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label className="form-label">Montant HT (F CFA) *</label>
+          <input className="form-input" type="number" min="0" value={form.htAmount} onChange={e => set('htAmount', e.target.value)} placeholder="0" />
+        </div>
+      </div>
+
+      {ht > 0 && (
+        <div style={{ background: 'var(--color-background-secondary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', padding: '11px 14px', marginBottom: 16 }}>
+          {[{ label: 'Montant HT', value: ht }, { label: 'TVA (18%)', value: tva }, { label: 'Total TTC', value: ht + tva }].map(({ label, value }, i) => (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderTop: i > 0 ? '0.5px solid var(--color-border-tertiary)' : 'none', fontWeight: i === 2 ? 700 : 400, fontSize: 12.5 }}>
+              <span style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+              <span className="mono">{fmt(value)} F CFA</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 9 }}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Annuler</button>
+        <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!valid || saving} onClick={handleSave}>
+          <Icon name="check" size={15} />{saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </DrawerPanel>
+  );
+}
+
 export default function SuppliersPage() {
-  const { data: bills, loading, markPaid } = useSupplierBills();
+  const { data: bills, loading, markPaid, createBill } = useSupplierBills();
   const [activeStatus, setActiveStatus] = useState('all');
   const [selected, setSelected] = useState<SupplierBill | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  const handleCreate = async (form: BillForm) => {
+    const ht = parseFloat(form.htAmount);
+    await createBill({
+      supplier:  form.supplier,
+      city:      form.city,
+      piece:     form.piece,
+      date:      form.date,
+      dueDate:   form.dueDate,
+      htAmount:  ht,
+      tvaAmount: Math.round(ht * TVA_RATE),
+      status:    'open',
+    });
+  };
 
   const supplierBills = bills ?? [];
 
@@ -141,7 +224,7 @@ export default function SuppliersPage() {
         </div>
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
-          <button className="btn btn-primary"><Icon name="plus" />Nouvelle facture</button>
+          <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle facture</button>
         </div>
       </div>
 
@@ -220,6 +303,7 @@ export default function SuppliersPage() {
       </div>
 
       {selected && <BillDrawer bill={selected} onMarkPaid={markPaid} onClose={() => setSelected(null)} />}
+      {showForm && <NewBillDrawer onSave={handleCreate} onClose={() => setShowForm(false)} />}
     </div>
   );
 }

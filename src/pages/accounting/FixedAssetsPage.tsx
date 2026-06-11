@@ -9,6 +9,82 @@ import { fmt, fmtCompact, amortSchedule, netValueOf } from '../../lib/accounting
 import { useFixedAssets } from '../../lib/accounting-hooks';
 import { FixedAssetsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
+const ASSET_METHODS = ['Linéaire', 'Dégressif'];
+const ASSET_ICONS = ['building-warehouse', 'device-laptop', 'car', 'tool', 'server', 'printer'] as const;
+
+interface AssetForm { name: string; acct: string; acquisitionDate: string; usefulLife: string; grossValue: string; method: string; icon: string }
+const EMPTY_ASSET_FORM: AssetForm = { name: '', acct: '241', acquisitionDate: new Date().toISOString().slice(0, 10), usefulLife: '5', grossValue: '', method: 'Linéaire', icon: 'building-warehouse' };
+
+function AssetForm({ onSave, onClose }: { onSave: (f: AssetForm) => Promise<void>; onClose: () => void }) {
+  const [form, setForm] = useState<AssetForm>(EMPTY_ASSET_FORM);
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof AssetForm, v: string) => setForm(p => ({ ...p, [k]: v }));
+  const valid = form.name.trim() && form.acct.trim() && parseFloat(form.grossValue) > 0 && parseInt(form.usefulLife) > 0;
+
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave(form); onClose(); } finally { setSaving(false); }
+  };
+
+  return (
+    <DrawerPanel open onClose={onClose} title="Nouvelle immobilisation" subtitle="Enregistrement d'un actif">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label className="form-label">Désignation *</label>
+          <input className="form-input" value={form.name} onChange={e => set('name', e.target.value)} placeholder='ex. MacBook Pro 16"' />
+        </div>
+        <div>
+          <label className="form-label">Compte immobilisation *</label>
+          <input className="form-input" value={form.acct} onChange={e => set('acct', e.target.value)} placeholder="241" />
+        </div>
+        <div>
+          <label className="form-label">Méthode</label>
+          <select className="form-input" value={form.method} onChange={e => set('method', e.target.value)}>
+            {ASSET_METHODS.map(m => <option key={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="form-label">Date d'acquisition *</label>
+          <input className="form-input" type="date" value={form.acquisitionDate} onChange={e => set('acquisitionDate', e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">Durée (années) *</label>
+          <input className="form-input" type="number" min="1" max="50" value={form.usefulLife} onChange={e => set('usefulLife', e.target.value)} />
+        </div>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label className="form-label">Valeur brute (F CFA) *</label>
+          <input className="form-input" type="number" min="0" value={form.grossValue} onChange={e => set('grossValue', e.target.value)} placeholder="0" />
+        </div>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label className="form-label">Icône</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {ASSET_ICONS.map(ic => (
+              <button key={ic} onClick={() => set('icon', ic)} style={{ width: 36, height: 36, borderRadius: 9, border: form.icon === ic ? '2px solid var(--brand)' : '1.5px solid var(--color-border-tertiary)', background: form.icon === ic ? 'var(--brand-tint)' : 'var(--color-background-secondary)', color: form.icon === ic ? 'var(--brand)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={ic} size={16} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {form.grossValue && parseInt(form.usefulLife) > 0 && (
+        <div style={{ background: 'var(--brand-tint)', border: '0.5px solid var(--color-border-secondary)', borderRadius: 'var(--border-radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 12.5 }}>
+          <span style={{ color: 'var(--color-text-secondary)' }}>Dotation annuelle · </span>
+          <span style={{ fontWeight: 700, color: 'var(--brand)' }}>{fmt(parseFloat(form.grossValue) / parseInt(form.usefulLife))} F CFA</span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 9 }}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Annuler</button>
+        <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!valid || saving} onClick={handleSave}>
+          <Icon name="check" size={15} />{saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </DrawerPanel>
+  );
+}
+
 function DepreciationProgress({ pct }: { pct: number }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -80,8 +156,22 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
 }
 
 export default function FixedAssetsPage() {
-  const { data: assets, loading } = useFixedAssets();
+  const { data: assets, loading, createAsset } = useFixedAssets();
   const [selected, setSelected] = useState<FixedAsset | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  const handleCreate = async (form: AssetForm) => {
+    await createAsset({
+      id: `IMM-${Date.now().toString(36).toUpperCase()}`,
+      name: form.name,
+      acct: form.acct,
+      icon: form.icon,
+      acquisitionDate: form.acquisitionDate,
+      usefulLife: parseInt(form.usefulLife),
+      method: form.method,
+      grossValue: parseFloat(form.grossValue),
+    });
+  };
 
   const fixedAssets = assets ?? [];
   const totalGross  = fixedAssets.reduce((s, a) => s + a.grossValue, 0);
@@ -103,7 +193,7 @@ export default function FixedAssetsPage() {
         </div>
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
-          <button className="btn btn-primary"><Icon name="plus" />Nouvelle immobilisation</button>
+          <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle immobilisation</button>
         </div>
       </div>
 
@@ -160,6 +250,7 @@ export default function FixedAssetsPage() {
       </div>
 
       {selected && <AssetDrawer asset={selected} onClose={() => setSelected(null)} />}
+      {showForm && <AssetForm onSave={handleCreate} onClose={() => setShowForm(false)} />}
     </div>
   );
 }
