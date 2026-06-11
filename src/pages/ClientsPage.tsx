@@ -4,9 +4,9 @@ import { EmptyState, EmptyInline } from '../components/EmptyState';
 import { ClientsEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
-import { createClient } from '../lib/api/clients';
+import { createClient, updateClient, removeClient } from '../lib/api/clients';
 import { fmt } from '../data';
-import type { ClientStatus, InvoiceStatus, NewClientForm } from '../lib/schemas';
+import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '../lib/schemas';
 
 type FilterKey = 'all' | 'active' | 'lead' | 'balance';
 
@@ -48,13 +48,15 @@ function fmtCompact(n: number) {
 }
 
 export default function ClientsPage() {
-  const { clients, setClients, invoices, orgId, loading } = useApp();
+  const { clients, setClients, invoices, orgId, showToast, loading } = useApp();
 
   if (loading) return <PageSkeleton title="Clients" subtitle="Gérez vos clients" variant="table-only" rows={6} />;
   const [filter, setFilter]   = useState<FilterKey>('all');
   const [search, setSearch]   = useState('');
   const [panel, setPanel]     = useState<null | { kind: 'detail'; code: string } | { kind: 'new' }>(null);
   const [form, setForm]       = useState<NewClientForm>(EMPTY_FORM);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState<NewClientForm>(EMPTY_FORM);
 
   const totalBilled  = clients.reduce((s, c) => s + c.billed, 0);
   const outstanding  = clients.reduce((s, c) => s + c.balance, 0);
@@ -89,7 +91,31 @@ export default function ClientsPage() {
     ? clients.find(c => c.code === panel.code) ?? null
     : null;
 
-  function closePanel() { setPanel(null); }
+  function closePanel() { setPanel(null); setEditMode(false); }
+
+  function openDetailEdit(cl: ClientRecord | null) {
+    if (!cl) return;
+    setEditForm({ name: cl.name, contact: cl.contact === '—' ? '' : cl.contact, email: cl.email === '—' ? '' : cl.email, phone: cl.phone === '—' ? '' : cl.phone, city: cl.city === '—' ? '' : cl.city, status: cl.status, ifu: cl.ifu ?? '', rccm: cl.rccm ?? '', taxRegime: cl.taxRegime ?? '' });
+    setEditMode(true);
+  }
+
+  async function handleSaveEdit(cl: ClientRecord | null) {
+    if (!cl) return;
+    const patch = { name: editForm.name, contact: editForm.contact || '—', email: editForm.email || '—', phone: editForm.phone || '—', city: editForm.city || '—', status: editForm.status, ifu: editForm.ifu, rccm: editForm.rccm, taxRegime: editForm.taxRegime };
+    setClients(prev => prev.map(c => c.code === cl.code ? { ...c, ...patch } : c));
+    await updateClient(cl.code, patch);
+    setEditMode(false);
+    showToast('Client mis à jour');
+  }
+
+  async function handleDeleteClient(cl: ClientRecord | null) {
+    if (!cl) return;
+    if (!window.confirm(`Supprimer "${cl.name}" ? Cette action est irréversible.`)) return;
+    setClients(prev => prev.filter(c => c.code !== cl.code));
+    await removeClient(cl.code);
+    closePanel();
+    showToast(`"${cl.name}" supprimé`);
+  }
 
   async function handleAddClient(e: React.FormEvent) {
     e.preventDefault();
@@ -316,18 +342,53 @@ export default function ClientsPage() {
               {/* Contact */}
               <div className="detail-block">
                 <div className="detail-block-title">Contact</div>
-                <div className="contact-line">
-                  <Icon name="mail" size={16} />
-                  <span>{detailClient.email}</span>
-                </div>
-                <div className="contact-line">
-                  <Icon name="phone" size={16} />
-                  <span>{detailClient.phone}</span>
-                </div>
-                <div className="contact-line">
-                  <Icon name="map-pin" size={16} />
-                  <span>{detailClient.city}</span>
-                </div>
+                {editMode ? (
+                  <>
+                    <div className="form-group" style={{ marginBottom: 8 }}>
+                      <label className="form-label">Raison sociale</label>
+                      <input className="form-input" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 8 }}>
+                      <label className="form-label">Contact principal</label>
+                      <input className="form-input" value={editForm.contact} onChange={e => setEditForm(f => ({ ...f, contact: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 8 }}>
+                      <label className="form-label">Email</label>
+                      <input className="form-input" type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 8 }}>
+                      <label className="form-label">Téléphone</label>
+                      <input className="form-input" value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 8 }}>
+                      <label className="form-label">Ville</label>
+                      <input className="form-input" value={editForm.city} onChange={e => setEditForm(f => ({ ...f, city: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Statut</label>
+                      <select className="form-input" value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value as ClientStatus }))}>
+                        <option value="active">Actif</option>
+                        <option value="lead">Prospect</option>
+                        <option value="inactive">Inactif</option>
+                      </select>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="contact-line">
+                      <Icon name="mail" size={16} />
+                      <span>{detailClient.email}</span>
+                    </div>
+                    <div className="contact-line">
+                      <Icon name="phone" size={16} />
+                      <span>{detailClient.phone}</span>
+                    </div>
+                    <div className="contact-line">
+                      <Icon name="map-pin" size={16} />
+                      <span>{detailClient.city}</span>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Identifiants fiscaux */}
@@ -383,13 +444,28 @@ export default function ClientsPage() {
               </div>
             </div>
 
-            <div className="panel-footer">
-              <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={closePanel}>
-                Fermer
-              </button>
-              <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                <Icon name="plus" size={15} />
-                Nouvelle facture
+            <div className="panel-footer" style={{ flexDirection: 'column', gap: 8 }}>
+              {editMode ? (
+                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                  <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditMode(false)}>
+                    Annuler
+                  </button>
+                  <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => handleSaveEdit(detailClient)}>
+                    <Icon name="check" size={15} /> Enregistrer
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                  <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}>
+                    <Icon name="edit" size={15} /> Modifier
+                  </button>
+                  <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+                    <Icon name="plus" size={15} /> Nouvelle facture
+                  </button>
+                </div>
+              )}
+              <button className="btn btn-ghost btn-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => handleDeleteClient(detailClient)}>
+                <Icon name="trash" size={15} /> Supprimer ce client
               </button>
             </div>
           </>

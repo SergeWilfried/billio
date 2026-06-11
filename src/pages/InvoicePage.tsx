@@ -1,17 +1,13 @@
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
-import { removeInvoice } from '../lib/api/invoices';
+import { removeInvoice, updateInvoice } from '../lib/api/invoices';
+import { fetchLineItems } from '../lib/api/line-items';
 import { fmt, fmtDate, STATUS_LABEL } from '../data';
 import type { Status } from '../data';
-
-// Mock line items — real data would come from backend per invoice
-const MOCK_LINES = [
-  { desc: 'UI/UX design — phase 2', note: 'Wireframes, hi-fi screens, mise à jour du design system', qty: 1, price: 300_000 },
-  { desc: 'Développement front-end', note: 'Build responsive, librairie de composants', qty: 8, price: 35_000 },
-  { desc: 'AQ & livraison', note: 'Tests cross-navigateurs, déploiement', qty: 1, price: 80_000 },
-];
+import type { LineItem } from '../lib/schemas';
 
 type DotKind = 'paid' | 'sent' | 'overdue' | 'viewed' | '';
 interface TlEntry { dot: DotKind; text: string; time: string; }
@@ -81,6 +77,11 @@ export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { invoices, setInvoices, showToast, clientsMap, orgSettings, loading } = useApp();
+  const [lines, setLines] = useState<LineItem[]>([]);
+
+  useEffect(() => {
+    if (id) fetchLineItems(id).then(setLines).catch(() => setLines([]));
+  }, [id]);
 
   if (loading) return <PageSkeleton title="Facture" variant="table-only" metrics={0} rows={4} />;
 
@@ -104,7 +105,7 @@ export default function InvoicePage() {
   }
 
   const client    = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
-  const subtotal  = MOCK_LINES.reduce((s, li) => s + li.qty * li.price, 0);
+  const subtotal  = lines.reduce((s, li) => s + li.qty * li.price, 0);
   const tax       = Math.round(subtotal * 0.18);
   const total     = subtotal + tax;
   const isOverdue = invoice.status === 'overdue';
@@ -120,12 +121,11 @@ export default function InvoicePage() {
       navigate('/invoices');
     }
   };
-
-  // const handleMarkPaid = async () => {
-  //   setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
-  //   await updateInvoice(invoice.id, { status: 'paid' });
-  //   showToast('Facture marquée comme payée');
-  // };
+  const handleMarkPaid = async () => {
+    setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
+    await updateInvoice(invoice.id, { status: 'paid' });
+    showToast('Facture marquée comme payée');
+  };
 
   return (
     <div className="main">
@@ -224,12 +224,11 @@ export default function InvoicePage() {
                 </tr>
               </thead>
               <tbody>
-                {MOCK_LINES.map((li, i) => (
-                  <tr key={i}>
-                    <td>
-                      <div className="li-desc">{li.desc}</div>
-                      {li.note && <div className="li-note">{li.note}</div>}
-                    </td>
+                {lines.length === 0 ? (
+                  <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '16px 0' }}>Aucune ligne</td></tr>
+                ) : lines.map(li => (
+                  <tr key={li.id}>
+                    <td><div className="li-desc">{li.desc}</div></td>
                     <td className="r">{li.qty}</td>
                     <td className="r">{fmt(li.price)}</td>
                     <td className="r">{fmt(li.qty * li.price)}</td>
@@ -317,7 +316,7 @@ export default function InvoicePage() {
               )}
               <div className="rail-actions">
                 {(isOverdue || invoice.status === 'pending') && (<>
-                  <button className="btn btn-primary btn-block">
+                  <button className="btn btn-primary btn-block" onClick={handleMarkPaid}>
                     <Icon name="cash" ariaHidden /> Enregistrer un paiement
                   </button>
                   <button

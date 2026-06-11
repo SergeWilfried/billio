@@ -4,7 +4,7 @@ import { EmptyState } from '../components/EmptyState';
 import { QuotesEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
-import { createQuote, updateQuote } from '../lib/api/quotes';
+import { createQuote, updateQuote, removeQuote } from '../lib/api/quotes';
 import { saveLineItems } from '../lib/api/line-items';
 import { fmt, fmtDate, newLineItem } from '../data';
 import type { LineItem, QuoteStatus, Quote } from '../lib/schemas';
@@ -131,6 +131,14 @@ export default function QuotesPage() {
   function sendReminder(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     showToast(`Relance envoyée pour ${id}`);
+  }
+
+  async function handleDelete(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!window.confirm(`Supprimer le devis ${id} ? Cette action est irréversible.`)) return;
+    setQuotes(prev => prev.filter(q => q.id !== id));
+    await removeQuote(id);
+    showToast(`Devis ${id} supprimé`);
   }
 
   return (
@@ -308,8 +316,8 @@ export default function QuotesPage() {
                           <Icon name="copy" size={14} />
                         </button>
                       )}
-                      <button className="icon-btn" title="Plus" onClick={e => e.stopPropagation()}>
-                        <Icon name="dots" size={14} />
+                      <button className="icon-btn" title="Supprimer" onClick={e => handleDelete(q.id, e)}>
+                        <Icon name="trash" size={14} />
                       </button>
                     </div>
                   </div>
