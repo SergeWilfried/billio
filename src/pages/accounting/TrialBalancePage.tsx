@@ -7,8 +7,8 @@ import JournalBadge from '../../components/accounting/JournalBadge';
 import { EmptyState } from '../../components/EmptyState';
 import { AccountMovementsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 import type { Account, AccountClass, Journal } from '../../lib/accounting-data';
-import { fmt, fmtCompact, clsOf, movementsOf, closingSigned, openingOf, ledgerOf } from '../../lib/accounting-data';
-import { useTrialBalance } from '../../lib/accounting-hooks';
+import { fmt, fmtCompact, clsOf, openingOf, ledgerOf } from '../../lib/accounting-data';
+import { useTrialBalance, useBalanceFns } from '../../lib/accounting-hooks';
 
 function LedgerDrawer({
   account, classes, journals, onClose,
@@ -86,12 +86,14 @@ export default function TrialBalancePage() {
   const classes  = data?.classes  ?? {};
   const journals = data?.journals ?? {};
 
+  const { mvtOf, signedOf, openingOf: openOf } = useBalanceFns(data, showDraft);
+
   const activeAccounts = useMemo(() =>
     accounts.filter(a => {
-      const m = movementsOf(a.num, showDraft);
-      return openingOf(a.num) !== 0 || m.debit > 0 || m.credit > 0;
+      const m = mvtOf(a.num);
+      return openOf(a.num) !== 0 || m.debit > 0 || m.credit > 0;
     }),
-    [showDraft]);
+    [data, showDraft]);
 
   const byClass = useMemo(() => {
     const map: Record<string, Account[]> = {};
@@ -103,10 +105,10 @@ export default function TrialBalancePage() {
     return map;
   }, [activeAccounts]);
 
-  const totalDebitMvt = activeAccounts.reduce((s, a) => s + movementsOf(a.num, showDraft).debit, 0);
-  const totalCreditMvt = activeAccounts.reduce((s, a) => s + movementsOf(a.num, showDraft).credit, 0);
-  const totalDebitClose = activeAccounts.reduce((s, a) => { const v = closingSigned(a.num, showDraft); return v > 0 ? s + v : s; }, 0);
-  const totalCreditClose = activeAccounts.reduce((s, a) => { const v = closingSigned(a.num, showDraft); return v < 0 ? s - v : s; }, 0);
+  const totalDebitMvt = activeAccounts.reduce((s, a) => s + mvtOf(a.num).debit, 0);
+  const totalCreditMvt = activeAccounts.reduce((s, a) => s + mvtOf(a.num).credit, 0);
+  const totalDebitClose = activeAccounts.reduce((s, a) => { const v = signedOf(a.num); return v > 0 ? s + v : s; }, 0);
+  const totalCreditClose = activeAccounts.reduce((s, a) => { const v = signedOf(a.num); return v < 0 ? s - v : s; }, 0);
   const isTied = Math.abs(totalDebitClose - totalCreditClose) < 1;
 
   const result = totalCreditClose - totalDebitClose;
@@ -169,10 +171,10 @@ export default function TrialBalancePage() {
           {Object.keys(byClass).sort().map(k => {
             const cls = classes[Number(k)];
             const acctRows = byClass[k];
-            const clsDMvt = acctRows.reduce((s, a) => s + movementsOf(a.num, showDraft).debit, 0);
-            const clsCMvt = acctRows.reduce((s, a) => s + movementsOf(a.num, showDraft).credit, 0);
-            const clsDClose = acctRows.reduce((s, a) => { const v = closingSigned(a.num, showDraft); return v > 0 ? s + v : s; }, 0);
-            const clsCClose = acctRows.reduce((s, a) => { const v = closingSigned(a.num, showDraft); return v < 0 ? s - v : s; }, 0);
+            const clsDMvt = acctRows.reduce((s, a) => s + mvtOf(a.num).debit, 0);
+            const clsCMvt = acctRows.reduce((s, a) => s + mvtOf(a.num).credit, 0);
+            const clsDClose = acctRows.reduce((s, a) => { const v = signedOf(a.num); return v > 0 ? s + v : s; }, 0);
+            const clsCClose = acctRows.reduce((s, a) => { const v = signedOf(a.num); return v < 0 ? s - v : s; }, 0);
 
             return (
               <div key={k}>
@@ -192,8 +194,8 @@ export default function TrialBalancePage() {
                 </div>
 
                 {acctRows.map((a, i) => {
-                  const m = movementsOf(a.num, showDraft);
-                  const signed = closingSigned(a.num, showDraft);
+                  const m = mvtOf(a.num);
+                  const signed = signedOf(a.num);
                   return (
                     <div
                       key={a.num}

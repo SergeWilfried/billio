@@ -3,7 +3,7 @@
 // the same data shapes the page components already consume — so page diffs
 // are limited to swapping imports + adding a loading guard.
 
-import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
+import { useState, useEffect, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { useApp } from '../context/AppContext';
 import { supabase } from './supabase';
 import {
@@ -27,7 +27,7 @@ import {
 } from './api/accounting';
 import type { FiscalPeriod, AccountBalance } from './api/accounting';
 import {
-  movementsOf, closingSigned, ledgerOf, openingOf,
+  movementsOf, closingSigned, ledgerOf, openingOf, allMovements,
   ACCOUNTS, CLASSES, JOURNALS, ENTRIES, OPENING,
   FIXED_ASSETS, SUPPLIER_BILLS,
 } from './accounting-data';
@@ -40,12 +40,21 @@ const EXERCISE_YEAR = 2026;
 
 // ─── Shared helper ───────────────────────────────────────────────────────────
 
+// Module-level SWR cache — survives unmount/remount within a session.
+// Keys are scoped per-org (e.g. "journals:org-uuid") so switching orgs
+// never leaks data. Realtime + manual reload() keep entries fresh after writes.
+const SWR_CACHE = new Map<string, unknown>();
+
 function useAsyncData<T>(
+  cacheKey: string,
   loader: () => Promise<T>,
   deps: unknown[] = [],
 ): { data: T | null; loading: boolean; error: string | null; reload: () => void; setData: Dispatch<SetStateAction<T | null>> } {
-  const [data,    setData]    = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cached = SWR_CACHE.get(cacheKey) as T | undefined;
+  // Initialise from cache: page renders immediately with stale data on revisit
+  const [data,    setData]    = useState<T | null>(cached ?? null);
+  // Only show skeleton when there is genuinely nothing to display yet
+  const [loading, setLoading] = useState(cached === undefined);
   const [error,   setError]   = useState<string | null>(null);
   const [tick,    setTick]    = useState(0);
 
@@ -53,14 +62,26 @@ function useAsyncData<T>(
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setError(null);
+    // Show skeleton only on a true first load (no stale data in cache)
+    if (!SWR_CACHE.has(cacheKey)) setLoading(true);
     loader()
-      .then(d  => { if (!cancelled) { setData(d); setLoading(false); } })
-      .catch(e => { if (!cancelled) { setError(String(e?.message ?? e)); setLoading(false); } });
+      .then(d => {
+        if (!cancelled) {
+          SWR_CACHE.set(cacheKey, d);
+          setData(d);
+          setLoading(false);
+        }
+      })
+      .catch(e => {
+        if (!cancelled) {
+          setError(String(e?.message ?? e));
+          setLoading(false);
+        }
+      });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tick, ...deps]);
+  }, [cacheKey, tick, ...deps]);
 
   return { data, loading, error, reload, setData };
 }
@@ -77,7 +98,7 @@ export interface ChartData {
 
 export function useChartOfAccounts() {
   const { orgId } = useApp();
-  const result = useAsyncData<ChartData>(async () => {
+  const result = useAsyncData<ChartData>(`chart:${orgId}`, async () => {
     const [classes, accounts, journals, opening, balances] = await Promise.all([
       fetchAccountClasses(),
       fetchAccounts(orgId),
@@ -115,13 +136,13 @@ export function useJournalsData(includeDraft = true) {
     return { journals, accounts, entries };
   }, [orgId, includeDraft]);
 
-  const result = useAsyncData(load, [orgId, includeDraft]);
+  const result = useAsyncData<JournalsData>(`journals:${orgId}:${includeDraft}`, load, [orgId, includeDraft]);
 
   const postEntry = useCallback(async (entryId: string) => {
     // Optimistic: flip posted flag immediately so the drawer closes with correct status
-    result.setData(prev => prev ? {
+    result.setData((prev: JournalsData | null) => prev ? {
       ...prev,
-      entries: prev.entries.map(e => e.id === entryId ? { ...e, posted: true } : e),
+      entries: prev.entries.map((e: JournalEntry) => e.id === entryId ? { ...e, posted: true } : e),
     } : null);
     try {
       await postJournalEntry(entryId);
@@ -132,9 +153,9 @@ export function useJournalsData(includeDraft = true) {
 
   const removeEntry = useCallback(async (entryId: string) => {
     // Optimistic: remove from list immediately
-    result.setData(prev => prev ? {
+    result.setData((prev: JournalsData | null) => prev ? {
       ...prev,
-      entries: prev.entries.filter(e => e.id !== entryId),
+      entries: prev.entries.filter((e: JournalEntry) => e.id !== entryId),
     } : null);
     try {
       await deleteJournalEntry(entryId);
@@ -176,7 +197,7 @@ export interface TrialBalanceData {
 
 export function useTrialBalance() {
   const { orgId } = useApp();
-  return useAsyncData<TrialBalanceData>(async () => {
+  return useAsyncData<TrialBalanceData>(`trial:${orgId}`, async () => {
     const [classes, accounts, journals, opening, balances] = await Promise.all([
       fetchAccountClasses(),
       fetchAccounts(orgId),
@@ -197,7 +218,7 @@ export interface FinancialStatementsData {
 
 export function useFinancialStatements() {
   const { orgId } = useApp();
-  return useAsyncData<FinancialStatementsData>(async () => {
+  return useAsyncData<FinancialStatementsData>(`fin-stmt:${orgId}`, async () => {
     const [opening, balances] = await Promise.all([
       fetchOpeningBalances(orgId, EXERCISE_YEAR),
       fetchAccountBalances(orgId),
@@ -211,6 +232,7 @@ export function useFinancialStatements() {
 export function useFixedAssets() {
   const { orgId } = useApp();
   const result = useAsyncData<FixedAsset[]>(
+    `fixed-assets:${orgId}`,
     () => fetchFixedAssets(orgId),
     [orgId],
   );
@@ -239,6 +261,7 @@ export function useFixedAssets() {
 export function useSupplierBills() {
   const { orgId } = useApp();
   const result = useAsyncData<SupplierBill[]>(
+    `supplier-bills:${orgId}`,
     () => fetchSupplierBills(orgId),
     [orgId],
   );
@@ -283,7 +306,7 @@ export interface TaxData {
 
 export function useTaxData() {
   const { orgId } = useApp();
-  return useAsyncData<TaxData>(async () => {
+  return useAsyncData<TaxData>(`tax:${orgId}`, async () => {
     const [journals, entries] = await Promise.all([
       fetchJournals(orgId),
       fetchJournalEntries(orgId, { includeDraft: false }),
@@ -303,7 +326,7 @@ export interface PeriodClosingData {
 
 export function usePeriodClosing() {
   const { orgId } = useApp();
-  const result = useAsyncData<PeriodClosingData>(async () => {
+  const result = useAsyncData<PeriodClosingData>(`period-closing:${orgId}`, async () => {
     const [periods, entries, opening, balances] = await Promise.all([
       fetchFiscalPeriods(orgId, EXERCISE_YEAR),
       fetchJournalEntries(orgId, { includeDraft: true }),
@@ -321,13 +344,34 @@ export function usePeriodClosing() {
   return { ...result, closePeriod };
 }
 
+// ─── Balance helpers ──────────────────────────────────────────────────────────
+// Builds O(1) lookup fns from the data returned by any hook with { balances, opening }.
+// When data is null (still loading) or an account has no row, all values are 0.
+
+export function useBalanceFns(
+  data: { balances: AccountBalance[]; opening: Record<string, number> } | null,
+  _showDraft = false,
+) {
+  return useMemo(() => {
+    const map = new Map((data?.balances ?? []).map(b => [b.accountNum, { debit: b.totalDebit, credit: b.totalCredit }]));
+    const openMap = data?.opening ?? {};
+    const mvtOf = (num: string) => map.get(num) ?? { debit: 0, credit: 0 };
+    const openFn = (num: string) => openMap[num] ?? 0;
+    return {
+      mvtOf,
+      signedOf: (num: string) => { const m = mvtOf(num); return openFn(num) + m.debit - m.credit; },
+      openingOf: openFn,
+    };
+  }, [data]);
+}
+
 // ─── Re-export computed helpers so pages import from one place ────────────────
 // In MOCK mode these work directly on ENTRIES / OPENING (in-memory).
 // In real mode pages will receive pre-computed balances from the DB view
 // and should prefer those over calling these functions.
 
 export {
-  movementsOf, closingSigned, ledgerOf, openingOf,
+  movementsOf, closingSigned, ledgerOf, openingOf, allMovements,
   ACCOUNTS, CLASSES, JOURNALS, ENTRIES, OPENING,
   FIXED_ASSETS, SUPPLIER_BILLS,
 };

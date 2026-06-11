@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Icon from '../../components/Icon';
-import { fmt, closingSigned, movementsOf } from '../../lib/accounting-data';
+import { fmt } from '../../lib/accounting-data';
+import { useFinancialStatements, useBalanceFns } from '../../lib/accounting-hooks';
 
 type Tab = 'bilan' | 'cr' | 'flux' | 'notes';
 
@@ -11,6 +12,11 @@ interface SheetRow {
   bold?: boolean;
   highlight?: boolean;
 }
+
+type Fns = {
+  signedOf: (num: string) => number;
+  mvtOf: (num: string) => { debit: number; credit: number };
+};
 
 function SheetRowEl({ row }: { row: SheetRow }) {
   return (
@@ -30,35 +36,35 @@ function SheetRowEl({ row }: { row: SheetRow }) {
   );
 }
 
-function BalanceSheet() {
+function BalanceSheet({ signedOf }: Pick<Fns, 'signedOf'>) {
   // Actif
-  const software = closingSigned('211') + closingSigned('281');
-  const equipment = closingSigned('2441') + closingSigned('2441') > 0 ? closingSigned('2441') : 0;
-  const transport = closingSigned('2451');
-  const amortMat = Math.abs(closingSigned('2818'));
-  const netImmo = Math.max(0, closingSigned('211')) + Math.max(0, closingSigned('2441')) + Math.max(0, closingSigned('2451')) - amortMat;
-  const stocks = closingSigned('311');
-  const clients = closingSigned('411');
-  const tvaRecup = closingSigned('445');
-  const banque = closingSigned('521');
-  const caisse = closingSigned('571');
+  const software = signedOf('211') + signedOf('281');
+  const equipment = signedOf('2441') + signedOf('2441') > 0 ? signedOf('2441') : 0;
+  const transport = signedOf('2451');
+  const amortMat = Math.abs(signedOf('2818'));
+  const netImmo = Math.max(0, signedOf('211')) + Math.max(0, signedOf('2441')) + Math.max(0, signedOf('2451')) - amortMat;
+  const stocks = signedOf('311');
+  const clients = signedOf('411');
+  const tvaRecup = signedOf('445');
+  const banque = signedOf('521');
+  const caisse = signedOf('571');
   const totalActif = netImmo + stocks + clients + tvaRecup + banque + caisse;
 
   // Passif
-  const capital = Math.abs(closingSigned('101'));
-  const reserves = Math.abs(closingSigned('106'));
-  const reportAN = Math.abs(closingSigned('110'));
-  const emprunts = Math.abs(closingSigned('162'));
-  const fournisseurs = Math.abs(closingSigned('401'));
-  const personnel = Math.abs(closingSigned('421'));
-  const secu = Math.abs(closingSigned('431'));
-  const tvaFacturee = Math.abs(closingSigned('443'));
+  const capital = Math.abs(signedOf('101'));
+  const reserves = Math.abs(signedOf('106'));
+  const reportAN = Math.abs(signedOf('110'));
+  const emprunts = Math.abs(signedOf('162'));
+  const fournisseurs = Math.abs(signedOf('401'));
+  const personnel = Math.abs(signedOf('421'));
+  const secu = Math.abs(signedOf('431'));
+  const tvaFacturee = Math.abs(signedOf('443'));
   const totalPassif = capital + reserves + reportAN + emprunts + fournisseurs + personnel + secu + tvaFacturee;
 
   const actifRows: SheetRow[] = [
     { label: 'ACTIF IMMOBILISÉ', value: netImmo, bold: true },
     { label: 'Logiciels et licences (net)', value: Math.max(0, software), indent: 1 },
-    { label: 'Matériel de bureau (net)', value: Math.max(0, closingSigned('2441') - amortMat * 0.3), indent: 1 },
+    { label: 'Matériel de bureau (net)', value: Math.max(0, signedOf('2441') - amortMat * 0.3), indent: 1 },
     { label: 'Matériel de transport (net)', value: Math.max(0, transport), indent: 1 },
     { label: 'ACTIF CIRCULANT', value: stocks + clients + tvaRecup, bold: true },
     { label: 'Marchandises', value: stocks, indent: 1 },
@@ -99,17 +105,17 @@ function BalanceSheet() {
   );
 }
 
-function IncomeStatement() {
-  const sales701 = movementsOf('701').credit;
-  const sales706 = movementsOf('706').credit;
+function IncomeStatement({ mvtOf }: Pick<Fns, 'mvtOf'>) {
+  const sales701 = mvtOf('701').credit;
+  const sales706 = mvtOf('706').credit;
   const totalRevenue = sales701 + sales706;
-  const purchases = movementsOf('601').debit;
-  const otherPurchases = movementsOf('605').debit;
-  const bankFees = movementsOf('627').debit;
-  const payroll = movementsOf('661').debit;
-  const socialCharges = movementsOf('431').credit;
-  const amort = movementsOf('681').debit;
-  const interest = movementsOf('671').debit;
+  const purchases = mvtOf('601').debit;
+  const otherPurchases = mvtOf('605').debit;
+  const bankFees = mvtOf('627').debit;
+  const payroll = mvtOf('661').debit;
+  const socialCharges = mvtOf('431').credit;
+  const amort = mvtOf('681').debit;
+  const interest = mvtOf('671').debit;
   const totalCharges = purchases + otherPurchases + bankFees + payroll + socialCharges + amort + interest;
   const operatingResult = totalRevenue - (purchases + otherPurchases + bankFees + payroll + socialCharges + amort);
   const netResult = totalRevenue - totalCharges;
@@ -147,23 +153,22 @@ function IncomeStatement() {
   );
 }
 
-function CashFlow() {
-  const opening = closingSigned('521') + closingSigned('571');
-  const receipts = movementsOf('521').debit + movementsOf('571').debit;
-  const payments = movementsOf('521').credit + movementsOf('571').credit;
+function CashFlow({ signedOf, mvtOf }: Fns) {
+  const closing = signedOf('521') + signedOf('571');
+  const receipts = mvtOf('521').debit + mvtOf('571').debit;
+  const payments = mvtOf('521').credit + mvtOf('571').credit;
   const operFlow = receipts - payments;
-  const closing = opening;
 
   const rows = [
     { label: 'Trésorerie ouverture', value: 4180000 + 320000, bold: true },
-    { label: 'FLUX OPÉRATIONNELS', value: 0, bold: true },
-    { label: 'Encaissements clients', value: movementsOf('411').credit, indent: 1 },
-    { label: 'Décaissements fournisseurs', value: -movementsOf('401').debit, indent: 1 },
-    { label: 'Charges de personnel (cash)', value: -(movementsOf('421').credit + movementsOf('431').credit), indent: 1 },
-    { label: 'Charges bancaires', value: -movementsOf('627').debit, indent: 1 },
+    { label: 'FLUX OPÉRATIONNELS', value: operFlow, bold: true },
+    { label: 'Encaissements clients', value: mvtOf('411').credit, indent: 1 },
+    { label: 'Décaissements fournisseurs', value: -mvtOf('401').debit, indent: 1 },
+    { label: 'Charges de personnel (cash)', value: -(mvtOf('421').credit + mvtOf('431').credit), indent: 1 },
+    { label: 'Charges bancaires', value: -mvtOf('627').debit, indent: 1 },
     { label: 'FLUX DE FINANCEMENT', value: 0, bold: true },
-    { label: 'Remboursement emprunt', value: -movementsOf('162').debit, indent: 1 },
-    { label: 'Intérêts payés', value: -movementsOf('671').debit, indent: 1 },
+    { label: 'Remboursement emprunt', value: -mvtOf('162').debit, indent: 1 },
+    { label: 'Intérêts payés', value: -mvtOf('671').debit, indent: 1 },
     { label: 'Trésorerie clôture', value: closing, bold: true, highlight: true },
   ];
 
@@ -177,7 +182,7 @@ function CashFlow() {
   );
 }
 
-function Notes() {
+function Notes({ signedOf }: Pick<Fns, 'signedOf'>) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
@@ -200,9 +205,9 @@ function Notes() {
           </thead>
           <tbody>
             {[
-              { name: 'Logiciels et licences', gross: 1800000, amort: Math.abs(closingSigned('281')) },
-              { name: 'Matériel de bureau', gross: 2400000, amort: Math.abs(closingSigned('2818')) * 0.3 },
-              { name: 'Matériel de transport', gross: 6500000, amort: Math.abs(closingSigned('2818')) * 0.7 },
+              { name: 'Logiciels et licences', gross: 1800000, amort: Math.abs(signedOf('281')) },
+              { name: 'Matériel de bureau', gross: 2400000, amort: Math.abs(signedOf('2818')) * 0.3 },
+              { name: 'Matériel de transport', gross: 6500000, amort: Math.abs(signedOf('2818')) * 0.7 },
             ].map((row, i) => (
               <tr key={i} style={{ borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
                 <td style={{ padding: '10px 14px', fontWeight: 500 }}>{row.name}</td>
@@ -227,6 +232,8 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 export default function FinancialStatementsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('bilan');
+  const { data } = useFinancialStatements();
+  const { signedOf, mvtOf } = useBalanceFns(data);
 
   return (
     <div className="main">
@@ -246,7 +253,6 @@ export default function FinancialStatementsPage() {
       </div>
 
       <div className="content">
-        {/* Tab bar */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: 'var(--color-background-secondary)', padding: 4, borderRadius: 'var(--border-radius-lg)', border: '0.5px solid var(--color-border-tertiary)', width: 'fit-content' }}>
           {TABS.map(tab => (
             <button
@@ -266,10 +272,10 @@ export default function FinancialStatementsPage() {
           ))}
         </div>
 
-        {activeTab === 'bilan' && <BalanceSheet />}
-        {activeTab === 'cr' && <IncomeStatement />}
-        {activeTab === 'flux' && <CashFlow />}
-        {activeTab === 'notes' && <Notes />}
+        {activeTab === 'bilan' && <BalanceSheet signedOf={signedOf} />}
+        {activeTab === 'cr' && <IncomeStatement mvtOf={mvtOf} />}
+        {activeTab === 'flux' && <CashFlow signedOf={signedOf} mvtOf={mvtOf} />}
+        {activeTab === 'notes' && <Notes signedOf={signedOf} />}
       </div>
     </div>
   );

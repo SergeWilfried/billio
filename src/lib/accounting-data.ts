@@ -265,6 +265,19 @@ export function closingSigned(num: string, includeDraft = false): number {
   return openingOf(num) + m.debit - m.credit;
 }
 
+export function allMovements(includeDraft = false): Map<string, { debit: number; credit: number }> {
+  const map = new Map<string, { debit: number; credit: number }>();
+  for (const e of ENTRIES) {
+    if (!includeDraft && !e.posted) continue;
+    for (const l of e.lines) {
+      const m = map.get(l.acct);
+      if (m) { m.debit += l.d; m.credit += l.c; }
+      else map.set(l.acct, { debit: l.d, credit: l.c });
+    }
+  }
+  return map;
+}
+
 export function ledgerOf(num: string, includeDraft = false): LedgerRow[] {
   const rows: LedgerRow[] = [];
   let running = openingOf(num);

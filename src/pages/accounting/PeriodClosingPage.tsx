@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import Icon from '../../components/Icon';
 import { PageSkeleton } from '../../components/SkeletonLoader';
-import { closingSigned, fmt } from '../../lib/accounting-data';
-import { usePeriodClosing } from '../../lib/accounting-hooks';
+import { fmt } from '../../lib/accounting-data';
+import { usePeriodClosing, useBalanceFns } from '../../lib/accounting-hooks';
 
 const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
 
@@ -74,6 +74,7 @@ export default function PeriodClosingPage() {
 
   const entries = data?.entries ?? [];
   const periods = data?.periods ?? [];
+  const { signedOf } = useBalanceFns(data);
 
   // Closed = either DB says so (after reload) or user just clicked close (optimistic)
   const targetDbPeriod = periods.find(p => p.month === TARGET_MONTH);
@@ -100,11 +101,11 @@ export default function PeriodClosingPage() {
   };
 
   const result = useMemo(() => {
-    const produits = -(closingSigned('701') + closingSigned('706'));
-    const charges = closingSigned('601') + closingSigned('605') + closingSigned('627') +
-      closingSigned('661') + closingSigned('681') + closingSigned('671');
+    const produits = -(signedOf('701') + signedOf('706'));
+    const charges = signedOf('601') + signedOf('605') + signedOf('627') +
+      signedOf('661') + signedOf('681') + signedOf('671');
     return produits - charges;
-  }, []);
+  }, [data]);
 
   if (loading) return <PageSkeleton title="Clôture de période" variant="accounting" rows={5} />;
 

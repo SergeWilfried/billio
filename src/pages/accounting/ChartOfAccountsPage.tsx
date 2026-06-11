@@ -4,8 +4,8 @@ import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
 import type { Account, AccountClass, Journal } from '../../lib/accounting-data';
-import { fmt, fmtCompact, clsOf, movementsOf, closingSigned, openingOf, ledgerOf } from '../../lib/accounting-data';
-import { useChartOfAccounts } from '../../lib/accounting-hooks';
+import { fmt, fmtCompact, clsOf, openingOf, ledgerOf } from '../../lib/accounting-data';
+import { useChartOfAccounts, useBalanceFns } from '../../lib/accounting-hooks';
 import { EmptyState } from '../../components/EmptyState';
 import { ChartOfAccountsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
@@ -21,15 +21,17 @@ function SideTag({ signed }: { signed: number }) {
   );
 }
 
-function AccountDrawer({ account, classes, journals, onClose }: {
+function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }: {
   account: Account;
   classes: Record<number, AccountClass>;
   journals: Record<string, Journal>;
   onClose: () => void;
+  mvtOf: (num: string) => { debit: number; credit: number };
+  signedOf: (num: string) => number;
 }) {
-  const mvt = movementsOf(account.num);
+  const mvt = mvtOf(account.num);
   const opening = openingOf(account.num);
-  const closing = closingSigned(account.num);
+  const closing = signedOf(account.num);
   const ledger = ledgerOf(account.num);
   const cls = clsOf(account.num);
   const clsInfo = classes[cls];
@@ -181,18 +183,20 @@ export default function ChartOfAccountsPage() {
   const classes  = data?.classes  ?? {};
   const journals = data?.journals ?? {};
 
-  const cash = closingSigned('521') + closingSigned('571');
-  const recv = closingSigned('411');
-  const pay  = -closingSigned('401');
+  const { mvtOf, signedOf, openingOf: openOf } = useBalanceFns(data);
+
+  const cash = signedOf('521') + signedOf('571');
+  const recv = signedOf('411');
+  const pay  = -signedOf('401');
 
   const usedClassCount = useMemo(() => {
     const s = new Set<number>();
     accounts.forEach(a => {
-      const m = movementsOf(a.num);
-      if (m.debit || m.credit || openingOf(a.num)) s.add(clsOf(a.num));
+      const m = mvtOf(a.num);
+      if (m.debit || m.credit || openOf(a.num)) s.add(clsOf(a.num));
     });
     return s.size;
-  }, [accounts]);
+  }, [data]);
 
   const filtered = useMemo(() => {
     return accounts.filter(a => {
@@ -299,7 +303,7 @@ export default function ChartOfAccountsPage() {
               {Object.keys(byClass).sort().map((k, gi) => {
                 const cls = classes[Number(k)];
                 const clsAccounts = byClass[k];
-                const clsSigned = clsAccounts.reduce((s, a) => s + closingSigned(a.num), 0);
+                const clsSigned = clsAccounts.reduce((s, a) => s + signedOf(a.num), 0);
                 const isCollapsed = collapsed[k];
                 return (
                   <div key={k} style={gi > 0 ? { borderTop: '0.5px solid var(--color-border-tertiary)' } : {}}>
@@ -322,8 +326,8 @@ export default function ChartOfAccountsPage() {
                     </div>
 
                     {!isCollapsed && clsAccounts.map((a) => {
-                      const m = movementsOf(a.num);
-                      const signed = closingSigned(a.num);
+                      const m = mvtOf(a.num);
+                      const signed = signedOf(a.num);
                       return (
                         <div
                           key={a.num}
@@ -367,7 +371,7 @@ export default function ChartOfAccountsPage() {
         </div>
       </div>
 
-      {selected && <AccountDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} />}
+      {selected && <AccountDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} mvtOf={mvtOf} signedOf={signedOf} />}
       {showNewAccount && <NewAccountModal classes={classes} onSave={addAccount} onClose={() => setShowNewAccount(false)} />}
     </div>
   );
