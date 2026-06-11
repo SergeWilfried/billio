@@ -6,6 +6,7 @@ import { EmptyState } from '../../components/EmptyState';
 import type { FixedAsset } from '../../lib/accounting-data';
 import { fmt, fmtCompact, amortSchedule, netValueOf } from '../../lib/accounting-data';
 import { useFixedAssets } from '../../lib/accounting-hooks';
+import { FixedAssetsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
 function DepreciationProgress({ pct }: { pct: number }) {
   return (
@@ -127,9 +128,8 @@ export default function FixedAssetsPage() {
 
           {fixedAssets.length === 0
             ? <EmptyState
-                variant="compact"
-                icon={<Icon name="building-warehouse" size={24} />}
-                title="Aucune immobilisation"
+            illustration={<FixedAssetsEmptyIllustration />}
+                title="Aucune immobilisation trouvée"
                 description="Ajoutez votre première immobilisation pour suivre les amortissements."
               />
             : null}

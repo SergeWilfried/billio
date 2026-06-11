@@ -7,6 +7,7 @@ import { EmptyState } from '../../components/EmptyState';
 import type { SupplierBill } from '../../lib/accounting-data';
 import { fmt, fmtCompact } from '../../lib/accounting-data';
 import { useSupplierBills } from '../../lib/accounting-hooks';
+import { SuppliersEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
 const AV_COLORS = [
   { bg: '#B5D4F4', color: '#0C447C' },
@@ -180,8 +181,7 @@ export default function SuppliersPage() {
 
           {filtered.length === 0
             ? <EmptyState
-                variant="compact"
-                icon={<Icon name="truck-delivery" size={24} />}
+                illustration={<SuppliersEmptyIllustration />}
                 title="Aucune facture"
                 description="Aucune facture fournisseur ne correspond au statut sélectionné."
               />

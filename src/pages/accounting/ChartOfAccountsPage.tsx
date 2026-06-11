@@ -6,6 +6,7 @@ import type { Account, AccountClass, Journal } from '../../lib/accounting-data';
 import { fmt, fmtCompact, clsOf, movementsOf, closingSigned, openingOf, ledgerOf } from '../../lib/accounting-data';
 import { useChartOfAccounts } from '../../lib/accounting-hooks';
 import { EmptyState } from '../../components/EmptyState';
+import { ChartOfAccountsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
 function SideTag({ signed }: { signed: number }) {
   if (Math.abs(signed) < 0.5) return null;
@@ -76,9 +77,8 @@ function AccountDrawer({ account, classes, journals, onClose }: {
 
       {ledger.length === 0 ? (
         <EmptyState
-          variant="compact"
-          icon={<Icon name="list" size={24} />}
-          title="Aucun mouvement"
+          illustration={<ChartOfAccountsEmptyIllustration />}
+          title="Aucun mouvement trouvé"
           description="Ce compte n'a pas encore de mouvements comptabilisés."
         />
       ) : (
@@ -237,8 +237,7 @@ export default function ChartOfAccountsPage() {
           </div>
           {Object.keys(byClass).length === 0 ? (
             <EmptyState
-              variant="compact"
-              icon={<Icon name="book" size={24} />}
+              illustration={<ChartOfAccountsEmptyIllustration />}
               title="Aucun compte trouvé"
               description="Aucun compte ne correspond à votre recherche ou au filtre sélectionné."
             />

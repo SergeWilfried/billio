@@ -8,6 +8,7 @@ import StatusPill from '../../components/accounting/StatusPill';
 import type { JournalEntry, Journal } from '../../lib/accounting-data';
 import { fmt, fmtCompact, acctOf } from '../../lib/accounting-data';
 import { useJournalsData } from '../../lib/accounting-hooks';
+import { JournalsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
 function entryTotal(e: JournalEntry) {
   return e.lines.reduce((s, l) => s + l.d, 0);
@@ -239,9 +240,8 @@ export default function JournalsPage() {
 
           {filtered.length === 0
             ? <EmptyState
-                variant="compact"
-                icon={<Icon name="notebook" size={24} />}
-                title="Aucune écriture"
+                illustration={<JournalsEmptyIllustration />}
+                title="Aucune écriture trouvée"
                 description="Aucune écriture ne correspond au journal ou filtre sélectionné."
               />
             : filtered.map((e, i) => {
