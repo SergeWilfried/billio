@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction, type ReactNode } from 'react';
+import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { INITIAL_INVOICES, INITIAL_ACTIVITY, INITIAL_CLIENTS, INITIAL_PAYMENTS, INITIAL_PRODUCTS, INITIAL_QUOTES } from '../data';
 import { fetchInvoices }   from '../lib/api/invoices';
@@ -89,10 +90,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    async function boot() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
-
+    async function boot(user: User) {
+      setLoading(true);
       setUserId(user.id);
       const email = user.email ?? '';
       const meta  = user.user_metadata as Record<string, string> | undefined;
@@ -118,7 +117,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setOrgId(resolvedOrgId);
 
       if (!resolvedOrgId) {
-        // No org membership found — new user whose trigger hasn't run yet
         setNeedsOnboarding(true);
       } else {
         const { data: org, error: orgErr } = await supabase
@@ -162,7 +160,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    boot();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user) {
+        boot(session.user);
+      }
+      if (event === 'SIGNED_OUT') {
+        setUserId('');
+        setOrgId('');
+        setUserLabel('');
+        setUserInitials('??');
+        setOrgSettings(EMPTY_ORG);
+        setNeedsOnboarding(false);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const completeOnboarding = useCallback((bizName: string) => {

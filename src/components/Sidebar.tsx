@@ -26,6 +26,17 @@ const NAV_FINANCE: NavItem[] = [
   { icon: 'file-text',   label: 'Devis',     to: '/quotes'   },
 ];
 
+const NAV_ACCOUNTING: NavItem[] = [
+  { icon: 'book',               label: 'Plan comptable',    to: '/accounting/chart-of-accounts'    },
+  { icon: 'notebook',           label: 'Journaux',          to: '/accounting/journals'             },
+  { icon: 'book-2',             label: 'Balance générale',  to: '/accounting/trial-balance'        },
+  { icon: 'report-money',       label: 'États financiers',  to: '/accounting/financial-statements' },
+  { icon: 'building-warehouse', label: 'Immobilisations',   to: '/accounting/fixed-assets'         },
+  { icon: 'truck-delivery',     label: 'Fournisseurs',      to: '/accounting/suppliers'            },
+  { icon: 'percentage',         label: 'Fiscalité',         to: '/accounting/tax'                  },
+  { icon: 'lock',               label: 'Clôture',           to: '/accounting/period-closing'       },
+];
+
 const NAV_ACCOUNT: NavItem[] = [
   { icon: 'settings', label: 'Paramètres', to: '/settings' },
 ];
@@ -67,6 +78,18 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
 
         <div className="nav-section">Finance</div>
         {NAV_FINANCE.map(({ icon, label, to }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+          >
+            <Icon name={icon} ariaHidden />
+            {label}
+          </NavLink>
+        ))}
+
+        <div className="nav-section">Comptabilité</div>
+        {NAV_ACCOUNTING.map(({ icon, label, to }) => (
           <NavLink
             key={to}
             to={to}

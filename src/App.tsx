@@ -17,6 +17,14 @@ import PaymentsPage from './pages/PaymentsPage';
 import QuotesPage from './pages/QuotesPage';
 import TemplatesPage from './pages/TemplatesPage';
 import SettingsPage from './pages/SettingsPage';
+import ChartOfAccountsPage from './pages/accounting/ChartOfAccountsPage';
+import JournalsPage from './pages/accounting/JournalsPage';
+import TrialBalancePage from './pages/accounting/TrialBalancePage';
+import FinancialStatementsPage from './pages/accounting/FinancialStatementsPage';
+import FixedAssetsPage from './pages/accounting/FixedAssetsPage';
+import SuppliersPage from './pages/accounting/SuppliersPage';
+import TaxPage from './pages/accounting/TaxPage';
+import PeriodClosingPage from './pages/accounting/PeriodClosingPage';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
@@ -81,6 +89,14 @@ export default function App() {
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/clients"  element={<ClientsPage />} />
             <Route path="/products" element={<ProductsPage />} />
+            <Route path="/accounting/chart-of-accounts"    element={<ChartOfAccountsPage />} />
+            <Route path="/accounting/journals"             element={<JournalsPage />} />
+            <Route path="/accounting/trial-balance"        element={<TrialBalancePage />} />
+            <Route path="/accounting/financial-statements" element={<FinancialStatementsPage />} />
+            <Route path="/accounting/fixed-assets"         element={<FixedAssetsPage />} />
+            <Route path="/accounting/suppliers"            element={<SuppliersPage />} />
+            <Route path="/accounting/tax"                  element={<TaxPage />} />
+            <Route path="/accounting/period-closing"       element={<PeriodClosingPage />} />
             <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/quotes"     element={<QuotesPage />} />
