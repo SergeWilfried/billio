@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction, type ReactNode } from 'react';
+import { useToast } from './ToastContext';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { INITIAL_INVOICES, INITIAL_ACTIVITY, INITIAL_CLIENTS, INITIAL_PAYMENTS, INITIAL_PRODUCTS, INITIAL_QUOTES } from '../data';
@@ -48,11 +49,8 @@ interface AppContextValue {
   needsOnboarding:    boolean;
   completeOnboarding: (bizName: string) => void;
   // UI
-  loading:     boolean;
-  toastMsg:    string;
-  toastVisible:boolean;
-  toastError:  boolean;
-  showToast:   (msg: string, isError?: boolean) => void;
+  loading:   boolean;
+  showToast: (msg: string, isError?: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -75,10 +73,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [loading,         setLoading]         = useState(!MOCK);
 
-  const [toastMsg,     setToastMsg]     = useState('');
-  const [toastVisible, setToastVisible] = useState(false);
-  const [toastError,   setToastError]   = useState(false);
-  const toastTimer   = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { showToast } = useToast();
   const realtimeRef  = useRef<RealtimeChannel | null>(null);
 
   // Derived client lookup
@@ -260,16 +255,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUserLabel(prev => prev || bizName);
   }, []);
 
-  const showToast = useCallback((msg: string, isError = false) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToastMsg(msg);
-    setToastError(isError);
-    setToastVisible(true);
-    toastTimer.current = setTimeout(() => setToastVisible(false), 2600);
-  }, []);
-
-  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
-
   return (
     <AppContext.Provider value={{
       invoices,  setInvoices,
@@ -285,7 +270,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       userLabel, userInitials,
       needsOnboarding, completeOnboarding,
       loading,
-      toastMsg, toastVisible, toastError,
       showToast,
     }}>
       {children}

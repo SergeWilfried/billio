@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { AppProvider, useApp } from './context/AppContext';
+import { ToastProvider } from './context/ToastContext';
 import AppShell from './components/AppShell';
 
 // ── Lazy page chunks ────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ export default function App() {
     : () => { supabase.auth.signOut(); };
 
   return (
+    <ToastProvider>
     <AppProvider>
       <Suspense fallback={<div style={{ background: 'var(--color-background-primary)', minHeight: '100dvh' }} />}>
       <Routes>
@@ -114,6 +116,7 @@ export default function App() {
       </Routes>
       </Suspense>
     </AppProvider>
+    </ToastProvider>
   );
 }
 
