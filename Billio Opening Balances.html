@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Billio — Opening balances</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="accounting-shell.css">
+<style>
+.mono { font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+/* ---------- migration intro ---------- */
+.ob-intro { display: flex; align-items: center; gap: 18px; padding: 16px 20px; border-radius: var(--border-radius-lg); margin-bottom: 16px;
+  background: linear-gradient(110deg, var(--brand-tint) 0%, #EEF4FB 52%, var(--color-background-primary) 100%);
+  border: 0.5px solid color-mix(in srgb, var(--brand) 22%, white); box-shadow: var(--shadow-sm); }
+.ob-intro-ico { width: 44px; height: 44px; flex-shrink: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #fff;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--brand) 80%, white), var(--brand-dark)); box-shadow: 0 4px 12px -3px rgba(12,68,124,0.45); }
+.ob-intro-main { flex: 1; min-width: 0; }
+.ob-intro-title { font-size: 15px; font-weight: 800; letter-spacing: -0.3px; }
+.ob-intro-sub { font-size: 12.5px; color: var(--color-text-secondary); margin-top: 3px; line-height: 1.5; max-width: 62ch; }
+.ob-steps { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ob-step { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 20px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); font-size: 11.5px; font-weight: 600; color: var(--color-text-secondary); transition: all .2s; }
+.ob-step.done { background: var(--brand); border-color: var(--brand); color: #fff; }
+.ob-step.active { border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent); }
+.ob-step .sn { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 800; background: var(--color-background-secondary); color: var(--color-text-tertiary); }
+.ob-step.done .sn, .ob-step.active .sn { background: rgba(255,255,255,0.25); color: inherit; }
+.ob-step.active .sn { background: var(--brand-tint); color: var(--brand); }
+.ob-steparrow { color: var(--color-text-tertiary); font-size: 13px; }
+
+/* ---------- layout ---------- */
+.ob-grid { display: grid; grid-template-columns: minmax(0,1fr) 332px; gap: 16px; align-items: start; }
+
+/* ---------- entry card ---------- */
+.ob-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+.ob-cardhead { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.jchip { font-size: 11px; font-weight: 800; padding: 6px 11px; border-radius: 7px; color: #fff; letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 6px; }
+.jchip i { font-size: 13px; }
+.jchip .lk { font-weight: 600; opacity: 0.85; font-size: 10px; }
+.ob-statuschip { margin-left: auto; font-size: 11px; font-weight: 700; padding: 4px 11px; border-radius: 20px; display: inline-flex; align-items: center; gap: 6px; background: var(--color-background-secondary); color: var(--color-text-secondary); }
+.ob-statuschip i { font-size: 13px; }
+
+.ob-metarow { display: grid; grid-template-columns: 200px 1fr 150px; gap: 14px; padding: 16px 20px; border-bottom: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); }
+.ob-fld-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: var(--color-text-tertiary); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+.ob-input { width: 100%; padding: 9px 11px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); font-size: 13px; font-family: var(--font-sans); background: var(--color-background-primary); color: var(--color-text-primary); }
+.ob-input:focus { outline: none; border-color: color-mix(in srgb, var(--brand) 70%, white); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent); }
+.ob-datefield { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-primary); }
+.ob-datefield i { font-size: 16px; color: var(--brand); }
+.ob-datefield .dv { font-size: 13px; font-weight: 700; }
+.ob-datefield .dt { font-size: 10px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; color: var(--brand); background: var(--brand-tint); padding: 2px 7px; border-radius: 5px; margin-left: auto; }
+
+/* lines */
+.ob-lineshead, .ob-line { display: grid; grid-template-columns: 1fr 150px 150px 34px; gap: 10px; align-items: center; }
+.ob-lineshead { padding: 12px 20px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--color-text-tertiary); }
+.ob-lineshead .r { text-align: right; padding-right: 12px; }
+.ob-lines { padding: 0 20px; }
+.ob-line { padding: 5px 0; }
+.ob-line.flash { animation: obflash 1.1s ease; }
+@keyframes obflash { 0% { background: color-mix(in srgb, var(--brand) 16%, transparent); } 100% { background: transparent; } }
+.ob-acct { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ob-dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; background: var(--color-border-secondary); transition: background .15s; }
+.ob-sel { flex: 1; min-width: 0; appearance: none; padding: 9px 28px 9px 11px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); font-size: 12.5px; font-family: var(--font-sans); background: var(--color-background-primary); color: var(--color-text-primary); cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235C687A' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; }
+.ob-sel:focus { outline: none; border-color: color-mix(in srgb, var(--brand) 70%, white); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent); }
+.ob-sel.empty { color: var(--color-text-tertiary); }
+.ob-amt { width: 100%; padding: 9px 12px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); font-size: 13px; font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; background: var(--color-background-primary); color: var(--color-text-primary); }
+.ob-amt::placeholder { color: var(--color-border-secondary); }
+.ob-amt:focus { outline: none; border-color: color-mix(in srgb, var(--brand) 70%, white); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent); }
+.ob-amt.filled-d { border-color: color-mix(in srgb, var(--brand) 35%, var(--color-border-secondary)); }
+.ob-del { width: 34px; height: 36px; border: none; background: transparent; color: var(--color-text-tertiary); cursor: pointer; border-radius: 7px; font-size: 15px; display: flex; align-items: center; justify-content: center; }
+.ob-del:hover { background: #FCEBEB; color: #A32D2D; }
+.add-line-btn { font-size: 12.5px; font-weight: 600; color: var(--brand); background: none; border: none; cursor: pointer; padding: 12px 20px 4px; display: inline-flex; align-items: center; gap: 6px; }
+.add-line-btn:hover { color: var(--brand-dark); }
+
+/* totals */
+.ob-totals { display: grid; grid-template-columns: 1fr 150px 150px 34px; gap: 10px; align-items: center; padding: 13px 20px; margin-top: 8px; background: var(--color-background-secondary); border-top: 1px solid var(--color-border-secondary); }
+.ob-tot-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-text-secondary); display: flex; align-items: center; gap: 8px; }
+.ob-tot-ecart { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
+.ob-tot-ecart.no { background: #FCEBEB; color: #A32D2D; }
+.ob-tot-ecart.ok { background: #E7F3E2; color: #2E7D32; }
+.ob-tot-val { text-align: right; padding-right: 12px; font-size: 14px; font-weight: 800; }
+
+/* banner */
+.ob-banner { display: flex; align-items: center; gap: 12px; padding: 13px 20px; font-size: 12.5px; font-weight: 600; }
+.ob-banner.ok { background: #E7F3E2; color: #226B2A; }
+.ob-banner.no { background: #FCF3E8; color: #8A5A12; }
+.ob-banner i.lead { font-size: 18px; flex-shrink: 0; }
+.ob-banner .bn-main { flex: 1; min-width: 0; }
+.ob-banner .bn-main b { font-weight: 800; }
+.ob-fixbtn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; border-radius: var(--border-radius-md); font-size: 12px; font-weight: 700; cursor: pointer; border: none; background: #B26A09; color: #fff; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.ob-fixbtn:hover { background: #95590A; }
+.ob-fixbtn i { font-size: 14px; }
+
+/* foot */
+.ob-foot { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-top: 0.5px solid var(--color-border-tertiary); }
+.ob-foot .hint { font-size: 11.5px; color: var(--color-text-tertiary); display: flex; align-items: center; gap: 6px; }
+.ob-foot .hint i { font-size: 14px; }
+.ob-foot .spacer { flex: 1; }
+.btn-lg { padding: 11px 18px; font-size: 13.5px; font-weight: 700; }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+.btn[disabled]:hover { background: var(--brand); border-color: var(--brand); }
+
+/* ---------- preview panel ---------- */
+.ob-preview { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; position: sticky; top: 0; }
+.ob-pv-head { padding: 14px 18px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.ob-pv-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--color-text-tertiary); display: flex; align-items: center; gap: 6px; }
+.ob-pv-eyebrow i { font-size: 13px; color: var(--brand); }
+.ob-pv-title { font-size: 14px; font-weight: 800; letter-spacing: -0.3px; margin-top: 5px; }
+.ob-pv-date { font-size: 11.5px; color: var(--color-text-secondary); margin-top: 2px; }
+.ob-pv-classcol { padding: 6px 18px 4px; }
+.ob-pvrow { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.ob-pvrow:last-child { border-bottom: none; }
+.ob-pv-cls { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ob-pv-cls .nm { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-pv-cls .nm small { display: block; font-size: 10px; color: var(--color-text-tertiary); font-weight: 500; }
+.ob-pv-amt { font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.ob-pv-amt .sd { font-size: 9.5px; font-weight: 700; color: var(--color-text-tertiary); margin-left: 3px; }
+.ob-pv-empty { padding: 26px 18px; text-align: center; font-size: 12px; color: var(--color-text-tertiary); }
+.ob-pv-tot { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; padding: 12px 18px; background: var(--color-background-secondary); border-top: 1px solid var(--color-border-secondary); align-items: baseline; }
+.ob-pv-tot .lbl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--color-text-tertiary); }
+.ob-pv-tot .col { text-align: right; }
+.ob-pv-tot .col .ct { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--color-text-tertiary); }
+.ob-pv-tot .col .cv { font-size: 12.5px; font-weight: 800; }
+.ob-pv-note { display: flex; gap: 9px; align-items: flex-start; padding: 12px 18px; font-size: 11px; color: var(--color-text-secondary); line-height: 1.5; border-top: 0.5px solid var(--color-border-tertiary); }
+.ob-pv-note i { color: var(--brand); font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+.ob-pv-note b { color: var(--color-text-primary); font-weight: 700; }
+
+/* ---------- success ---------- */
+.ob-success { max-width: 760px; margin: 0 auto; }
+.ob-suc-hero { text-align: center; padding: 14px 0 22px; }
+.ob-suc-badge { width: 68px; height: 68px; margin: 0 auto; border-radius: 20px; background: linear-gradient(155deg, #4FAE58, #2E7D32); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 34px; box-shadow: 0 12px 28px -10px rgba(46,125,50,0.55); animation: pop .5s cubic-bezier(.18,.89,.32,1.28); }
+@keyframes pop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.08); } 100% { transform: scale(1); opacity: 1; } }
+.ob-suc-title { font-size: 24px; font-weight: 800; letter-spacing: -0.7px; margin-top: 16px; }
+.ob-suc-sub { font-size: 13.5px; color: var(--color-text-secondary); margin-top: 9px; line-height: 1.55; max-width: 50ch; margin-left: auto; margin-right: auto; }
+.ob-suc-recap { display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+.ob-recap-pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 20px; background: var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary); font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
+.ob-recap-pill i { font-size: 14px; color: var(--brand); }
+.ob-recap-pill b { color: var(--color-text-primary); font-weight: 800; }
+.ob-recap-pill.lock i { color: #226B2A; }
+
+.ob-where-label { font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--color-text-tertiary); margin: 26px 0 12px; text-align: center; }
+.ob-where { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.ob-wcard { display: block; text-decoration: none; color: inherit; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); padding: 16px; transition: border-color .14s, box-shadow .14s, transform .14s; }
+.ob-wcard:hover { border-color: color-mix(in srgb, var(--brand) 45%, white); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.ob-wcard-ico { width: 36px; height: 36px; border-radius: 10px; background: var(--brand-tint); color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.ob-wcard-t { font-size: 13.5px; font-weight: 700; margin-top: 12px; display: flex; align-items: center; gap: 6px; }
+.ob-wcard-t .ext { font-size: 13px; color: var(--color-text-tertiary); margin-left: auto; }
+.ob-wcard-s { font-size: 11.5px; color: var(--color-text-secondary); margin-top: 5px; line-height: 1.5; }
+.ob-wcard-mini { margin-top: 12px; padding-top: 11px; border-top: 0.5px dashed var(--color-border-secondary); font-size: 11px; }
+.ob-mini-row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.ob-mini-row .ml { color: var(--color-text-secondary); }
+.ob-mini-row .mv { font-weight: 700; font-family: "SFMono-Regular", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.ob-mini-row .mv.c { color: var(--color-text-secondary); }
+.ob-suc-cta { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 26px; }
+.ob-suc-edit { display: block; text-align: center; margin-top: 16px; font-size: 12px; font-weight: 600; color: var(--color-text-tertiary); cursor: pointer; }
+.ob-suc-edit:hover { color: var(--brand); }
+
+@media (max-width: 1080px) {
+  .ob-grid { grid-template-columns: 1fr; }
+  .ob-preview { position: static; }
+  .ob-steps { display: none; }
+}
+@media (max-width: 720px) {
+  .ob-where { grid-template-columns: 1fr; }
+  .ob-metarow { grid-template-columns: 1fr; }
+}
+
+/* density tweak */
+body.ob-dense .ob-line { padding: 2px 0; }
+body.ob-dense .ob-amt, body.ob-dense .ob-sel { padding-top: 7px; padding-bottom: 7px; }
+body.ob-dense .ob-intro { padding: 12px 16px; }
+body.ob-dense .ob-intro-sub { display: none; }
+</style>
+</head>
+<body>
+<h1 class="sr-only">Billio — Opening balances</h1>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="crumb"><i class="ti ti-flag"></i> Accounting</div>
+        <div class="page-title" id="pageTitle">Opening balances</div>
+        <div class="page-sub" id="pageSub">Journal des à-nouveaux · reprise au 1 juin 2026</div>
+      </div>
+      <div class="topbar-actions">
+        <span class="period-pill"><span class="dot"></span> Exercice 2026 · ouverture</span>
+      </div>
+    </div>
+    <div class="content">
+
+      <!-- migration intro -->
+      <div class="ob-intro">
+        <div class="ob-intro-ico"><i class="ti ti-arrows-exchange"></i></div>
+        <div class="ob-intro-main">
+          <div class="ob-intro-title" id="introTitle">Coming from another platform?</div>
+          <div class="ob-intro-sub">Enter your closing balances as one balanced entry dated at the start of your exercice. Billio posts it to <b>journal OD</b> and adopts it as your opening position — your à-nouveaux flow straight into the trial balance and ledger.</div>
+        </div>
+        <div class="ob-steps" id="obSteps">
+          <div class="ob-step active" data-step="1"><span class="sn">1</span> Enter balances</div>
+          <i class="ti ti-chevron-right ob-steparrow"></i>
+          <div class="ob-step" data-step="2"><span class="sn">2</span> Balance it</div>
+          <i class="ti ti-chevron-right ob-steparrow"></i>
+          <div class="ob-step" data-step="3"><span class="sn">3</span> Adopt</div>
+        </div>
+      </div>
+
+      <!-- composer + preview -->
+      <div class="ob-grid" id="composerView">
+        <div class="ob-card">
+          <div class="ob-cardhead">
+            <span class="jchip" style="background:var(--c2);"><i class="ti ti-arrows-exchange"></i> OD · Opérations diverses <span class="lk"><i class="ti ti-lock" style="font-size:11px;"></i></span></span>
+            <span class="ob-statuschip" id="entryStatus"><i class="ti ti-point-filled" style="color:var(--color-text-tertiary);"></i> Draft — not yet adopted</span>
+          </div>
+
+          <div class="ob-metarow">
+            <div>
+              <div class="ob-fld-label"><i class="ti ti-calendar-event" style="font-size:12px;"></i> Date</div>
+              <div class="ob-datefield"><i class="ti ti-calendar-event"></i><span class="dv">1 juin 2026</span><span class="dt">FY start</span></div>
+            </div>
+            <div>
+              <div class="ob-fld-label">Libellé</div>
+              <input class="ob-input" id="mLabel" type="text" value="Reprise des à-nouveaux — exercice 2026">
+            </div>
+            <div>
+              <div class="ob-fld-label">Pièce</div>
+              <input class="ob-input mono" id="mPiece" type="text" value="AN-2026-001">
+            </div>
+          </div>
+
+          <div class="ob-lineshead">
+            <div>Compte</div>
+            <div class="r">Débit</div>
+            <div class="r">Crédit</div>
+            <div></div>
+          </div>
+          <div class="ob-lines" id="obLines"></div>
+          <button class="add-line-btn" onclick="addLine()"><i class="ti ti-plus"></i> Add an account</button>
+
+          <div class="ob-totals">
+            <div class="ob-tot-lbl">Totaux <span class="ob-tot-ecart no" id="ecartPill">Écart 0</span></div>
+            <div class="ob-tot-val mono" id="totD">0</div>
+            <div class="ob-tot-val mono" id="totC">0</div>
+            <div></div>
+          </div>
+
+          <div class="ob-banner no" id="obBanner"></div>
+
+          <div class="ob-foot">
+            <span class="hint"><i class="ti ti-info-circle"></i> Débit must equal crédit before you can adopt</span>
+            <span class="spacer"></span>
+            <a class="btn" href="Billio Journals.html">Cancel</a>
+            <button class="btn btn-primary btn-lg" id="postBtn" disabled onclick="post()"><i class="ti ti-stamp"></i> Adopt as opening position</button>
+          </div>
+        </div>
+
+        <!-- live preview -->
+        <aside class="ob-preview">
+          <div class="ob-pv-head">
+            <div class="ob-pv-eyebrow"><i class="ti ti-eye"></i> Live preview</div>
+            <div class="ob-pv-title" id="previewTitle">À-nouveaux by class</div>
+            <div class="ob-pv-date">au 1 juin 2026 · XOF</div>
+          </div>
+          <div class="ob-pv-classcol" id="pvRows"></div>
+          <div class="ob-pv-tot">
+            <div class="lbl">Total</div>
+            <div class="col"><div class="ct">Débiteur</div><div class="cv mono" id="pvTotD">0</div></div>
+            <div class="col"><div class="ct">Créditeur</div><div class="cv mono" id="pvTotC">0</div></div>
+          </div>
+          <div class="ob-pv-note"><i class="ti ti-info-circle"></i><div>Once adopted, these become the <b>à-nouveau</b> opening line on every account's ledger and the first column of your trial balance.</div></div>
+        </aside>
+      </div>
+
+      <!-- success -->
+      <div class="ob-success" id="successView" style="display:none;">
+        <div class="ob-suc-hero">
+          <div class="ob-suc-badge"><i class="ti ti-circle-check-filled"></i></div>
+          <div class="ob-suc-title" id="sucTitle">Opening position adopted</div>
+          <div class="ob-suc-sub">Your à-nouveaux are now Billio's starting point for exercice 2026. Every account opens from these balances — no need to re-enter anything.</div>
+          <div class="ob-suc-recap" id="sucRecap"></div>
+        </div>
+        <div class="ob-where-label">Where your opening balances appear now</div>
+        <div class="ob-where">
+          <a class="ob-wcard" href="Billio Trial Balance.html">
+            <div class="ob-wcard-ico"><i class="ti ti-scale"></i></div>
+            <div class="ob-wcard-t">Trial balance <i class="ti ti-external-link ext"></i></div>
+            <div class="ob-wcard-s">Seeds the opening column — débiteur = créditeur from line one.</div>
+            <div class="ob-wcard-mini">
+              <div class="ob-mini-row"><span class="ml">À-nouveau débit</span><span class="mv" id="wTbD">0</span></div>
+              <div class="ob-mini-row"><span class="ml">À-nouveau crédit</span><span class="mv c" id="wTbC">0</span></div>
+            </div>
+          </a>
+          <a class="ob-wcard" href="Billio Trial Balance.html">
+            <div class="ob-wcard-ico"><i class="ti ti-book-2"></i></div>
+            <div class="ob-wcard-t">Grand livre <i class="ti ti-external-link ext"></i></div>
+            <div class="ob-wcard-s">Each account opens with an « À-nouveau au 01/06 » running-balance row.</div>
+            <div class="ob-wcard-mini">
+              <div class="ob-mini-row"><span class="ml">Accounts opened</span><span class="mv" id="wLedN">0</span></div>
+              <div class="ob-mini-row"><span class="ml">521 Banques</span><span class="mv" id="wLedBank">0</span></div>
+            </div>
+          </a>
+          <a class="ob-wcard" href="Billio Financial Statements.html">
+            <div class="ob-wcard-ico"><i class="ti ti-report-money"></i></div>
+            <div class="ob-wcard-t">Bilan d'ouverture <i class="ti ti-external-link ext"></i></div>
+            <div class="ob-wcard-s">Assets and resources tie out as your opening balance sheet.</div>
+            <div class="ob-wcard-mini">
+              <div class="ob-mini-row"><span class="ml">Total bilan</span><span class="mv" id="wBalTot">0</span></div>
+              <div class="ob-mini-row"><span class="ml">Équilibre</span><span class="mv" style="color:#226B2A;">Actif = Passif ✓</span></div>
+            </div>
+          </a>
+        </div>
+        <div class="ob-suc-cta">
+          <a class="btn btn-primary btn-lg" href="Billio Trial Balance.html"><i class="ti ti-scale"></i> Open trial balance</a>
+          <a class="btn btn-lg" href="Billio Journals.html"><i class="ti ti-notebook"></i> View the entry</a>
+        </div>
+        <div class="ob-suc-edit" onclick="editEntry()">← Edit the opening entry</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><i class="ti ti-circle-check-filled"></i><span id="toastMsg"></span></div>
+<div id="tweaksRoot"></div>
+
+<script src="icons.js"></script>
+<script src="accounting-data.js"></script>
+<script>
+(function () {
+  "use strict";
+  var A = window.ACC;
+  document.getElementById("sidebar").innerHTML = A.renderSidebar("opening");
+
+  /* default tweak state (jsx broadcasts authoritative values on mount) */
+  var TW = { autoTarget: "110", postStatus: "locked", term: "fr", density: "regular" };
+  window.__OB_DEFAULTS = TW;
+
+  /* ---- seed: real opening figures EXCEPT the report-à-nouveau plug (deliberate écart) ---- */
+  var lines = [
+    { acct: "101",  d: 0, c: 5000000 },
+    { acct: "106",  d: 0, c: 1200000 },
+    { acct: "162",  d: 0, c: 8180000 },
+    { acct: "211",  d: 1800000, c: 0 },
+    { acct: "281",  d: 0, c: 600000 },
+    { acct: "2441", d: 2400000, c: 0 },
+    { acct: "2451", d: 6500000, c: 0 },
+    { acct: "2818", d: 0, c: 2100000 },
+    { acct: "311",  d: 1250000, c: 0 },
+    { acct: "401",  d: 0, c: 1920000 },
+    { acct: "411",  d: 3420000, c: 0 },
+    { acct: "521",  d: 4180000, c: 0 },
+    { acct: "571",  d: 320000,  c: 0 }
+  ];
+
+  /* ---- helpers ---- */
+  function grp(n) { return Math.round(Math.abs(n)).toLocaleString("fr-FR").replace(/\u202f/g, " ").replace(/\u00a0/g, " "); }
+  function acctLabel(num) { var a = A.acct(num); return a ? a.num + " — " + a.label : num; }
+  var TERMS = {
+    fr: { intro: "Coming from another platform?", pvTitle: "À-nouveaux by class", sucTitle: "Opening position adopted", pageTitle: "Opening balances" },
+    en: { intro: "Coming from another platform?", pvTitle: "Opening balances by class", sucTitle: "Opening position adopted", pageTitle: "Opening balances" }
+  };
+
+  /* account <option> markup */
+  var OPTS = '<option value="">Choisir un compte…</option>' +
+    A.ACCOUNTS.map(function (a) { return '<option value="' + a.num + '">' + a.num + " — " + a.label + '</option>'; }).join("");
+
+  /* ---- render lines ---- */
+  function renderLines() {
+    var box = document.getElementById("obLines");
+    box.innerHTML = lines.map(function (l, i) {
+      var cls = l.acct ? A.clsOf(l.acct) : 0;
+      var col = cls ? A.CLASSES[cls].color : "var(--color-border-secondary)";
+      var sel = OPTS.replace('value="' + l.acct + '"', 'value="' + l.acct + '" selected');
+      return '<div class="ob-line">' +
+        '<div class="ob-acct"><span class="ob-dot" style="background:' + col + ';"></span>' +
+          '<select class="ob-sel' + (l.acct ? "" : " empty") + '" onchange="onAcct(this,' + i + ')">' + sel + '</select></div>' +
+        '<input class="ob-amt' + (l.d ? " filled-d" : "") + '" data-f="d" inputmode="numeric" placeholder="0" value="' + (l.d ? grp(l.d) : "") + '" oninput="onAmt(this,' + i + ',\'d\')">' +
+        '<input class="ob-amt" data-f="c" inputmode="numeric" placeholder="0" value="' + (l.c ? grp(l.c) : "") + '" oninput="onAmt(this,' + i + ',\'c\')">' +
+        '<button class="ob-del" onclick="delLine(' + i + ')" title="Remove"><i class="ti ti-trash"></i></button>' +
+      '</div>';
+    }).join("");
+    if (window.refreshIcons) refreshIcons(box);
+    recompute();
+  }
+
+  window.onAcct = function (sel, i) {
+    lines[i].acct = sel.value;
+    sel.classList.toggle("empty", !sel.value);
+    var cls = sel.value ? A.clsOf(sel.value) : 0;
+    var dot = sel.parentElement.querySelector(".ob-dot");
+    dot.style.background = cls ? A.CLASSES[cls].color : "var(--color-border-secondary)";
+    renderPreview();
+  };
+
+  window.onAmt = function (inp, i, field) {
+    var digits = inp.value.replace(/[^\d]/g, "");
+    var n = digits ? parseInt(digits, 10) : 0;
+    lines[i][field] = n;
+    var opp = field === "d" ? "c" : "d";
+    if (n) lines[i][opp] = 0;
+    inp.value = n ? grp(n) : "";
+    inp.classList.toggle("filled-d", field === "d" && !!n);
+    var row = inp.closest(".ob-line");
+    var oppInp = row.querySelector('[data-f="' + opp + '"]');
+    if (oppInp && n) { oppInp.value = ""; oppInp.classList.remove("filled-d"); }
+    recompute();
+  };
+
+  window.addLine = function () { lines.push({ acct: "", d: 0, c: 0 }); renderLines(); };
+  window.delLine = function (i) { lines.splice(i, 1); if (!lines.length) lines.push({ acct: "", d: 0, c: 0 }); renderLines(); };
+
+  /* ---- totals / balance ---- */
+  function totals() {
+    var d = 0, c = 0, n = 0;
+    lines.forEach(function (l) { d += l.d; c += l.c; if (l.acct && (l.d || l.c)) n++; });
+    return { d: d, c: c, ecart: d - c, n: n };
+  }
+
+  function recompute() {
+    var t = totals();
+    document.getElementById("totD").textContent = grp(t.d);
+    document.getElementById("totC").textContent = grp(t.c);
+    var balanced = Math.abs(t.ecart) < 0.5 && t.n >= 2;
+    var pill = document.getElementById("ecartPill");
+    pill.className = "ob-tot-ecart " + (Math.abs(t.ecart) < 0.5 ? "ok" : "no");
+    pill.textContent = Math.abs(t.ecart) < 0.5 ? "Équilibrée ✓" : "Écart " + grp(t.ecart) + (t.ecart > 0 ? " D" : " C");
+
+    var banner = document.getElementById("obBanner");
+    var side = t.ecart > 0 ? "crédit" : "débit";
+    if (balanced) {
+      banner.className = "ob-banner ok";
+      banner.innerHTML = '<i class="ti ti-circle-check-filled lead"></i><div class="bn-main">Balanced — débit = crédit = <b>' + grp(t.d) + ' XOF</b>. Ready to adopt as your opening position.</div>';
+    } else {
+      banner.className = "ob-banner no";
+      banner.innerHTML = '<i class="ti ti-alert-triangle lead"></i>' +
+        '<div class="bn-main">Off by <b>' + grp(t.ecart) + ' XOF</b> — needs ' + grp(t.ecart) + ' more on the <b>' + side + '</b> side to balance.</div>' +
+        '<button class="ob-fixbtn" onclick="autoBalance()"><i class="ti ti-plus-minus"></i> Auto-balance to ' + acctShort(TW.autoTarget) + '</button>';
+    }
+    document.getElementById("postBtn").disabled = !balanced;
+
+    /* step indicator */
+    setStep(balanced ? 2 : 1, false);
+    if (window.refreshIcons) refreshIcons(banner);
+    renderPreview();
+  }
+
+  function acctShort(num) { var a = A.acct(num); return a ? num : num; }
+
+  function setStep(active, adopted) {
+    document.querySelectorAll(".ob-step").forEach(function (el) {
+      var s = parseInt(el.dataset.step, 10);
+      el.classList.toggle("done", adopted ? s <= 3 : s < active);
+      el.classList.toggle("active", adopted ? false : s === active);
+    });
+    if (adopted) document.querySelectorAll(".ob-step").forEach(function (el) { el.classList.add("done"); el.classList.remove("active"); });
+  }
+
+  /* ---- auto-balance ---- */
+  window.autoBalance = function () {
+    var t = totals();
+    if (Math.abs(t.ecart) < 0.5) return;
+    var tgt = TW.autoTarget;
+    var amt = Math.abs(t.ecart);
+    var side = t.ecart > 0 ? "c" : "d";
+    var ex = lines.find(function (l) { return l.acct === tgt; });
+    if (ex) { ex[side] = (ex[side] || 0) + amt; ex[side === "c" ? "d" : "c"] = 0; }
+    else { lines.push({ acct: tgt, d: side === "d" ? amt : 0, c: side === "c" ? amt : 0 }); }
+    renderLines();
+    /* flash the balancing row */
+    requestAnimationFrame(function () {
+      var sels = document.querySelectorAll("#obLines .ob-sel");
+      sels.forEach(function (s) { if (s.value === tgt) s.closest(".ob-line").classList.add("flash"); });
+    });
+    showToast("Balancing line added — " + acctLabel(tgt));
+  };
+
+  /* ---- live preview by class ---- */
+  function renderPreview() {
+    var byCls = {};
+    lines.forEach(function (l) {
+      if (!l.acct || (!l.d && !l.c)) return;
+      var k = A.clsOf(l.acct);
+      byCls[k] = (byCls[k] || 0) + (l.d - l.c);
+    });
+    var keys = Object.keys(byCls).sort();
+    var box = document.getElementById("pvRows");
+    if (!keys.length) {
+      box.innerHTML = '<div class="ob-pv-empty">Pick accounts and amounts to preview your à-nouveaux.</div>';
+    } else {
+      box.innerHTML = keys.map(function (k) {
+        var c = A.CLASSES[k];
+        var v = byCls[k];
+        var sd = v >= 0 ? "D" : "C";
+        return '<div class="ob-pvrow"><div class="ob-pv-cls">' +
+          '<span class="cls-tag" style="background:' + c.color + ';width:20px;height:20px;font-size:10px;border-radius:5px;">' + k + '</span>' +
+          '<span class="nm">Classe ' + k + '<small>' + c.short + '</small></span></div>' +
+          '<div class="ob-pv-amt mono">' + grp(v) + '<span class="sd">' + sd + '</span></div></div>';
+      }).join("");
+    }
+    var t = totals();
+    document.getElementById("pvTotD").textContent = grp(t.d);
+    document.getElementById("pvTotC").textContent = grp(t.c);
+    if (window.refreshIcons) refreshIcons(box);
+  }
+
+  /* ---- adopt / success ---- */
+  window.post = function () {
+    var t = totals();
+    if (Math.abs(t.ecart) >= 0.5 || t.n < 2) return;
+    var locked = TW.postStatus === "locked";
+
+    /* recap pills */
+    document.getElementById("sucRecap").innerHTML =
+      '<span class="ob-recap-pill"><i class="ti ti-list"></i><b>' + t.n + '</b> accounts</span>' +
+      '<span class="ob-recap-pill"><i class="ti ti-scale"></i><b>' + grp(t.d) + '</b> XOF</span>' +
+      '<span class="ob-recap-pill"><i class="ti ti-calendar-event"></i> 1 juin 2026</span>' +
+      '<span class="ob-recap-pill mono"><i class="ti ti-notebook"></i> OD · ' + (document.getElementById("mPiece").value || "AN-2026-001") + '</span>' +
+      (locked
+        ? '<span class="ob-recap-pill lock"><i class="ti ti-lock"></i> Verrouillée</span>'
+        : '<span class="ob-recap-pill"><i class="ti ti-point-filled"></i> Brouillon</span>');
+
+    /* where-it-appears figures */
+    document.getElementById("wTbD").textContent = grp(t.d);
+    document.getElementById("wTbC").textContent = grp(t.c);
+    document.getElementById("wLedN").textContent = t.n;
+    var bank = lines.find(function (l) { return l.acct === "521"; });
+    document.getElementById("wLedBank").textContent = (bank ? grp(bank.d - bank.c) : "0") + " D";
+    document.getElementById("wBalTot").textContent = grp(t.d);
+
+    document.getElementById("sucTitle").textContent = locked ? "Opening position adopted" : "Opening entry saved as draft";
+
+    document.getElementById("composerView").style.display = "none";
+    document.getElementById("successView").style.display = "block";
+    setStep(3, true);
+    if (window.refreshIcons) refreshIcons(document.getElementById("successView"));
+    showToast(locked ? "À-nouveaux adopted — entry locked" : "Opening entry saved as draft");
+    document.querySelector(".content").scrollTop = 0;
+  };
+
+  window.editEntry = function () {
+    document.getElementById("successView").style.display = "none";
+    document.getElementById("composerView").style.display = "grid";
+    recompute();
+  };
+
+  /* ---- toast ---- */
+  var toastTimer;
+  window.showToast = function (msg) {
+    var el = document.getElementById("toast");
+    document.getElementById("toastMsg").textContent = msg;
+    el.classList.add("show"); clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2600);
+  };
+
+  /* ---- tweaks ---- */
+  function applyTweaks(edits) {
+    Object.assign(TW, edits);
+    document.body.classList.toggle("ob-dense", TW.density === "compact");
+    var term = TERMS[TW.term] || TERMS.fr;
+    document.getElementById("introTitle").textContent = term.intro;
+    document.getElementById("previewTitle").textContent = term.pvTitle;
+    document.getElementById("sucTitle").textContent = term.sucTitle;
+    var stat = document.getElementById("entryStatus");
+    if (TW.postStatus === "locked") {
+      stat.innerHTML = '<i class="ti ti-lock" style="color:#226B2A;"></i> Will lock as à-nouveaux';
+    } else {
+      stat.innerHTML = '<i class="ti ti-point-filled" style="color:var(--color-text-tertiary);"></i> Will save as draft';
+    }
+    if (window.refreshIcons) refreshIcons(stat);
+    recompute();
+  }
+  window.addEventListener("tweakchange", function (e) { applyTweaks(e.detail || {}); });
+
+  /* ---- meta inputs (label/pièce) — no-op beyond holding their value ---- */
+
+  renderLines();
+  if (window.refreshIcons) refreshIcons();
+})();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="opening-tweaks.jsx"></script>
+</body>
+</html>
