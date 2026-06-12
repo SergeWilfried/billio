@@ -453,7 +453,7 @@ export default function OpeningBalancesPage() {
     };
     return {
       ok: false,
-      text: <>Off by <b>{grp(ecart)} XOF</b> — needs {grp(ecart)} more on the <b>{side}</b> side to balance.</>,
+      text: <>Écart de <b>{grp(ecart)} F CFA</b> — il manque {grp(ecart)} au <b>{side}</b> pour équilibrer.</>,
     };
   }, [balanced, ecart, totD]);
 
