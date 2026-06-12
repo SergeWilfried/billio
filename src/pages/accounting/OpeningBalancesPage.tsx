@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../../components/Icon';
-import { useToast } from '../../context/ToastContext';
+import { useApp } from '../../context/AppContext';
+import { adoptOpeningBalances } from '../../lib/api/accounting';
 import {
   ACCOUNTS, CLASSES, clsOf, acctOf, fmt,
 } from '../../lib/accounting-data';
@@ -264,24 +265,24 @@ function SuccessView({
       </div>
 
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'var(--color-text-tertiary)', margin: '26px 0 12px', textAlign: 'center' }}>
-        Where your opening balances appear now
+        Où apparaissent vos soldes d'ouverture
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
         {[
           {
             icon: 'arrows-exchange', href: '/accounting/trial-balance',
-            title: 'Trial balance', sub: 'Seeds the opening column — débiteur = créditeur from line one.',
+            title: 'Balance générale', sub: "Alimente la colonne d’ouverture — débiteur = créditeur dès la première ligne.",
             rows: [{ l: 'À-nouveau débit', v: fmt(totD) }, { l: 'À-nouveau crédit', v: fmt(totC), dim: true }],
           },
           {
             icon: 'book-2', href: '/accounting/journals',
-            title: 'Grand livre', sub: 'Each account opens with an « À-nouveau au 01/06 » running-balance row.',
-            rows: [{ l: 'Accounts opened', v: String(lineCount) }, { l: '521 Banques', v: fmt(bankAmt) + ' D' }],
+            title: 'Grand livre', sub: "Chaque compte s’ouvre sur une ligne « À-nouveau au 01/06 » avec solde courant.",
+            rows: [{ l: 'Comptes ouverts', v: String(lineCount) }, { l: '521 Banques', v: fmt(bankAmt) + ' D' }],
           },
           {
             icon: 'report-money', href: '/accounting/financial-statements',
-            title: 'Bilan d\'ouverture', sub: 'Assets and resources tie out as your opening balance sheet.',
+            title: "Bilan d’ouverture", sub: "Les actifs et les ressources s’équilibrent dans le bilan d’ouverture.",
             rows: [{ l: 'Total bilan', v: fmt(totD) }, { l: 'Équilibre', v: 'Actif = Passif ✓', green: true }],
           },
         ].map(card => (
@@ -311,7 +312,7 @@ function SuccessView({
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 5, lineHeight: 1.5 }}>{card.sub}</div>
             <div style={{ marginTop: 12, paddingTop: 11, borderTop: '0.5px dashed var(--color-border-secondary)', fontSize: 11 }}>
-              {card.rows.map((r, i) => (
+              {(card.rows as { l: string; v: string; dim?: boolean; green?: boolean }[]).map((r, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
                   <span style={{ color: 'var(--color-text-secondary)' }}>{r.l}</span>
                   <span style={{ fontWeight: 700, fontFamily: '"SFMono-Regular", ui-monospace, monospace', fontVariantNumeric: 'tabular-nums', color: r.green ? '#226B2A' : r.dim ? 'var(--color-text-secondary)' : undefined }}>{r.v}</span>
@@ -354,13 +355,13 @@ function SuccessView({
 /* ─── main page ──────────────────────────────────────────────────────────── */
 
 export default function OpeningBalancesPage() {
-  const { showToast } = useToast();
+  const { orgId, openingBalancesAdopted, setOpeningBalancesAdopted, showToast } = useApp();
   const navigate = useNavigate();
 
   const [lines, setLines]     = useState<OBLine[]>(SEED);
   const [label, setLabel]     = useState('Reprise des à-nouveaux — exercice 2026');
   const [piece, setPiece]     = useState('AN-2026-001');
-  const [adopted, setAdopted] = useState(false);
+  const [saving, setSaving]   = useState(false);
 
   /* ── derived totals ── */
   const { totD, totC, ecart, lineCount } = useMemo(() => {
@@ -416,11 +417,26 @@ export default function OpeningBalancesPage() {
     showToast(`Balancing line added — ${tgt}${a ? ' ' + a.label : ''}`);
   }, [ecart, showToast]);
 
-  const handleAdopt = useCallback(() => {
-    if (!balanced) return;
-    setAdopted(true);
-    showToast('À-nouveaux adopted — entry locked');
-  }, [balanced, showToast]);
+  const handleAdopt = useCallback(async () => {
+    if (!balanced || saving) return;
+    setSaving(true);
+    try {
+      await adoptOpeningBalances(orgId, {
+        year:  new Date().getFullYear(),
+        date:  '2026-06-01',
+        piece,
+        label,
+        lines,
+      });
+      setOpeningBalancesAdopted(true);
+      showToast('À-nouveaux adoptés — écriture verrouillée');
+    } catch (err) {
+      showToast('Erreur lors de l\'adoption des à-nouveaux', true);
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }, [balanced, saving, orgId, piece, label, lines, setOpeningBalancesAdopted, showToast]);
 
   /* ── bank amount for success card ── */
   const bankAmt = useMemo(() => {
@@ -441,13 +457,13 @@ export default function OpeningBalancesPage() {
     };
   }, [balanced, ecart, totD]);
 
-  if (adopted) {
+  if (openingBalancesAdopted) {
     return (
       <div className="main">
         <div className="topbar">
           <div className="topbar-left">
-            <div className="crumb"><Icon name="arrows-exchange" size={14} /> Accounting</div>
-            <div className="page-title">Opening balances</div>
+            <div className="crumb"><Icon name="arrows-exchange" size={14} /> Comptabilité</div>
+            <div className="page-title">À-nouveaux</div>
             <div className="page-sub">Journal des à-nouveaux · reprise au 1 juin 2026</div>
           </div>
           <div className="topbar-actions">
@@ -458,7 +474,7 @@ export default function OpeningBalancesPage() {
           <SuccessView
             totD={totD} totC={totC} lineCount={lineCount}
             bankAmt={bankAmt} piece={piece}
-            onEdit={() => setAdopted(false)}
+            onEdit={() => setOpeningBalancesAdopted(false)}
           />
         </div>
       </div>
@@ -526,7 +542,7 @@ export default function OpeningBalancesPage() {
               </span>
               <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, padding: '4px 11px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--color-background-secondary)', color: 'var(--color-text-secondary)' }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-text-tertiary)', display: 'inline-block' }} />
-                Draft — not yet adopted
+                Brouillon — pas encore adopté
               </span>
             </div>
 
@@ -648,17 +664,17 @@ export default function OpeningBalancesPage() {
             {/* footer */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 20px', borderTop: '0.5px solid var(--color-border-tertiary)' }}>
               <span style={{ fontSize: 11.5, color: 'var(--color-text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Icon name="alert-triangle" size={14} /> Débit must equal crédit before you can adopt
+                <Icon name="alert-triangle" size={14} /> Le débit doit être égal au crédit pour pouvoir adopter
               </span>
               <span style={{ flex: 1 }} />
-              <button className="btn" onClick={() => navigate('/accounting/journals')}>Cancel</button>
+              <button className="btn" onClick={() => navigate('/accounting/journals')}>Annuler</button>
               <button
                 className="btn btn-primary btn-lg"
-                disabled={!balanced}
+                disabled={!balanced || saving}
                 onClick={handleAdopt}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '11px 18px', fontSize: 13.5, fontWeight: 700, opacity: balanced ? 1 : 0.5, cursor: balanced ? 'pointer' : 'not-allowed' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '11px 18px', fontSize: 13.5, fontWeight: 700, opacity: balanced && !saving ? 1 : 0.5, cursor: balanced && !saving ? 'pointer' : 'not-allowed' }}
               >
-                <Icon name="check" /> Adopt as opening position
+                <Icon name="check" /> {saving ? 'Enregistrement…' : 'Adopter comme position d\'ouverture'}
               </button>
             </div>
           </div>

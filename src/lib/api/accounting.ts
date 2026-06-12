@@ -221,6 +221,59 @@ export async function fetchOpeningBalances(
   );
 }
 
+export async function fetchOpeningBalanceAdopted(
+  orgId: string,
+  year: number,
+): Promise<boolean> {
+  if (MOCK) return false;
+  const { count, error } = await supabase
+    .from('opening_balances')
+    .select('*', { count: 'exact', head: true })
+    .eq('org_id', orgId)
+    .eq('exercise_year', year);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+export async function adoptOpeningBalances(
+  orgId: string,
+  opts: {
+    year: number;
+    date: string;
+    piece: string;
+    label: string;
+    lines: Array<{ acct: string; d: number; c: number }>;
+  },
+): Promise<void> {
+  if (MOCK) return;
+
+  const validLines = opts.lines.filter(l => l.acct && (l.d || l.c));
+
+  const { error: obErr } = await supabase
+    .from('opening_balances')
+    .upsert(
+      validLines.map(l => ({
+        org_id:        orgId,
+        exercise_year: opts.year,
+        account_num:   l.acct,
+        signed_amount: l.d - l.c,
+      })),
+      { onConflict: 'org_id,exercise_year,account_num' },
+    );
+  if (obErr) throw obErr;
+
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'OD', opts.date);
+  const entryId = await createJournalEntry(orgId, {
+    journalId,
+    periodId,
+    date:  opts.date,
+    piece: opts.piece,
+    label: opts.label,
+    lines: validLines.map(l => ({ accountNum: l.acct, debit: l.d, credit: l.c })),
+  });
+  await postJournalEntry(entryId);
+}
+
 // ─── Account balances (from v_account_balances view) ─────────────────────────
 
 export async function fetchAccountBalances(orgId: string): Promise<AccountBalance[]> {

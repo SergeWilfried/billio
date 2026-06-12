@@ -28,6 +28,7 @@ const NAV_FINANCE: NavItem[] = [
 
 const NAV_ACCOUNTING: NavItem[] = [
   { icon: 'book',               label: 'Plan comptable',    to: '/accounting/chart-of-accounts'    },
+  { icon: 'arrows-exchange',    label: 'À-nouveaux',        to: '/accounting/opening-balances'     },
   { icon: 'notebook',           label: 'Journaux',          to: '/accounting/journals'             },
   { icon: 'book-2',             label: 'Balance générale',  to: '/accounting/trial-balance'        },
   { icon: 'report-money',       label: 'États financiers',  to: '/accounting/financial-statements' },
@@ -41,7 +42,7 @@ const NAV_ACCOUNT: NavItem[] = [
 ];
 
 export default function Sidebar({ onLogout }: { onLogout: () => void }) {
-  const { invoices, userLabel, userInitials } = useApp();
+  const { invoices, userLabel, userInitials, openingBalancesAdopted } = useApp();
   const overdueCount = useMemo(
     () => invoices.filter(i => i.status === 'overdue').length,
     [invoices],
@@ -88,7 +89,9 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
         ))}
 
         <div className="nav-section">Comptabilité</div>
-        {NAV_ACCOUNTING.map(({ icon, label, to }) => (
+        {NAV_ACCOUNTING.filter(({ to }) =>
+          to !== '/accounting/opening-balances' || !openingBalancesAdopted
+        ).map(({ icon, label, to }) => (
           <NavLink
             key={to}
             to={to}

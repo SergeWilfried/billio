@@ -9,6 +9,7 @@ import { fetchPayments,  dbToPayment  } from '../lib/api/payments';
 import { fetchProducts,  dbToProduct  } from '../lib/api/products';
 import { fetchQuotes,    dbToQuote    } from '../lib/api/quotes';
 import { fetchActivities, dbToActivity } from '../lib/api/activities';
+import { fetchOpeningBalanceAdopted } from '../lib/api/accounting';
 import type { Invoice, Activity, ClientRecord, Payment, Product, Quote, Client } from '../lib/schemas';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -48,6 +49,9 @@ interface AppContextValue {
   // Onboarding
   needsOnboarding:    boolean;
   completeOnboarding: (bizName: string) => void;
+  // Opening balances
+  openingBalancesAdopted:    boolean;
+  setOpeningBalancesAdopted: Dispatch<SetStateAction<boolean>>;
   // UI
   loading:   boolean;
   showToast: (msg: string, isError?: boolean) => void;
@@ -70,8 +74,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [orgId,           setOrgId]           = useState(MOCK ? 'mock-org'  : '');
   const [userLabel,       setUserLabel]       = useState('');
   const [userInitials,    setUserInitials]    = useState('??');
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [loading,         setLoading]         = useState(!MOCK);
+  const [needsOnboarding,         setNeedsOnboarding]         = useState(false);
+  const [openingBalancesAdopted,  setOpeningBalancesAdopted]  = useState(false);
+  const [loading,                 setLoading]                 = useState(!MOCK);
 
   const { showToast } = useToast();
   const realtimeRef  = useRef<RealtimeChannel | null>(null);
@@ -143,13 +148,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resolvedOrgId) {
         try {
-          const [inv, cli, pay, prod, quo, act] = await Promise.all([
+          const year = new Date().getFullYear();
+          const [inv, cli, pay, prod, quo, act, obAdopted] = await Promise.all([
             fetchInvoices(resolvedOrgId),
             fetchClients(resolvedOrgId),
             fetchPayments(resolvedOrgId),
             fetchProducts(resolvedOrgId),
             fetchQuotes(resolvedOrgId),
             fetchActivities(resolvedOrgId),
+            fetchOpeningBalanceAdopted(resolvedOrgId, year),
           ]);
           setInvoices(inv);
           setClients(cli);
@@ -157,6 +164,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setProducts(prod);
           setQuotes(quo);
           setActivity(act);
+          setOpeningBalancesAdopted(obAdopted);
         } catch (err) {
           console.error('[boot] data fetch error:', err);
         }
@@ -269,6 +277,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       orgId,
       userLabel, userInitials,
       needsOnboarding, completeOnboarding,
+      openingBalancesAdopted, setOpeningBalancesAdopted,
       loading,
       showToast,
     }}>
