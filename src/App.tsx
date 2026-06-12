@@ -30,6 +30,7 @@ const FinancialStatementsPage= lazy(() => import('./pages/accounting/FinancialSt
 const FixedAssetsPage        = lazy(() => import('./pages/accounting/FixedAssetsPage'));
 const TaxPage                = lazy(() => import('./pages/accounting/TaxPage'));
 const PeriodClosingPage      = lazy(() => import('./pages/accounting/PeriodClosingPage'));
+const OpeningBalancesPage    = lazy(() => import('./pages/accounting/OpeningBalancesPage'));
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
@@ -105,6 +106,7 @@ export default function App() {
             <Route path="/accounting/suppliers"            element={<Navigate to="/contacts?tab=suppliers" replace />} />
             <Route path="/accounting/tax"                  element={<TaxPage />} />
             <Route path="/accounting/period-closing"       element={<PeriodClosingPage />} />
+            <Route path="/accounting/opening-balances"     element={<OpeningBalancesPage />} />
             <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/quotes"     element={<QuotesPage />} />
