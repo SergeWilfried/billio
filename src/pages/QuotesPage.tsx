@@ -5,8 +5,10 @@ import { QuotesEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { createQuote, updateQuote, removeQuote } from '../lib/api/quotes';
-import { saveLineItems } from '../lib/api/line-items';
-import { fmt, fmtDate, newLineItem } from '../data';
+import { createInvoice } from '../lib/api/invoices';
+import { fetchLineItems, saveLineItems } from '../lib/api/line-items';
+import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
+import { fmt, fmtDate, newLineItem, nextId } from '../data';
 import type { LineItem, QuoteStatus, Quote } from '../lib/schemas';
 
 type FilterKey = 'all' | QuoteStatus;
@@ -44,7 +46,7 @@ function fmtCompact(n: number) {
 const TVA = 0.18;
 
 export default function QuotesPage() {
-  const { showToast, quotes, setQuotes, clientsMap, userId, orgId, loading } = useApp();
+  const { showToast, quotes, setQuotes, invoices, setInvoices, clientsMap, userId, orgId, loading } = useApp();
 
   if (loading) return <PageSkeleton title="Devis" subtitle="Gérez vos devis" metrics={0} rows={6} />;
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -123,9 +125,42 @@ export default function QuotesPage() {
 
   async function convertToInvoice(id: string, e: React.MouseEvent) {
     e.stopPropagation();
+    const quote = quotes.find(q => q.id === id);
+    if (!quote) return;
+
+    const today   = new Date().toISOString().slice(0, 10);
+    const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+    const invId   = nextId(invoices);
+    const cName   = clientsMap[quote.client]?.name ?? quote.client;
+    const htAmount  = Math.round(quote.amount / 1.18);
+    const tvaAmount = quote.amount - htAmount;
+
+    const newInv = {
+      id:      invId,
+      subject: quote.subject,
+      client:  quote.client,
+      issued:  today,
+      due:     dueDate,
+      amount:  quote.amount,
+      status:  'pending' as const,
+    };
+
+    setInvoices(prev => [newInv, ...prev]);
     setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced' } : q));
+
+    const quoteLines = await fetchLineItems(undefined, id);
+    await createInvoice(orgId, newInv);
+    await saveLineItems(orgId, quoteLines.map(l => ({ ...l })), { invoiceId: invId });
     await updateQuote(id, { status: 'invoiced' });
-    showToast(`Devis ${id} → facture créée`);
+    await recordInvoiceIssuanceEntry(orgId, {
+      invoiceId:  invId,
+      htAmount,
+      tvaAmount,
+      date:       today,
+      clientName: cName,
+    });
+
+    showToast(`Devis ${id} → Facture #${invId} créée`);
   }
 
   function sendReminder(id: string, e: React.MouseEvent) {

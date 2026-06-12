@@ -24,6 +24,8 @@ import {
   createSupplierBill as apiCreateBill,
   createAccount as apiCreateAccount,
   closeFiscalPeriod as apiClosePeriod,
+  recordSupplierBillEntry,
+  recordSupplierBillPaymentEntry,
 } from './api/accounting';
 import type { FiscalPeriod, AccountBalance } from './api/accounting';
 import {
@@ -267,19 +269,34 @@ export function useSupplierBills() {
   );
 
   const markPaid = useCallback(async (billId: string) => {
-    // Optimistic: flip status to 'paid' immediately so BillDrawer closes with correct state
+    const bill = result.data?.find(b => b.id === billId);
     result.setData(prev => prev?.map(b =>
       b.id === billId ? { ...b, status: 'paid' as const } : b
     ) ?? null);
     try {
       await apiBillPaid(billId);
+      if (bill) {
+        await recordSupplierBillPaymentEntry(orgId, {
+          piece:        bill.piece,
+          total:        bill.htAmount + bill.tvaAmount,
+          date:         new Date().toISOString().slice(0, 10),
+          supplierName: bill.supplier,
+        });
+      }
     } finally {
       result.reload();
     }
-  }, [result]);
+  }, [orgId, result]);
 
   const createBill = useCallback(async (bill: Omit<SupplierBill, 'id' | 'acctLines'>) => {
     await apiCreateBill(orgId, bill);
+    await recordSupplierBillEntry(orgId, {
+      piece:        bill.piece,
+      htAmount:     bill.htAmount,
+      tvaAmount:    bill.tvaAmount,
+      date:         bill.date,
+      supplierName: bill.supplier,
+    });
     result.reload();
   }, [orgId, result]);
 

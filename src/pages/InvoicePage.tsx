@@ -4,6 +4,7 @@ import Icon from '../components/Icon';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { removeInvoice, updateInvoice } from '../lib/api/invoices';
+import { recordInvoicePaymentEntry, deleteInvoiceEntries } from '../lib/api/accounting';
 import { fetchLineItems } from '../lib/api/line-items';
 import { fmt, fmtDate, STATUS_LABEL } from '../data';
 import type { Status } from '../data';
@@ -76,7 +77,7 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, showToast, clientsMap, orgSettings, loading } = useApp();
+  const { invoices, setInvoices, showToast, clientsMap, orgSettings, orgId, loading } = useApp();
   const [lines, setLines] = useState<LineItem[]>([]);
 
   useEffect(() => {
@@ -117,6 +118,7 @@ export default function InvoicePage() {
     if (window.confirm(`Supprimer la facture #${invoice.id} ? Cette action est irréversible.`)) {
       setInvoices(prev => prev.filter(i => i.id !== invoice.id));
       await removeInvoice(invoice.id);
+      await deleteInvoiceEntries(orgId, invoice.id);
       showToast('Facture supprimée');
       navigate('/invoices');
     }
@@ -124,6 +126,12 @@ export default function InvoicePage() {
   const handleMarkPaid = async () => {
     setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
     await updateInvoice(invoice.id, { status: 'paid' });
+    await recordInvoicePaymentEntry(orgId, {
+      invoiceId: invoice.id,
+      total,
+      date: new Date().toISOString().slice(0, 10),
+      clientName: client.name,
+    });
     showToast('Facture marquée comme payée');
   };
 

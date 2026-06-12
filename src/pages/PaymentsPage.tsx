@@ -5,6 +5,8 @@ import { PaymentsEmptyIllustration } from '../components/PageEmptyIllustrations'
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { createPayment } from '../lib/api/payments';
+import { updateInvoice } from '../lib/api/invoices';
+import { recordInvoicePaymentEntry } from '../lib/api/accounting';
 import { fmt, fmtDate } from '../data';
 import type { PayMethod, PayStatus, Payment } from '../lib/schemas';
 
@@ -48,7 +50,7 @@ function fmtCompact(n: number) {
 }
 
 export default function PaymentsPage() {
-  const { invoices, payments, setPayments, showToast, clientsMap, orgId, loading } = useApp();
+  const { invoices, setInvoices, payments, setPayments, showToast, clientsMap, orgId, loading } = useApp();
 
   if (loading) return <PageSkeleton title="Paiements" subtitle="Suivez vos encaissements" metrics={4} rows={6} />;
   const [filter, setFilter]     = useState<FilterKey>('all');
@@ -127,7 +129,16 @@ export default function PaymentsPage() {
     };
 
     setPayments(prev => [newPayment, ...prev]);
+    setInvoices(prev => prev.map(i => i.id === invId ? { ...i, status: 'paid' as const } : i));
     await createPayment(orgId, newPayment);
+    await updateInvoice(invId, { status: 'paid' });
+    const clientName = clientsMap[inv?.client ?? '']?.name ?? (inv?.client ?? '?');
+    await recordInvoicePaymentEntry(orgId, {
+      invoiceId:  invId,
+      total:      amt,
+      date,
+      clientName,
+    });
     closePanel();
     showToast(`Paiement ${m.label} de ${fmt(amt)} F CFA enregistré`);
   }

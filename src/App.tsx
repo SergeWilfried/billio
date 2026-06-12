@@ -16,7 +16,7 @@ const OnboardingPage         = lazy(() => import('./pages/OnboardingPage'));
 const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
 const InvoicesPage           = lazy(() => import('./pages/InvoicesPage'));
 const InvoicePage            = lazy(() => import('./pages/InvoicePage'));
-const ClientsPage            = lazy(() => import('./pages/ClientsPage'));
+const ContactsPage           = lazy(() => import('./pages/ContactsPage'));
 const ProductsPage           = lazy(() => import('./pages/ProductsPage'));
 const PaymentsPage           = lazy(() => import('./pages/PaymentsPage'));
 const QuotesPage             = lazy(() => import('./pages/QuotesPage'));
@@ -27,7 +27,6 @@ const JournalsPage           = lazy(() => import('./pages/accounting/JournalsPag
 const TrialBalancePage       = lazy(() => import('./pages/accounting/TrialBalancePage'));
 const FinancialStatementsPage= lazy(() => import('./pages/accounting/FinancialStatementsPage'));
 const FixedAssetsPage        = lazy(() => import('./pages/accounting/FixedAssetsPage'));
-const SuppliersPage          = lazy(() => import('./pages/accounting/SuppliersPage'));
 const TaxPage                = lazy(() => import('./pages/accounting/TaxPage'));
 const PeriodClosingPage      = lazy(() => import('./pages/accounting/PeriodClosingPage'));
 
@@ -93,14 +92,15 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/invoices" element={<InvoicesPage />} />
             <Route path="/invoices/:id" element={<InvoicePage />} />
-            <Route path="/clients"  element={<ClientsPage />} />
+            <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/clients"  element={<Navigate to="/contacts" replace />} />
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/accounting/chart-of-accounts"    element={<ChartOfAccountsPage />} />
             <Route path="/accounting/journals"             element={<JournalsPage />} />
             <Route path="/accounting/trial-balance"        element={<TrialBalancePage />} />
             <Route path="/accounting/financial-statements" element={<FinancialStatementsPage />} />
             <Route path="/accounting/fixed-assets"         element={<FixedAssetsPage />} />
-            <Route path="/accounting/suppliers"            element={<SuppliersPage />} />
+            <Route path="/accounting/suppliers"            element={<Navigate to="/contacts?tab=suppliers" replace />} />
             <Route path="/accounting/tax"                  element={<TaxPage />} />
             <Route path="/accounting/period-closing"       element={<PeriodClosingPage />} />
             <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />

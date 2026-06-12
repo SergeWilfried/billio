@@ -6,6 +6,7 @@ import { InvoicesEmptyIllustration } from '../components/PageEmptyIllustrations'
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { createInvoice } from '../lib/api/invoices';
+import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { saveLineItems } from '../lib/api/line-items';
 import { createActivity } from '../lib/api/activities';
 import {
@@ -88,6 +89,15 @@ export default function InvoicesPage() {
     setInvoices(prev => [newInv, ...prev]);
     await createInvoice(orgId, newInv);
     await saveLineItems(orgId, lineItems, { invoiceId: id });
+    if (status === 'pending') {
+      await recordInvoiceIssuanceEntry(orgId, {
+        invoiceId:  id,
+        htAmount:   subtotal,
+        tvaAmount:  tax,
+        date:       fDate,
+        clientName: cName,
+      });
+    }
 
     const actPayload = status === 'pending'
       ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' envoyée à ' }, { text: cName, bold: true as const }] }

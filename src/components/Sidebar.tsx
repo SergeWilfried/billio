@@ -15,7 +15,7 @@ type NavItem = { icon: string; label: string; to: string };
 const NAV_WORKSPACE: NavItem[] = [
   { icon: 'layout-dashboard', label: 'Tableau de bord', to: '/dashboard' },
   { icon: 'receipt',          label: 'Factures',        to: '/invoices'  },
-  { icon: 'users',            label: 'Clients',         to: '/clients'   },
+  { icon: 'users',            label: 'Contacts',        to: '/contacts'  },
   { icon: 'package',          label: 'Produits',        to: '/products'  },
   { icon: 'layout-grid',      label: 'Modèles',         to: '/templates' },
 ];
@@ -32,7 +32,6 @@ const NAV_ACCOUNTING: NavItem[] = [
   { icon: 'book-2',             label: 'Balance générale',  to: '/accounting/trial-balance'        },
   { icon: 'report-money',       label: 'États financiers',  to: '/accounting/financial-statements' },
   { icon: 'building-warehouse', label: 'Immobilisations',   to: '/accounting/fixed-assets'         },
-  { icon: 'truck-delivery',     label: 'Fournisseurs',      to: '/accounting/suppliers'            },
   { icon: 'percentage',         label: 'Fiscalité',         to: '/accounting/tax'                  },
   { icon: 'lock',               label: 'Clôture',           to: '/accounting/period-closing'       },
 ];

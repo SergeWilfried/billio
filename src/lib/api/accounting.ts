@@ -375,6 +375,175 @@ export async function fetchSupplierBills(
   return (data ?? []).map(r => toSupplierBill(r as Record<string, unknown>));
 }
 
+// ─── Shared helper: resolve journal ID + fiscal period ID ────────────────────
+
+async function resolveJournalAndPeriod(
+  orgId: string,
+  journalCode: string,
+  date: string,
+): Promise<{ journalId: string; periodId: string }> {
+  const { data: journal, error: jErr } = await supabase
+    .from('journals')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('code', journalCode)
+    .single();
+  if (jErr || !journal) throw jErr ?? new Error(`${journalCode} journal not found`);
+
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+
+  const { data: period } = await supabase
+    .from('fiscal_periods')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('year', year)
+    .eq('month', month)
+    .single();
+
+  let periodId: string;
+  if (period) {
+    periodId = String((period as Record<string, unknown>).id);
+  } else {
+    const { data: newPeriod, error: cpErr } = await supabase
+      .from('fiscal_periods')
+      .insert({ org_id: orgId, year, month, status: 'open' })
+      .select('id')
+      .single();
+    if (cpErr || !newPeriod) throw cpErr ?? new Error('Failed to create fiscal period');
+    periodId = String((newPeriod as Record<string, unknown>).id);
+  }
+
+  return {
+    journalId: String((journal as Record<string, unknown>).id),
+    periodId,
+  };
+}
+
+// ─── Auto-entry helpers ───────────────────────────────────────────────────────
+
+export async function recordInvoiceIssuanceEntry(
+  orgId: string,
+  opts: {
+    invoiceId: string;
+    htAmount: number;
+    tvaAmount: number;
+    date: string;
+    clientName: string;
+  },
+): Promise<void> {
+  if (MOCK) return;
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'VE', opts.date);
+  const total = opts.htAmount + opts.tvaAmount;
+  const entryId = await createJournalEntry(orgId, {
+    journalId,
+    periodId,
+    date:  opts.date,
+    piece: `VE-${opts.invoiceId}`,
+    label: `Facture — ${opts.clientName} (${opts.invoiceId})`,
+    lines: [
+      { accountNum: '411', debit: total,          credit: 0              },
+      { accountNum: '706', debit: 0,               credit: opts.htAmount  },
+      { accountNum: '443', debit: 0,               credit: opts.tvaAmount },
+    ],
+  });
+  await postJournalEntry(entryId);
+}
+
+export async function recordInvoicePaymentEntry(
+  orgId: string,
+  opts: {
+    invoiceId: string;
+    total: number;
+    date: string;
+    clientName: string;
+  },
+): Promise<void> {
+  if (MOCK) return;
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'BQ', opts.date);
+  const entryId = await createJournalEntry(orgId, {
+    journalId,
+    periodId,
+    date:  opts.date,
+    piece: `REG-${opts.invoiceId}`,
+    label: `Règlement reçu — ${opts.clientName} (${opts.invoiceId})`,
+    lines: [
+      { accountNum: '521', debit: opts.total, credit: 0          },
+      { accountNum: '411', debit: 0,          credit: opts.total },
+    ],
+  });
+  await postJournalEntry(entryId);
+}
+
+export async function recordSupplierBillEntry(
+  orgId: string,
+  opts: {
+    piece: string;
+    htAmount: number;
+    tvaAmount: number;
+    date: string;
+    supplierName: string;
+  },
+): Promise<void> {
+  if (MOCK) return;
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'AC', opts.date);
+  const total = opts.htAmount + opts.tvaAmount;
+  const entryId = await createJournalEntry(orgId, {
+    journalId,
+    periodId,
+    date:  opts.date,
+    piece: opts.piece,
+    label: `Facture achat — ${opts.supplierName}`,
+    lines: [
+      { accountNum: '605', debit: opts.htAmount,  credit: 0     },
+      { accountNum: '445', debit: opts.tvaAmount, credit: 0     },
+      { accountNum: '401', debit: 0,              credit: total },
+    ],
+  });
+  await postJournalEntry(entryId);
+}
+
+export async function recordSupplierBillPaymentEntry(
+  orgId: string,
+  opts: {
+    piece: string;
+    total: number;
+    date: string;
+    supplierName: string;
+  },
+): Promise<void> {
+  if (MOCK) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'BQ', today);
+  const entryId = await createJournalEntry(orgId, {
+    journalId,
+    periodId,
+    date:  today,
+    piece: `REG-${opts.piece}`,
+    label: `Règlement fournisseur — ${opts.supplierName}`,
+    lines: [
+      { accountNum: '401', debit: opts.total, credit: 0          },
+      { accountNum: '521', debit: 0,          credit: opts.total },
+    ],
+  });
+  await postJournalEntry(entryId);
+}
+
+export async function deleteInvoiceEntries(orgId: string, invoiceId: string): Promise<void> {
+  if (MOCK) return;
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('piece', [`VE-${invoiceId}`, `REG-${invoiceId}`]);
+  if (error) throw error;
+  if (!data?.length) return;
+  await Promise.all(
+    (data as Array<Record<string, unknown>>).map(r => deleteJournalEntry(String(r.id)))
+  );
+}
+
 export async function markBillPaid(billId: string): Promise<void> {
   if (MOCK) return;
   const { error } = await supabase
