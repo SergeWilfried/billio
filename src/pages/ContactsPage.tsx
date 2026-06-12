@@ -5,14 +5,13 @@ import { EmptyState, EmptyInline } from '../components/EmptyState';
 import { ClientsEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { SuppliersEmptyIllustration } from '../components/accounting/EmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
-import KPIStrip from '../components/accounting/KPIStrip';
 import DrawerPanel from '../components/accounting/DrawerPanel';
 import StatusPill from '../components/accounting/StatusPill';
 import { useApp } from '../context/AppContext';
 import { createClient, updateClient, removeClient } from '../lib/api/clients';
 import { fmt, fmtCompact } from '../data';
 import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '../lib/schemas';
-import type { SupplierBill } from '../lib/accounting-data';
+import type { SupplierBill, PaymentMethod } from '../lib/accounting-data';
 import { useSupplierBills } from '../lib/accounting-hooks';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -35,8 +34,63 @@ function supplierAvColor(name: string) {
 function supplierInitials(name: string) {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
+const TODAY = new Date('2026-06-12');
 function daysDue(dueDate: string) {
-  return Math.round((new Date(dueDate).getTime() - new Date('2026-06-10').getTime()) / 86400000);
+  return Math.round((new Date(dueDate).getTime() - TODAY.getTime()) / 86400000);
+}
+function ageBucket(b: SupplierBill): 'cur' | 'd30' | 'd60' | 'd90' | null {
+  if (b.status === 'paid') return null;
+  const d = daysDue(b.dueDate);
+  if (d >= 0) return 'cur';
+  if (d >= -30) return 'd30';
+  if (d >= -60) return 'd60';
+  return 'd90';
+}
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDate(iso: string) {
+  const p = iso.split('-');
+  return parseInt(p[2], 10) + ' ' + MONTHS[parseInt(p[1], 10) - 1];
+}
+
+// ─── Aging strip ──────────────────────────────────────────────────────────────
+
+const AGING_SEGS = [
+  { key: 'cur' as const, label: 'Not due',    color: '#2E7D32' },
+  { key: 'd30' as const, label: '1–30 days',  color: '#B26A09' },
+  { key: 'd60' as const, label: '31–60 days', color: '#C2570B' },
+  { key: 'd90' as const, label: '60+ days',   color: '#A32D2D' },
+];
+
+function AgingStrip({ bills }: { bills: SupplierBill[] }) {
+  const tot: Record<string, number> = {};
+  bills.forEach(b => {
+    const k = ageBucket(b);
+    if (k) tot[k] = (tot[k] || 0) + b.htAmount + b.tvaAmount;
+  });
+  const max = Math.max(1, ...Object.values(tot));
+  return (
+    <div className="aging-strip">
+      {AGING_SEGS.map(s => {
+        const v = tot[s.key] || 0;
+        return (
+          <div key={s.key} className="aging-seg">
+            <div className="aging-top">
+              <span className="aging-dot" style={{ background: s.color }} />
+              <span className="aging-lbl">{s.label}</span>
+            </div>
+            <div className="aging-amt mono" style={{ color: v ? s.color : 'var(--color-text-tertiary)' }}>
+              {v ? fmtCompact(v) : '—'}
+              {v ? <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-text-tertiary)', marginLeft: 3 }}>F CFA</span> : null}
+            </div>
+            <div className="aging-bar">
+              <div style={{ width: `${Math.round((v / max) * 100)}%`, background: s.color }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── Clients sub-components ───────────────────────────────────────────────────
@@ -53,6 +107,11 @@ const CLIENT_FILTERS: { key: ClientFilterKey; label: string }[] = [
 
 // ─── Supplier sub-components ──────────────────────────────────────────────────
 
+type SupplierFilterKey = 'all' | 'open' | 'overdue' | 'settled';
+const SUPPLIER_FILTERS: { key: SupplierFilterKey; label: string }[] = [
+  { key: 'all', label: 'Tous' }, { key: 'open', label: 'En cours' }, { key: 'overdue', label: 'En retard' }, { key: 'settled', label: 'Soldés' },
+];
+
 interface SupplierContact {
   name: string;
   city: string;
@@ -62,13 +121,41 @@ interface SupplierContact {
   overdueCount: number;
 }
 
-interface BillForm { supplier: string; city: string; piece: string; date: string; dueDate: string; htAmount: string }
-const EMPTY_BILL_FORM: BillForm = { supplier: '', city: '', piece: '', date: new Date().toISOString().slice(0, 10), dueDate: '', htAmount: '' };
+interface BillForm { supplier: string; city: string; piece: string; date: string; dueDate: string; htAmount: string; paymentMethod: PaymentMethod }
+const EMPTY_BILL_FORM: BillForm = { supplier: '', city: '', piece: '', date: new Date().toISOString().slice(0, 10), dueDate: '', htAmount: '', paymentMethod: 'wire' };
+
+const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  wire:   'Virement',
+  cash:   'Espèces',
+  mobile: 'Mobile money',
+};
+const PAYMENT_METHOD_ICONS: Record<PaymentMethod, string> = {
+  wire:   'building-bank',
+  cash:   'cash',
+  mobile: 'device-mobile',
+};
 const TVA_RATE = 0.18;
+
+function JournalLines({ lines }: { lines: SupplierBill['acctLines'] }) {
+  return (
+    <div style={{ border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', overflow: 'hidden', marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '56px 1fr 90px 90px', gap: 8, padding: '8px 14px', background: 'var(--color-background-secondary)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-secondary)' }}>
+        <span>Cpte</span><span>Libellé</span><span style={{ textAlign: 'right' }}>Débit</span><span style={{ textAlign: 'right' }}>Crédit</span>
+      </div>
+      {lines.map((l, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '56px 1fr 90px 90px', gap: 8, padding: '9px 14px', borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 12.5, alignItems: 'center' }}>
+          <span className="mono" style={{ fontWeight: 700, color: 'var(--brand)' }}>{l.acct}</span>
+          <span style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.label}</span>
+          <span className="mono" style={{ textAlign: 'right', fontWeight: l.side === 'D' ? 600 : 400, color: l.side === 'D' ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)' }}>{l.side === 'D' ? fmt(l.amount) : '—'}</span>
+          <span className="mono" style={{ textAlign: 'right', fontWeight: l.side === 'C' ? 600 : 400, color: l.side === 'C' ? '#A32D2D' : 'var(--color-text-tertiary)' }}>{l.side === 'C' ? fmt(l.amount) : '—'}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkPaid: (id: string) => void; onClose: () => void }) {
   const av = supplierAvColor(bill.supplier);
-  const days = daysDue(bill.dueDate);
   return (
     <DrawerPanel open onClose={onClose} title={
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -81,19 +168,27 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
         </div>
       </div>
     }>
+      {/* Meta grid: date, due, status, payment method */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-        {[
+        {([
           { label: 'Date facture', value: bill.date },
           { label: 'Échéance', value: bill.dueDate },
           { label: 'Statut', value: <StatusPill status={bill.status} /> },
-          { label: days > 0 ? 'Jours restants' : 'Jours retard', value: `${Math.abs(days)} j.` },
-        ].map(({ label, value }) => (
+          { label: 'Mode de règlement', value: (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Icon name={PAYMENT_METHOD_ICONS[bill.paymentMethod]} size={14} />
+              {PAYMENT_METHOD_LABELS[bill.paymentMethod]}
+            </span>
+          )},
+        ] as { label: string; value: React.ReactNode }[]).map(({ label, value }) => (
           <div key={label} style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '11px 13px', border: '0.5px solid var(--color-border-tertiary)' }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-tertiary)' }}>{label}</div>
             <div style={{ marginTop: 5, fontSize: 13.5, fontWeight: 600 }}>{value}</div>
           </div>
         ))}
       </div>
+
+      {/* Amount breakdown */}
       <div className="dsec-label"><Icon name="receipt" size={13} />Détail montant</div>
       <div style={{ border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', overflow: 'hidden', marginBottom: 20 }}>
         {[
@@ -107,23 +202,31 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
           </div>
         ))}
       </div>
-      <div className="dsec-label"><Icon name="book-2" size={13} />Simulation comptable</div>
-      <div style={{ border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', overflow: 'hidden', marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 100px 100px', gap: 8, padding: '8px 14px', background: 'var(--color-background-secondary)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-secondary)' }}>
-          <span>Compte</span><span>Libellé</span><span style={{ textAlign: 'right' }}>Débit</span><span style={{ textAlign: 'right' }}>Crédit</span>
-        </div>
-        {bill.acctLines.map((l, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 100px 100px', gap: 8, padding: '10px 14px', borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 12.5, alignItems: 'center' }}>
-            <span className="mono" style={{ fontWeight: 700, color: 'var(--brand)' }}>{l.acct}</span>
-            <span style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.label}</span>
-            <span className="mono" style={{ textAlign: 'right', fontWeight: l.side === 'D' ? 600 : 400, color: l.side === 'D' ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)' }}>{l.side === 'D' ? fmt(l.amount) : '—'}</span>
-            <span className="mono" style={{ textAlign: 'right', fontWeight: l.side === 'C' ? 600 : 400, color: l.side === 'C' ? '#A32D2D' : 'var(--color-text-tertiary)' }}>{l.side === 'C' ? fmt(l.amount) : '—'}</span>
-          </div>
-        ))}
-      </div>
+
+      {/* Purchase journal entry */}
+      <div className="dsec-label"><Icon name="book-2" size={13} />Écriture d'achat (AC)</div>
+      <JournalLines lines={bill.acctLines} />
+
+      {/* Payment journal entry — shown when paid */}
+      {bill.status === 'paid' && (() => {
+        const total = bill.htAmount + bill.tvaAmount;
+        const creditAcct = bill.paymentMethod === 'cash' ? '571' : '521';
+        const creditLabel = bill.paymentMethod === 'cash' ? 'Caisse' : 'Banque';
+        const journalLabel = bill.paymentMethod === 'cash' ? 'Écriture de règlement (CA)' : 'Écriture de règlement (BQ)';
+        return (
+          <>
+            <div className="dsec-label" style={{ marginTop: 4 }}><Icon name="book-2" size={13} />{journalLabel}</div>
+            <JournalLines lines={[
+              { acct: '401', label: 'Fournisseurs',  amount: total, side: 'D' },
+              { acct: creditAcct, label: creditLabel, amount: total, side: 'C' },
+            ]} />
+          </>
+        );
+      })()}
+
       {bill.status !== 'paid' && (
         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { onMarkPaid(bill.id); onClose(); }}>
-          <Icon name="check" />Marquer comme payé
+          <Icon name="check" />Marquer comme payé · <span style={{ opacity: 0.8, fontSize: 12 }}>{PAYMENT_METHOD_LABELS[bill.paymentMethod]}</span>
         </button>
       )}
     </DrawerPanel>
@@ -168,6 +271,24 @@ function NewBillDrawer({ onSave, onClose, initialSupplier = '' }: { onSave: (f: 
         <div style={{ gridColumn: '1/-1' }}>
           <label className="form-label">Montant HT (F CFA) *</label>
           <input className="form-input" type="number" min="0" value={form.htAmount} onChange={e => set('htAmount', e.target.value)} placeholder="0" />
+        </div>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label className="form-label">Mode de règlement</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['wire', 'cash', 'mobile'] as PaymentMethod[]).map(m => (
+              <button key={m} type="button"
+                onClick={() => set('paymentMethod', m)}
+                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '8px 10px', borderRadius: 'var(--border-radius-md)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', transition: 'all .1s',
+                  border: form.paymentMethod === m ? '1.5px solid var(--brand)' : '0.5px solid var(--color-border-secondary)',
+                  background: form.paymentMethod === m ? 'var(--brand-tint)' : 'var(--color-background-primary)',
+                  color: form.paymentMethod === m ? 'var(--brand)' : 'var(--color-text-secondary)',
+                }}>
+                <Icon name={PAYMENT_METHOD_ICONS[m]} size={14} />
+                {PAYMENT_METHOD_LABELS[m]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       {ht > 0 && (
@@ -215,6 +336,15 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
   const statusCounts: Record<string, number> = { all: supplier.bills.length };
   supplier.bills.forEach(b => { statusCounts[b.status] = (statusCounts[b.status] || 0) + 1; });
 
+  // Per-supplier aging bar
+  const ageTot: Record<string, number> = {};
+  supplier.bills.forEach(b => {
+    const k = ageBucket(b);
+    if (k) ageTot[k] = (ageTot[k] || 0) + b.htAmount + b.tvaAmount;
+  });
+  const ageCols: Record<string, string> = { cur: '#2E7D32', d30: '#B26A09', d60: '#C2570B', d90: '#A32D2D' };
+  const ageTotal = Object.values(ageTot).reduce((a, v) => a + v, 0) || 1;
+
   return (
     <DrawerPanel open onClose={onClose} title={
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -231,17 +361,24 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
     }>
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-        {[
-          { label: 'Total TTC', value: fmt(supplier.totalTTC) + ' F CFA' },
-          { label: 'Reste à payer', value: fmt(supplier.totalPayable) + ' F CFA' },
-          { label: 'Factures', value: `${supplier.bills.length} facture${supplier.bills.length !== 1 ? 's' : ''}` },
-          { label: 'En retard', value: supplier.overdueCount > 0 ? `${supplier.overdueCount} en retard` : 'Aucun retard' },
-        ].map(({ label, value }) => (
-          <div key={label} style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '11px 13px', border: '0.5px solid var(--color-border-tertiary)' }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-tertiary)' }}>{label}</div>
-            <div style={{ marginTop: 5, fontSize: 13, fontWeight: 600 }}>{value}</div>
+        <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '11px 13px', border: '0.5px solid var(--color-border-tertiary)' }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-tertiary)' }}>Total TTC</div>
+          <div className="mono" style={{ marginTop: 5, fontSize: 17, fontWeight: 700, letterSpacing: -0.4 }}>{fmtCompact(supplier.totalTTC)}<span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--color-text-tertiary)', marginLeft: 3 }}>F CFA</span></div>
+        </div>
+        <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '11px 13px', border: '0.5px solid var(--color-border-tertiary)' }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-tertiary)' }}>À payer</div>
+          <div className="mono" style={{ marginTop: 5, fontSize: 17, fontWeight: 700, letterSpacing: -0.4, color: supplier.totalPayable > 0 ? '#A32D2D' : 'var(--color-text-primary)' }}>
+            {fmtCompact(supplier.totalPayable)}<span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--color-text-tertiary)', marginLeft: 3 }}>F CFA</span>
           </div>
-        ))}
+          {/* Aging mini-bar */}
+          {supplier.totalPayable > 0 && (
+            <div style={{ height: 5, display: 'flex', gap: 2, marginTop: 9, borderRadius: 3, overflow: 'hidden' }}>
+              {(['cur', 'd30', 'd60', 'd90'] as const).map(k => ageTot[k] ? (
+                <div key={k} style={{ height: '100%', borderRadius: 3, background: ageCols[k], flex: ageTot[k] / ageTotal }} />
+              ) : null)}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Bill status filter */}
@@ -261,7 +398,7 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
         {visibleBills.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--color-text-tertiary)', fontSize: 13 }}>Aucune facture dans ce filtre</div>
         ) : visibleBills.map(bill => {
-          const days = daysDue(bill.dueDate);
+          const d = daysDue(bill.dueDate);
           const ttc = bill.htAmount + bill.tvaAmount;
           return (
             <div key={bill.id} onClick={() => setLocalBill(bill)}
@@ -269,13 +406,16 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-background-secondary)')}
               onMouseLeave={e => (e.currentTarget.style.background = '')}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.piece}</div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 2 }}>Échéance {bill.dueDate}{bill.status === 'overdue' ? <span style={{ color: '#A32D2D', fontWeight: 700 }}> · {Math.abs(days)} j. retard</span> : null}</div>
+                <div className="mono" style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--brand)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.piece}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                  {bill.status === 'paid' ? 'Réglé' : bill.status === 'overdue'
+                    ? <span style={{ color: '#A32D2D', fontWeight: 700 }}>{Math.abs(d)} j. de retard</span>
+                    : `échéance ${fmtDate(bill.dueDate)}`}
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: 12 }}>
-                <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontSize: 12.5, fontWeight: 700 }}>{fmt(ttc)}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--color-text-tertiary)' }}>F CFA</div>
+                <div className="mono" style={{ textAlign: 'right', fontSize: 12.5, fontWeight: 700 }}>
+                  {fmt(ttc)} <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)' }}>F CFA</span>
                 </div>
                 <StatusPill status={bill.status} />
                 <Icon name="chevron-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -285,8 +425,11 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
         })}
       </div>
 
-      <div style={{ marginTop: 20 }}>
-        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { onClose(); onNewBill(supplier.name); }}>
+      <div style={{ display: 'flex', gap: 9, marginTop: 20 }}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => {}}>
+          <Icon name="download" size={15} />Relevé
+        </button>
+        <button className="btn btn-primary" style={{ flex: 1.4, justifyContent: 'center' }} onClick={() => { onClose(); onNewBill(supplier.name); }}>
           <Icon name="plus" size={15} />Nouvelle facture
         </button>
       </div>
@@ -321,6 +464,7 @@ export default function ContactsPage() {
   const [showBillForm, setShowBillForm] = useState(false);
   const [billInitialSupplier, setBillInitialSupplier] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState<SupplierFilterKey>('all');
 
   // ── useMemo calls must be unconditional (before any early return) ─────────
   const filteredClients = useMemo(() => {
@@ -354,10 +498,16 @@ export default function ContactsPage() {
   }, [supplierBillsAll]);
 
   const filteredSuppliers = useMemo(() => {
-    if (!supplierSearch.trim()) return supplierContacts;
-    const q = supplierSearch.toLowerCase();
-    return supplierContacts.filter(s => s.name.toLowerCase().includes(q) || s.city.toLowerCase().includes(q));
-  }, [supplierContacts, supplierSearch]);
+    let list = supplierContacts;
+    if (supplierFilter === 'overdue') list = list.filter(s => s.overdueCount > 0);
+    else if (supplierFilter === 'open') list = list.filter(s => s.totalPayable > 0);
+    else if (supplierFilter === 'settled') list = list.filter(s => s.totalPayable === 0);
+    if (supplierSearch.trim()) {
+      const q = supplierSearch.toLowerCase();
+      list = list.filter(s => s.name.toLowerCase().includes(q) || s.city.toLowerCase().includes(q));
+    }
+    return list;
+  }, [supplierContacts, supplierFilter, supplierSearch]);
 
   const loading = tab === 'clients' ? clientsLoading : suppLoading;
   if (loading) return <PageSkeleton title="Contacts" variant="accounting" rows={6} />;
@@ -410,21 +560,32 @@ export default function ContactsPage() {
   // ── Suppliers computed ────────────────────────────────────────────────────
   const supplierBills = supplierBillsAll;
   const totalPayable  = supplierBills.filter(b => b.status !== 'paid').reduce((s, b) => s + b.htAmount + b.tvaAmount, 0);
-  const dueSoon       = supplierBills.filter(b => b.status === 'open' && daysDue(b.dueDate) <= 7).reduce((s, b) => s + b.htAmount + b.tvaAmount, 0);
-  const overdue       = supplierBills.filter(b => b.status === 'overdue').reduce((s, b) => s + b.htAmount + b.tvaAmount, 0);
-  const suppCount     = new Set(supplierBills.map(b => b.supplier)).size;
+  const dueSoon       = supplierBills.filter(b => b.status === 'open' && daysDue(b.dueDate) >= 0 && daysDue(b.dueDate) <= 7).reduce((s, b) => s + b.htAmount + b.tvaAmount, 0);
+  const overdueTTC    = supplierBills.filter(b => b.status === 'overdue').reduce((s, b) => s + b.htAmount + b.tvaAmount, 0);
+  const suppCount     = supplierContacts.length;
+  const supplierCounts: Record<SupplierFilterKey, number> = {
+    all: suppCount,
+    overdue: supplierContacts.filter(s => s.overdueCount > 0).length,
+    open: supplierContacts.filter(s => s.totalPayable > 0).length,
+    settled: supplierContacts.filter(s => s.totalPayable === 0).length,
+  };
 
   async function handleCreateBill(billForm: BillForm) {
     const ht = parseFloat(billForm.htAmount);
-    await createBill({ supplier: billForm.supplier, city: billForm.city, piece: billForm.piece, date: billForm.date, dueDate: billForm.dueDate, htAmount: ht, tvaAmount: Math.round(ht * TVA_RATE), status: 'open' });
+    await createBill({ supplier: billForm.supplier, city: billForm.city, piece: billForm.piece, date: billForm.date, dueDate: billForm.dueDate, htAmount: ht, tvaAmount: Math.round(ht * TVA_RATE), status: 'open', paymentMethod: billForm.paymentMethod });
   }
 
-  // ── KPI strip — always 4 cards: 2 clients · 2 suppliers ─────────────────
-  const kpis = [
-    { icon: 'users',          iconBg: '#E9F0FA',            iconColor: 'var(--brand)',  label: 'Clients',        value: clients.length,          sub: `${activeCount} actifs · ${leadCount} prospects` },
-    { icon: 'clock-pause',    iconBg: '#FAEEDA',            iconColor: '#B26A09',       label: 'Solde impayé',   value: fmtCompact(outstanding),  unit: 'F CFA', sub: `${withBalance} client${withBalance !== 1 ? 's' : ''} avec solde` },
-    { icon: 'truck-delivery', iconBg: '#FCEFE0',            iconColor: '#B26A09',       label: 'Total à payer',  value: fmtCompact(totalPayable), unit: 'F CFA', sub: `${supplierBills.filter(b => b.status !== 'paid').length} factures ouvertes` },
-    { icon: 'alert-triangle', iconBg: '#FCEBEB',            iconColor: '#A32D2D',       label: 'En retard',      value: fmtCompact(overdue),      unit: 'F CFA', sub: `${suppCount} fournisseur${suppCount !== 1 ? 's' : ''} actifs` },
+  // ── Contextual KPIs ───────────────────────────────────────────────────────
+  const kpis = tab === 'clients' ? [
+    { icon: 'users',        iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)',  label: 'Clients',          value: clients.length,         sub: `${activeCount} actifs · ${leadCount} prospect${leadCount !== 1 ? 's' : ''}` },
+    { icon: 'user-check',   iconBg: '#EAF3DE',           iconColor: '#3B6D11',       label: 'Actifs',           value: activeCount,             sub: 'relations de facturation' },
+    { icon: 'report-money', iconBg: '#ECE9FB',            iconColor: '#5B45C7',       label: 'Total facturé',    value: fmtCompact(totalBilled), unit: 'F CFA', sub: 'revenu cumulé' },
+    { icon: 'clock-pause',  iconBg: '#FAEEDA',            iconColor: '#B26A09',       label: 'Solde impayé (411)', value: fmtCompact(outstanding), unit: 'F CFA', sub: `${withBalance} client${withBalance !== 1 ? 's' : ''} avec solde` },
+  ] : [
+    { icon: 'truck-delivery', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'À payer (401)',    value: fmtCompact(totalPayable), unit: 'F CFA', sub: `${supplierBills.filter(b => b.status !== 'paid').length} factures ouvertes` },
+    { icon: 'clock',          iconBg: '#FAEEDA',            iconColor: '#B26A09',      label: 'Échéance ≤ 7 j.', value: fmtCompact(dueSoon),      unit: 'F CFA', sub: 'à planifier' },
+    { icon: 'alert-triangle', iconBg: '#FCEBEB',            iconColor: '#A32D2D',      label: 'En retard',       value: fmtCompact(overdueTTC),   unit: 'F CFA', sub: `${supplierBills.filter(b => b.status === 'overdue').length} facture${supplierBills.filter(b => b.status === 'overdue').length !== 1 ? 's' : ''} échues` },
+    { icon: 'briefcase',      iconBg: '#E7F3E2',            iconColor: '#2E7D32',      label: 'Fournisseurs',    value: suppCount,                sub: 'avec activité' },
   ];
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -446,6 +607,7 @@ export default function ContactsPage() {
             <div className="page-sub">Clients &amp; fournisseurs</div>
           </div>
           <div className="topbar-actions">
+            <button className="btn"><Icon name="download" size={15} />Exporter</button>
             {tab === 'clients'
               ? <button className="btn btn-primary" onClick={() => setClientPanel({ kind: 'new' })}><Icon name="user-plus" size={15} />Nouveau client</button>
               : <button className="btn btn-primary" onClick={() => setShowBillForm(true)}><Icon name="plus" size={15} />Nouvelle facture</button>
@@ -454,9 +616,21 @@ export default function ContactsPage() {
         </div>
 
         <div className="content">
-          <KPIStrip items={kpis} />
+          {/* ── Contextual KPI strip ──────────────────────────────────────── */}
+          <div className="metrics" style={{ marginBottom: 20 }}>
+            {kpis.map(k => (
+              <div key={k.label} className="metric-card">
+                <div className="metric-top">
+                  <div className="metric-ico" style={{ background: k.iconBg, color: k.iconColor }}><Icon name={k.icon} size={15} /></div>
+                  <div className="metric-label">{k.label}</div>
+                </div>
+                <div className="metric-value mono">{k.value}{k.unit ? <span className="metric-unit">{k.unit}</span> : null}</div>
+                <div className="metric-change neutral">{k.sub}</div>
+              </div>
+            ))}
+          </div>
 
-          {/* ── Tab switcher ─────────────────────────────────────────────── */}
+          {/* ── Tab switcher ──────────────────────────────────────────────── */}
           <div style={{ display: 'flex', gap: 3, background: 'var(--color-background-secondary)', padding: 3, borderRadius: 'var(--border-radius-lg)', border: '0.5px solid var(--color-border-tertiary)', width: 'fit-content', marginBottom: 16 }}>
             <button style={tabStyle(tab === 'clients')} onClick={() => setTab('clients')}>
               <Icon name="users" size={14} />Clients
@@ -471,21 +645,17 @@ export default function ContactsPage() {
           {/* ── Clients tab ──────────────────────────────────────────────── */}
           {tab === 'clients' && (
             <>
-              <div className="section-header">
-                <div className="section-title">Répertoire clients
+              <div className="toolbar" style={{ marginBottom: 12 }}>
+                <div className="search-box">
+                  <Icon name="search" size={15} />
+                  <input type="text" placeholder="Rechercher un client…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div className="search-box">
-                    <Icon name="search" size={15} />
-                    <input type="text" placeholder="Rechercher un client…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
-                  </div>
-                  <div className="filters">
-                    {CLIENT_FILTERS.map(f => (
-                      <button key={f.key} className={'filter-chip' + (clientFilter === f.key ? ' active' : '')} onClick={() => setClientFilter(f.key)}>
-                        {f.label}<span className="cnt">{clientCounts[f.key]}</span>
-                      </button>
-                    ))}
-                  </div>
+                <div className="filters">
+                  {CLIENT_FILTERS.map(f => (
+                    <button key={f.key} className={'filter-chip' + (clientFilter === f.key ? ' active' : '')} onClick={() => setClientFilter(f.key)}>
+                      {f.label}<span className="cnt">{clientCounts[f.key]}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -521,11 +691,23 @@ export default function ContactsPage() {
                       }
                     </div>
                     <div><span className={`status-pill s-${cl.status}`}>{CLIENT_STATUS_LABEL[cl.status]}</span></div>
-                    <div className="row-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-btn" aria-label="Plus"><Icon name="dots" size={15} /></button>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', color: 'var(--color-text-tertiary)' }}>
+                      <Icon name="chevron-right" size={16} />
                     </div>
                   </div>
                 ))}
+                {/* Table footer */}
+                {filteredClients.length > 0 && (
+                  <div className="dir-foot">
+                    <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                      {filteredClients.length} sur {clients.length} client{clients.length !== 1 ? 's' : ''}
+                    </span>
+                    <div className="dir-foot-r">
+                      <span>Facturé<b>{fmt(filteredClients.reduce((a, c) => a + c.billed, 0))} F CFA</b></span>
+                      <span>Solde impayé<b className={filteredClients.reduce((a, c) => a + c.balance, 0) > 0 ? 'due' : ''}>{fmt(filteredClients.reduce((a, c) => a + c.balance, 0))} F CFA</b></span>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -533,55 +715,79 @@ export default function ContactsPage() {
           {/* ── Suppliers tab ─────────────────────────────────────────────── */}
           {tab === 'suppliers' && (
             <>
-              <div className="acc-toolbar">
-                <input
-                  className="search-input"
-                  placeholder="Rechercher un fournisseur…"
-                  value={supplierSearch}
-                  onChange={e => setSupplierSearch(e.target.value)}
-                  style={{ maxWidth: 280 }}
-                />
-                <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => { setBillInitialSupplier(''); setShowBillForm(true); }}>
-                  <Icon name="plus" size={15} /> Nouvelle facture
-                </button>
-              </div>
+              {/* AP Aging strip */}
+              <AgingStrip bills={supplierBillsAll} />
 
-              <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 130px 110px 36px', gap: 14, padding: '10px 18px', background: 'var(--color-background-secondary)', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-                  {['Fournisseur', 'Factures', 'Total TTC', 'En retard', ''].map((h, i) => (
-                    <div key={i} style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: 0.6, textAlign: i >= 1 && i <= 3 ? 'right' : 'left' }}>{h}</div>
+              {/* Toolbar: search + filter chips */}
+              <div className="toolbar" style={{ marginBottom: 12 }}>
+                <div className="search-box">
+                  <Icon name="search" size={15} />
+                  <input type="text" placeholder="Rechercher un fournisseur…" value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} />
+                </div>
+                <div className="filters">
+                  {SUPPLIER_FILTERS.map(f => (
+                    <button key={f.key} className={'filter-chip' + (supplierFilter === f.key ? ' active' : '')} onClick={() => setSupplierFilter(f.key)}>
+                      {f.label}<span className="cnt">{supplierCounts[f.key]}</span>
+                    </button>
                   ))}
                 </div>
-                {filteredSuppliers.length === 0
-                  ? <EmptyState illustration={<SuppliersEmptyIllustration />} title="Aucun fournisseur" description="Aucun fournisseur trouvé." />
-                  : filteredSuppliers.map((s, i) => {
-                    const av = supplierAvColor(s.name);
-                    return (
-                      <div key={s.name} onClick={() => setSelectedSupplier(s)}
-                        style={{ display: 'grid', gridTemplateColumns: '1fr 110px 130px 110px 36px', gap: 14, padding: '13px 18px', borderTop: i > 0 ? '0.5px solid var(--color-border-tertiary)' : 'none', cursor: 'pointer', alignItems: 'center', transition: 'background .1s' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-background-secondary)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = '')}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 8, background: av.bg, color: av.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 11, flexShrink: 0 }}>
-                            {supplierInitials(s.name)}
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 1 }}>{s.city}</div>
-                          </div>
+              </div>
+
+              <div className="client-table">
+                <div className="table-head supplier-grid-cols" style={{ padding: '10px 18px' }}>
+                  <div className="th">Fournisseur</div>
+                  <div className="th">Factures</div>
+                  <div className="th right">Total TTC</div>
+                  <div className="th">Règlement</div>
+                  <div className="th" />
+                </div>
+                {filteredSuppliers.length === 0 ? (
+                  <EmptyState illustration={<SuppliersEmptyIllustration />} title="Aucun fournisseur" description="Aucun fournisseur trouvé pour ce filtre." />
+                ) : filteredSuppliers.map(s => {
+                  const av = supplierAvColor(s.name);
+                  const pill = s.overdueCount > 0
+                    ? <span className="status-pill s-overdue">{s.overdueCount} en retard</span>
+                    : s.totalPayable > 0
+                      ? <span className="status-pill s-ontrack">En cours</span>
+                      : <span className="status-pill s-settled">Soldé</span>;
+                  return (
+                    <div key={s.name} className="supplier-row supplier-grid-cols" onClick={() => setSelectedSupplier(s)}>
+                      <div className="name-cell">
+                        <div style={{ width: 36, height: 36, borderRadius: 9, background: av.bg, color: av.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 11.5, flexShrink: 0 }}>
+                          {supplierInitials(s.name)}
                         </div>
-                        <div style={{ fontSize: 12.5, textAlign: 'right', fontWeight: 500 }}>{s.bills.length} facture{s.bills.length !== 1 ? 's' : ''}</div>
-                        <div className="mono" style={{ textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{fmt(s.totalTTC)} <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)' }}>F CFA</span></div>
-                        <div style={{ textAlign: 'right' }}>
-                          {s.overdueCount > 0
-                            ? <span style={{ fontSize: 11.5, fontWeight: 700, color: '#A32D2D' }}>{s.overdueCount} retard</span>
-                            : <span style={{ color: 'var(--color-text-tertiary)', fontSize: 11.5 }}>—</span>}
+                        <div style={{ minWidth: 0 }}>
+                          <div className="cl-name">{s.name}</div>
+                          <div className="cl-contact">{s.city}</div>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', color: 'var(--color-text-tertiary)' }}><Icon name="chevron-right" size={16} /></div>
                       </div>
-                    );
-                  })}
+                      <div className="inv-count tnum">{s.bills.length} <span>facture{s.bills.length !== 1 ? 's' : ''}</span></div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div className="billed tnum">{fmt(s.totalTTC)}<span className="cur">F CFA</span></div>
+                        {s.totalPayable > 0
+                          ? <div className="billed-sub bal">{fmt(s.totalPayable)} F CFA à payer</div>
+                          : <div className="billed-sub clear">Rien dû</div>
+                        }
+                      </div>
+                      <div>{pill}</div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', color: 'var(--color-text-tertiary)' }}>
+                        <Icon name="chevron-right" size={16} />
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Table footer */}
+                {filteredSuppliers.length > 0 && (
+                  <div className="dir-foot">
+                    <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                      {filteredSuppliers.length} sur {suppCount} fournisseur{suppCount !== 1 ? 's' : ''}
+                    </span>
+                    <div className="dir-foot-r">
+                      <span>Total TTC<b>{fmt(filteredSuppliers.reduce((a, s) => a + s.totalTTC, 0))} F CFA</b></span>
+                      <span>À payer<b className={filteredSuppliers.reduce((a, s) => a + s.totalPayable, 0) > 0 ? 'due' : ''}>{fmt(filteredSuppliers.reduce((a, s) => a + s.totalPayable, 0))} F CFA</b></span>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -595,20 +801,19 @@ export default function ContactsPage() {
         {detailClient && (
           <>
             <div className="panel-slide-head">
-              <div>
-                <div className="panel-slide-title">Client</div>
-                <div className="panel-slide-sub">Aperçu &amp; historique</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div className={`cl-av ${detailClient.av}`} style={{ width: 44, height: 44, borderRadius: 11, fontSize: 14 }}>{detailClient.code}</div>
+                <div>
+                  <div className="panel-slide-title">{detailClient.name}</div>
+                  <div className="panel-slide-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Icon name="map-pin" size={11} />{detailClient.city}
+                    <span className={`status-pill s-${detailClient.status}`} style={{ marginLeft: 4 }}>{CLIENT_STATUS_LABEL[detailClient.status]}</span>
+                  </div>
+                </div>
               </div>
               <button className="icon-btn" onClick={closeClientPanel} aria-label="Fermer"><Icon name="x" size={18} /></button>
             </div>
             <div className="panel-body">
-              <div className="detail-hero">
-                <div className={`detail-av ${detailClient.av}`}>{detailClient.code}</div>
-                <div>
-                  <div className="detail-name">{detailClient.name}</div>
-                  <div className="detail-meta">{detailClient.contact} · {detailClient.city}</div>
-                </div>
-              </div>
               <div className="stat-row">
                 <div className="stat-box">
                   <div className="stat-label">Total facturé</div>
@@ -688,7 +893,7 @@ export default function ContactsPage() {
                   <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}><Icon name="plus" size={15} /> Nouvelle facture</button>
                 </div>
               )}
-              <button className="btn btn-ghost btn-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => handleDeleteClient(detailClient)}><Icon name="trash" size={15} /> Supprimer ce client</button>
+              <button className="btn" style={{ width: '100%', justifyContent: 'center', color: '#A32D2D' }} onClick={() => handleDeleteClient(detailClient)}><Icon name="trash" size={15} /> Supprimer ce client</button>
             </div>
           </>
         )}

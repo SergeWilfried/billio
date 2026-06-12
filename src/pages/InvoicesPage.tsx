@@ -10,7 +10,7 @@ import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { saveLineItems } from '../lib/api/line-items';
 import { createActivity } from '../lib/api/activities';
 import {
-  STATUS_LABEL, fmt, fmtDate, fmtDue, nextId, newLineItem,
+  STATUS_LABEL, fmt, fmtCompact, fmtDate, fmtDue, nextId, newLineItem,
 } from '../data';
 import type { FilterKey, Status, LineItem } from '../data';
 import type { Activity } from '../lib/schemas';
@@ -135,7 +135,7 @@ export default function InvoicesPage() {
                 <div className="metric-label">Total facturé</div>
               </div>
               <div className="metric-value tnum">
-                {fmt(invoices.filter(i => i.status !== 'draft').reduce((s, i) => s + i.amount, 0))}
+                {fmtCompact(invoices.filter(i => i.status !== 'draft').reduce((s, i) => s + i.amount, 0))}
                 <span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">{invoices.filter(i => i.status !== 'draft').length} factures émises</div>
@@ -147,7 +147,7 @@ export default function InvoicesPage() {
                 <div className="metric-label">Encaissé</div>
               </div>
               <div className="metric-value tnum">
-                {fmt(invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0))}
+                {fmtCompact(invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0))}
                 <span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">{invoices.filter(i => i.status === 'paid').length} factures payées</div>
@@ -159,7 +159,7 @@ export default function InvoicesPage() {
                 <div className="metric-label">En attente</div>
               </div>
               <div className="metric-value tnum">
-                {fmt(invoices.filter(i => i.status === 'pending').reduce((s, i) => s + i.amount, 0))}
+                {fmtCompact(invoices.filter(i => i.status === 'pending').reduce((s, i) => s + i.amount, 0))}
                 <span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">{invoices.filter(i => i.status === 'pending').length} en attente de paiement</div>
@@ -171,7 +171,7 @@ export default function InvoicesPage() {
                 <div className="metric-label">En retard</div>
               </div>
               <div className="metric-value tnum" style={{ color: invoices.some(i => i.status === 'overdue') ? '#A32D2D' : undefined }}>
-                {fmt(invoices.filter(i => i.status === 'overdue').reduce((s, i) => s + i.amount, 0))}
+                {fmtCompact(invoices.filter(i => i.status === 'overdue').reduce((s, i) => s + i.amount, 0))}
                 <span className="metric-unit">F CFA</span>
               </div>
               <div className="metric-change neutral">{invoices.filter(i => i.status === 'overdue').length} factures en retard</div>

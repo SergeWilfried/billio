@@ -68,7 +68,7 @@ export default function DashboardPage() {
               <div className="metric-ico blue"><Icon name="file-invoice" size={15} ariaHidden /></div>
               <div className="metric-label">Total facturé</div>
             </div>
-            <div className="metric-value tnum">{fmt(metrics.totalInvoiced)}<span className="metric-unit">F CFA</span></div>
+            <div className="metric-value tnum">{fmtCompact(metrics.totalInvoiced)}<span className="metric-unit">F CFA</span></div>
             <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+12 % MoM</span></div>
           </div>
 
@@ -77,7 +77,7 @@ export default function DashboardPage() {
               <div className="metric-ico amber"><Icon name="clock-pause" size={15} ariaHidden /></div>
               <div className="metric-label">Impayé</div>
             </div>
-            <div className="metric-value tnum">{fmt(metrics.outstanding)}<span className="metric-unit">F CFA</span></div>
+            <div className="metric-value tnum">{fmtCompact(metrics.outstanding)}<span className="metric-unit">F CFA</span></div>
             <div className="metric-change"><span className="dn"><Icon name="alert-triangle" size={14} ariaHidden />{metrics.overdueCount} en retard</span></div>
           </div>
 
@@ -86,7 +86,7 @@ export default function DashboardPage() {
               <div className="metric-ico green"><Icon name="cash" size={15} ariaHidden /></div>
               <div className="metric-label">Encaissé</div>
             </div>
-            <div className="metric-value tnum">{fmt(metrics.collected)}<span className="metric-unit">F CFA</span></div>
+            <div className="metric-value tnum">{fmtCompact(metrics.collected)}<span className="metric-unit">F CFA</span></div>
             <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />{metrics.collectionRate} % collecté</span></div>
           </div>
 

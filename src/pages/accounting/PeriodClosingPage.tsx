@@ -103,7 +103,7 @@ export default function PeriodClosingPage() {
   const result = useMemo(() => {
     const produits = -(signedOf('701') + signedOf('706'));
     const charges = signedOf('601') + signedOf('605') + signedOf('627') +
-      signedOf('661') + signedOf('681') + signedOf('671');
+      signedOf('661') + signedOf('664') + signedOf('681') + signedOf('671');
     return produits - charges;
   }, [data]);
 

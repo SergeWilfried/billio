@@ -49,6 +49,8 @@ export interface FixedAsset {
   grossValue: number;
 }
 
+export type PaymentMethod = 'wire' | 'cash' | 'mobile';
+
 export interface SupplierBill {
   id: string;
   supplier: string;
@@ -59,6 +61,7 @@ export interface SupplierBill {
   htAmount: number;
   tvaAmount: number;
   status: 'open' | 'overdue' | 'paid';
+  paymentMethod: PaymentMethod;
   acctLines: { acct: string; label: string; amount: number; side: 'D' | 'C' }[];
 }
 
@@ -97,7 +100,10 @@ export const ACCOUNTS: Account[] = [
   { num: '401',  label: 'Fournisseurs',                                    nature: 'C' },
   { num: '411',  label: 'Clients',                                         nature: 'D' },
   { num: '421',  label: 'Personnel, rémunérations dues',                   nature: 'C' },
-  { num: '431',  label: 'Sécurité sociale',                                nature: 'C' },
+  { num: '4311', label: 'CNSS, cotisations patronales',                    nature: 'C' },
+  { num: '4312', label: 'CNSS, cotisations salariales',                    nature: 'C' },
+  { num: '4421', label: 'État, IRI retenu à la source',                    nature: 'C' },
+  { num: '4423', label: 'État, TMS (Taxe sur Masse Salariale)',             nature: 'C' },
   { num: '443',  label: 'État, TVA facturée',                              nature: 'C' },
   { num: '445',  label: 'État, TVA récupérable',                           nature: 'D' },
   { num: '521',  label: 'Banques',                                         nature: 'D' },
@@ -106,6 +112,7 @@ export const ACCOUNTS: Account[] = [
   { num: '605',  label: 'Autres achats',                                   nature: 'D' },
   { num: '627',  label: 'Services bancaires et assimilés',                 nature: 'D' },
   { num: '661',  label: 'Rémunérations directes versées au personnel',     nature: 'D' },
+  { num: '664',  label: 'Charges sociales patronales',                     nature: 'D' },
   { num: '671',  label: 'Intérêts des emprunts',                           nature: 'D' },
   { num: '681',  label: 'Dotations aux amortissements d\'exploitation',    nature: 'D' },
   { num: '701',  label: 'Ventes de marchandises',                          nature: 'C' },
@@ -149,8 +156,19 @@ export const ENTRIES: JournalEntry[] = [
     lines: [{ acct: '627', d: 12000, c: 0 }, { acct: '445', d: 2160, c: 0 }, { acct: '521', d: 0, c: 14160 }] },
   { id: 'VE-0044', journal: 'VE', date: '2026-06-15', piece: 'FACT INV-0044', label: 'Facture client — Orange Télécoms', posted: true,
     lines: [{ acct: '411', d: 377600, c: 0 }, { acct: '706', d: 0, c: 320000 }, { acct: '443', d: 0, c: 57600 }] },
-  { id: 'OD-0027', journal: 'OD', date: '2026-06-28', piece: 'PAIE 2026-06', label: 'Paie du mois de juin', posted: true,
-    lines: [{ acct: '661', d: 850000, c: 0 }, { acct: '421', d: 0, c: 720000 }, { acct: '431', d: 0, c: 130000 }] },
+  { id: 'OD-0027', journal: 'OD', date: '2026-06-28', piece: 'PAIE 2026-06', label: 'Paie du mois de juin — bulletin salarial', posted: true,
+    lines: [
+      { acct: '661',  d: 850000, c: 0 },  // Rémunérations brutes
+      { acct: '4312', d: 0, c: 46750 },   // CNSS salarié 5.5%
+      { acct: '4421', d: 0, c: 96000 },   // IRI retenu à la source (~12% base imposable)
+      { acct: '421',  d: 0, c: 707250 },  // Net à payer (850 000 − 46 750 − 96 000)
+    ] },
+  { id: 'OD-0030', journal: 'OD', date: '2026-06-28', piece: 'PAIE 2026-06B', label: 'Charges patronales — juin', posted: true,
+    lines: [
+      { acct: '664',  d: 153000, c: 0 },  // Charges sociales patronales
+      { acct: '4311', d: 0, c: 136000 },  // CNSS patronal 16%
+      { acct: '4423', d: 0, c: 17000 },   // TMS 2%
+    ] },
   { id: 'OD-0028', journal: 'OD', date: '2026-06-30', piece: 'OD 2026-028', label: 'Dotation aux amortissements — juin', posted: true,
     lines: [{ acct: '681', d: 180000, c: 0 }, { acct: '2818', d: 0, c: 150000 }, { acct: '281', d: 0, c: 30000 }] },
   { id: 'BQ-0236', journal: 'BQ', date: '2026-06-30', piece: 'ÉCH 2026-06', label: 'Échéance emprunt — capital + intérêts', posted: true,
@@ -183,7 +201,7 @@ export const SUPPLIER_BILLS: SupplierBill[] = [
   {
     id: 'BILL-001', supplier: 'BurkinaFarm SARL', city: 'Ouagadougou',
     piece: 'BL FRN-0462', date: '2026-06-08', dueDate: '2026-07-08',
-    htAmount: 600000, tvaAmount: 108000, status: 'open',
+    htAmount: 600000, tvaAmount: 108000, status: 'open', paymentMethod: 'wire',
     acctLines: [
       { acct: '601', label: 'Achats de marchandises', amount: 600000, side: 'D' },
       { acct: '445', label: 'TVA récupérable', amount: 108000, side: 'D' },
@@ -193,7 +211,7 @@ export const SUPPLIER_BILLS: SupplierBill[] = [
   {
     id: 'BILL-002', supplier: 'Sahel Office', city: 'Bamako',
     piece: 'BL FRN-0461', date: '2026-06-03', dueDate: '2026-06-18',
-    htAmount: 250000, tvaAmount: 45000, status: 'paid',
+    htAmount: 250000, tvaAmount: 45000, status: 'paid', paymentMethod: 'wire',
     acctLines: [
       { acct: '605', label: 'Autres achats', amount: 250000, side: 'D' },
       { acct: '445', label: 'TVA récupérable', amount: 45000, side: 'D' },
@@ -203,7 +221,7 @@ export const SUPPLIER_BILLS: SupplierBill[] = [
   {
     id: 'BILL-003', supplier: 'TotalEnergies BF', city: 'Ouagadougou',
     piece: 'FAC-2026-0815', date: '2026-05-20', dueDate: '2026-06-05',
-    htAmount: 180000, tvaAmount: 32400, status: 'overdue',
+    htAmount: 180000, tvaAmount: 32400, status: 'overdue', paymentMethod: 'mobile',
     acctLines: [
       { acct: '605', label: 'Autres achats', amount: 180000, side: 'D' },
       { acct: '445', label: 'TVA récupérable', amount: 32400, side: 'D' },
@@ -213,7 +231,7 @@ export const SUPPLIER_BILLS: SupplierBill[] = [
   {
     id: 'BILL-004', supplier: 'Orange Business CI', city: 'Abidjan',
     piece: 'INV-OB-04891', date: '2026-06-01', dueDate: '2026-07-01',
-    htAmount: 95000, tvaAmount: 17100, status: 'open',
+    htAmount: 95000, tvaAmount: 17100, status: 'open', paymentMethod: 'cash',
     acctLines: [
       { acct: '627', label: 'Services bancaires et assimilés', amount: 95000, side: 'D' },
       { acct: '445', label: 'TVA récupérable', amount: 17100, side: 'D' },
@@ -231,8 +249,7 @@ export function fmt(n: number): string {
 export function fmtCompact(n: number): string {
   const a = Math.abs(n);
   if (a >= 1e6) return (n / 1e6).toFixed(a % 1e6 === 0 ? 0 : 1) + 'M';
-  if (a >= 1e3) return Math.round(n / 1e3) + 'K';
-  return String(Math.round(n));
+  return Math.round(n).toLocaleString('fr-FR');
 }
 
 export function clsOf(num: string): number {

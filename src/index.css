@@ -726,10 +726,36 @@ select.form-input {
 .billed-sub.bal   { color: #A32D2D; font-weight: 600; }
 .billed-sub.clear { color: #3B6D11; font-weight: 500; }
 
-/* Client status pills */
+/* Client / supplier status pills */
 .s-active   { background: #EAF3DE; color: #3B6D11; }
 .s-lead     { background: var(--brand-tint); color: var(--brand); }
 .s-inactive { background: var(--color-background-secondary); color: var(--color-text-secondary); }
+.s-settled  { background: #E7F3E2; color: #2E7D32; }
+.s-ontrack  { background: #FCEFE0; color: #B26A09; }
+
+/* Supplier table */
+.supplier-grid-cols { display: grid; grid-template-columns: 2.5fr 1fr 1.35fr 1.05fr 36px; align-items: center; column-gap: 16px; }
+.supplier-row { padding: 13px 18px; border-bottom: 0.5px solid var(--color-border-tertiary); cursor: pointer; transition: background .1s; }
+.supplier-row:last-child { border-bottom: none; }
+.supplier-row:hover { background: var(--brand-tint); }
+
+/* Table footer */
+.dir-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-top: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); font-size: 11.5px; }
+.dir-foot-r { display: flex; gap: 20px; }
+.dir-foot-r span { color: var(--color-text-tertiary); font-weight: 600; }
+.dir-foot-r b { color: var(--color-text-primary); font-weight: 700; margin-left: 5px; font-variant-numeric: tabular-nums; }
+.dir-foot-r b.due { color: #A32D2D; }
+
+/* AP Aging strip */
+.aging-strip { display: flex; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); padding: 4px; margin-bottom: 16px; }
+.aging-seg { flex: 1; padding: 11px 14px; border-right: 0.5px solid var(--color-border-tertiary); }
+.aging-seg:last-child { border-right: none; }
+.aging-top { display: flex; align-items: center; gap: 7px; }
+.aging-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.aging-lbl { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
+.aging-amt { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; margin-top: 7px; }
+.aging-bar { height: 4px; border-radius: 3px; background: var(--color-background-tertiary); margin-top: 9px; overflow: hidden; }
+.aging-bar > div { height: 100%; border-radius: 3px; }
 
 /* Detail hero */
 .detail-hero { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
@@ -1182,11 +1208,11 @@ select.form-input {
 /* ─── Pay-online block (invoice paper) ─────────────────────────── */
 .pp-payonline {
   display: flex; align-items: center; gap: 18px;
-  padding: 16px 20px;
+  padding: 10px 20px;
   background: var(--brand-tint);
   border: 1px solid #CFE4F7;
   border-radius: var(--border-radius-lg);
-  margin: 0 24px 20px;
+  margin: 10px 24px 10px;
 }
 .pp-qr {
   width: 68px; height: 68px; flex-shrink: 0;

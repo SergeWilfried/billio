@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { pdf } from '@react-pdf/renderer';
 import Icon from '../components/Icon';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { removeInvoice, updateInvoice } from '../lib/api/invoices';
 import { recordInvoicePaymentEntry, deleteInvoiceEntries } from '../lib/api/accounting';
 import { fetchLineItems } from '../lib/api/line-items';
-import { fmt, fmtDate, STATUS_LABEL } from '../data';
+import { fmt, fmtDate, fmtDateLong, STATUS_LABEL } from '../data';
+import { InvoicePDFDocument } from '../components/InvoicePDF';
 import type { Status } from '../data';
 import type { LineItem } from '../lib/schemas';
 
@@ -114,6 +116,22 @@ export default function InvoicePage() {
 
   const handleSendReminder = () => showToast(`Relance envoyée à ${client.name}`);
   const handleDuplicate    = () => showToast('Facture dupliquée en brouillon');
+  const handleDownloadPDF = async () => {
+    const blob = await pdf(
+      <InvoicePDFDocument
+        invoice={invoice}
+        lines={lines}
+        client={client}
+        biz={orgSettings}
+      />
+    ).toBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `facture-${invoice.id.toLowerCase()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const handleDelete = async () => {
     if (window.confirm(`Supprimer la facture #${invoice.id} ? Cette action est irréversible.`)) {
       setInvoices(prev => prev.filter(i => i.id !== invoice.id));
@@ -149,7 +167,7 @@ export default function InvoicePage() {
           </div>
         </div>
         <div className="topbar-actions">
-          <button className="btn" onClick={() => window.print()}>
+          <button className="btn" onClick={handleDownloadPDF}>
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
           <button className="btn">
@@ -211,9 +229,9 @@ export default function InvoicePage() {
                 <div className="pp-block-label">Détails</div>
                 <div className="pp-meta-grid">
                   <div className="k">Émis le</div>
-                  <div className="v">{fmtDate(invoice.issued)}</div>
+                  <div className="v">{fmtDateLong(invoice.issued)}</div>
                   <div className="k">Échéance</div>
-                  <div className={`v${isOverdue ? ' due' : ''}`}>{fmtDate(invoice.due)}</div>
+                  <div className={`v${isOverdue ? ' due' : ''}`}>{fmtDateLong(invoice.due)}</div>
                   <div className="k">Conditions</div>
                   <div className="v">Net 14 jours</div>
                   <div className="k">Référence</div>
@@ -346,7 +364,7 @@ export default function InvoicePage() {
                     <Icon name="send" ariaHidden /> Envoyer une relance
                   </button>
                 </>)}
-                <button className="btn btn-block" onClick={() => window.print()}>
+                <button className="btn btn-block" onClick={handleDownloadPDF}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
                 <div className="rail-divider" />

@@ -207,7 +207,7 @@ export default function ChartOfAccountsPage() {
       }
       return true;
     });
-  }, [activeClass, query]);
+  }, [accounts, activeClass, query]);
 
   const byClass = useMemo(() => {
     const map: Record<string, Account[]> = {};
@@ -226,7 +226,7 @@ export default function ChartOfAccountsPage() {
       counts[k] = (counts[k] || 0) + 1;
     });
     return counts;
-  }, []);
+  }, [accounts]);
 
   const toggleCollapse = (k: string) =>
     setCollapsed(prev => ({ ...prev, [k]: !prev[k] }));

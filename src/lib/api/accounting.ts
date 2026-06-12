@@ -96,6 +96,17 @@ function toFixedAsset(row: Record<string, unknown>): FixedAsset {
 }
 
 function toSupplierBill(row: Record<string, unknown>): SupplierBill {
+  const ht  = Number(row.ht_amount);
+  const tva = Number(row.tva_amount);
+  const stored = row.acct_lines as SupplierBill['acctLines'] | null | undefined;
+  const acctLines: SupplierBill['acctLines'] =
+    stored && stored.length > 0
+      ? stored
+      : [
+          { acct: '605', label: 'Autres achats',    amount: ht,        side: 'D' },
+          { acct: '445', label: 'TVA récupérable',  amount: tva,       side: 'D' },
+          { acct: '401', label: 'Fournisseurs',     amount: ht + tva,  side: 'C' },
+        ];
   return {
     id:        String(row.id),
     supplier:  String(row.supplier),
@@ -103,10 +114,11 @@ function toSupplierBill(row: Record<string, unknown>): SupplierBill {
     piece:     String(row.piece),
     date:      String(row.date),
     dueDate:   String(row.due_date),
-    htAmount:  Number(row.ht_amount),
-    tvaAmount: Number(row.tva_amount),
-    status:    row.status as SupplierBill['status'],
-    acctLines: (row.acct_lines as SupplierBill['acctLines']) ?? [],
+    htAmount:  ht,
+    tvaAmount: tva,
+    status:        row.status as SupplierBill['status'],
+    paymentMethod: (row.payment_method as SupplierBill['paymentMethod']) ?? 'wire',
+    acctLines,
   };
 }
 
@@ -504,6 +516,17 @@ export async function recordSupplierBillEntry(
   await postJournalEntry(entryId);
 }
 
+const PAYMENT_METHOD_JOURNAL: Record<string, string> = {
+  wire:   'BQ',
+  mobile: 'BQ',
+  cash:   'CA',
+};
+const PAYMENT_METHOD_ACCOUNT: Record<string, string> = {
+  wire:   '521',
+  mobile: '521',
+  cash:   '571',
+};
+
 export async function recordSupplierBillPaymentEntry(
   orgId: string,
   opts: {
@@ -511,11 +534,14 @@ export async function recordSupplierBillPaymentEntry(
     total: number;
     date: string;
     supplierName: string;
+    paymentMethod: string;
   },
 ): Promise<void> {
   if (MOCK) return;
+  const journal = PAYMENT_METHOD_JOURNAL[opts.paymentMethod] ?? 'BQ';
+  const creditAcct = PAYMENT_METHOD_ACCOUNT[opts.paymentMethod] ?? '521';
   const today = new Date().toISOString().slice(0, 10);
-  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'BQ', today);
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, journal, today);
   const entryId = await createJournalEntry(orgId, {
     journalId,
     periodId,
@@ -523,8 +549,8 @@ export async function recordSupplierBillPaymentEntry(
     piece: `REG-${opts.piece}`,
     label: `Règlement fournisseur — ${opts.supplierName}`,
     lines: [
-      { accountNum: '401', debit: opts.total, credit: 0          },
-      { accountNum: '521', debit: 0,          credit: opts.total },
+      { accountNum: '401',      debit: opts.total, credit: 0          },
+      { accountNum: creditAcct, debit: 0,          credit: opts.total },
     ],
   });
   await postJournalEntry(entryId);
@@ -559,15 +585,16 @@ export async function createSupplierBill(
 ): Promise<void> {
   if (MOCK) return;
   const { error } = await supabase.from('supplier_bills').insert({
-    org_id:     orgId,
-    supplier:   bill.supplier,
-    city:       bill.city,
-    piece:      bill.piece,
-    date:       bill.date,
-    due_date:   bill.dueDate,
-    ht_amount:  bill.htAmount,
-    tva_amount: bill.tvaAmount,
-    status:     'open',
+    org_id:          orgId,
+    supplier:        bill.supplier,
+    city:            bill.city,
+    piece:           bill.piece,
+    date:            bill.date,
+    due_date:        bill.dueDate,
+    ht_amount:       bill.htAmount,
+    tva_amount:      bill.tvaAmount,
+    payment_method:  bill.paymentMethod,
+    status:          'open',
   });
   if (error) throw error;
 }

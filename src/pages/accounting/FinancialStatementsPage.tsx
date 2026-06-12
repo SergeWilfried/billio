@@ -57,9 +57,10 @@ function BalanceSheet({ signedOf }: Pick<Fns, 'signedOf'>) {
   const emprunts = Math.abs(signedOf('162'));
   const fournisseurs = Math.abs(signedOf('401'));
   const personnel = Math.abs(signedOf('421'));
-  const secu = Math.abs(signedOf('431'));
+  const cnss = Math.abs(signedOf('4311') + signedOf('4312'));
+  const fiscalPayables = Math.abs(signedOf('4421') + signedOf('4423'));
   const tvaFacturee = Math.abs(signedOf('443'));
-  const totalPassif = capital + reserves + reportAN + emprunts + fournisseurs + personnel + secu + tvaFacturee;
+  const totalPassif = capital + reserves + reportAN + emprunts + fournisseurs + personnel + cnss + fiscalPayables + tvaFacturee;
 
   const actifRows: SheetRow[] = [
     { label: 'ACTIF IMMOBILISÉ', value: netImmo, bold: true },
@@ -83,11 +84,11 @@ function BalanceSheet({ signedOf }: Pick<Fns, 'signedOf'>) {
     { label: 'Report à nouveau', value: reportAN, indent: 1 },
     { label: 'DETTES FINANCIÈRES', value: emprunts, bold: true },
     { label: 'Emprunts bancaires', value: emprunts, indent: 1 },
-    { label: 'DETTES FOURNISSEURS', value: fournisseurs + personnel + secu + tvaFacturee, bold: true },
+    { label: 'DETTES D\'EXPLOITATION', value: fournisseurs + personnel + cnss + fiscalPayables + tvaFacturee, bold: true },
     { label: 'Fournisseurs', value: fournisseurs, indent: 1 },
-    { label: 'Personnel', value: personnel, indent: 1 },
-    { label: 'Charges sociales', value: secu, indent: 1 },
-    { label: 'TVA facturée', value: tvaFacturee, indent: 1 },
+    { label: 'Personnel — rémunérations nettes', value: personnel, indent: 1 },
+    { label: 'CNSS (part patronale + salariale)', value: cnss, indent: 1 },
+    { label: 'Dettes fiscales (IRI, TMS, TVA)', value: fiscalPayables + tvaFacturee, indent: 1 },
     { label: 'TOTAL PASSIF', value: totalPassif, bold: true, highlight: true },
   ];
 
@@ -113,7 +114,7 @@ function IncomeStatement({ mvtOf }: Pick<Fns, 'mvtOf'>) {
   const otherPurchases = mvtOf('605').debit;
   const bankFees = mvtOf('627').debit;
   const payroll = mvtOf('661').debit;
-  const socialCharges = mvtOf('431').credit;
+  const socialCharges = mvtOf('664').debit;
   const amort = mvtOf('681').debit;
   const interest = mvtOf('671').debit;
   const totalCharges = purchases + otherPurchases + bankFees + payroll + socialCharges + amort + interest;
@@ -164,7 +165,7 @@ function CashFlow({ signedOf, mvtOf }: Fns) {
     { label: 'FLUX OPÉRATIONNELS', value: operFlow, bold: true },
     { label: 'Encaissements clients', value: mvtOf('411').credit, indent: 1 },
     { label: 'Décaissements fournisseurs', value: -mvtOf('401').debit, indent: 1 },
-    { label: 'Charges de personnel (cash)', value: -(mvtOf('421').credit + mvtOf('431').credit), indent: 1 },
+    { label: 'Charges de personnel (cash)', value: -(mvtOf('421').credit + mvtOf('4311').credit + mvtOf('4312').credit), indent: 1 },
     { label: 'Charges bancaires', value: -mvtOf('627').debit, indent: 1 },
     { label: 'FLUX DE FINANCEMENT', value: 0, bold: true },
     { label: 'Remboursement emprunt', value: -mvtOf('162').debit, indent: 1 },

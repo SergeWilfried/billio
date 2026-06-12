@@ -277,10 +277,11 @@ export function useSupplierBills() {
       await apiBillPaid(billId);
       if (bill) {
         await recordSupplierBillPaymentEntry(orgId, {
-          piece:        bill.piece,
-          total:        bill.htAmount + bill.tvaAmount,
-          date:         new Date().toISOString().slice(0, 10),
-          supplierName: bill.supplier,
+          piece:         bill.piece,
+          total:         bill.htAmount + bill.tvaAmount,
+          date:          new Date().toISOString().slice(0, 10),
+          supplierName:  bill.supplier,
+          paymentMethod: bill.paymentMethod,
         });
       }
     } finally {
