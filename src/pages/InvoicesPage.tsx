@@ -86,28 +86,35 @@ export default function InvoicesPage() {
     const id    = nextId(invoices);
     const cName = clientsMap[fClient]?.name ?? fClient;
     const newInv = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status };
-    setInvoices(prev => [newInv, ...prev]);
-    await createInvoice(orgId, newInv);
-    await saveLineItems(orgId, lineItems, { invoiceId: id });
-    if (status === 'pending') {
-      await recordInvoiceIssuanceEntry(orgId, {
-        invoiceId:  id,
-        htAmount:   subtotal,
-        tvaAmount:  tax,
-        date:       fDate,
-        clientName: cName,
-      });
+
+    try {
+      await createInvoice(orgId, newInv);
+      await saveLineItems(orgId, lineItems, { invoiceId: id });
+      if (status === 'pending') {
+        await recordInvoiceIssuanceEntry(orgId, {
+          invoiceId:  id,
+          htAmount:   subtotal,
+          tvaAmount:  tax,
+          date:       fDate,
+          clientName: cName,
+        });
+      }
+
+      setInvoices(prev => [newInv, ...prev]);
+
+      const actPayload = status === 'pending'
+        ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' envoyée à ' }, { text: cName, bold: true as const }] }
+        : { kind: 'viewed' as const, parts: [{ text: 'Brouillon ' }, { text: `#${id}`, bold: true as const }, { text: ' enregistré pour ' }, { text: cName, bold: true as const }] };
+      const actEntry: Activity = { ...actPayload, time: "À l'instant" };
+      setActivity((prev: Activity[]) => [actEntry, ...prev]);
+      await createActivity(orgId, actPayload);
+
+      closePanel();
+      showToast(status === 'pending' ? `Facture #${id} envoyée à ${cName}` : `Brouillon #${id} enregistré`);
+    } catch (err) {
+      console.error('[submitInvoice] error:', err);
+      showToast('Une erreur est survenue. Veuillez réessayer.', true);
     }
-
-    const actPayload = status === 'pending'
-      ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' envoyée à ' }, { text: cName, bold: true as const }] }
-      : { kind: 'viewed' as const, parts: [{ text: 'Brouillon ' }, { text: `#${id}`, bold: true as const }, { text: ' enregistré pour ' }, { text: cName, bold: true as const }] };
-    const actEntry: Activity = { ...actPayload, time: "À l'instant" };
-    setActivity((prev: Activity[]) => [actEntry, ...prev]);
-    await createActivity(orgId, actPayload);
-
-    closePanel();
-    showToast(status === 'pending' ? `Facture #${id} envoyée à ${cName}` : `Brouillon #${id} enregistré`);
   };
 
   return (
