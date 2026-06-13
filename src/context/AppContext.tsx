@@ -82,7 +82,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [orgId,           setOrgId]           = useState(MOCK ? 'mock-org'  : '');
   const [userLabel,       setUserLabel]       = useState('');
   const [userInitials,    setUserInitials]    = useState('??');
-  const [userRole,        setUserRole]        = useState<'admin' | 'accountant' | 'member'>('admin');
+  const [userRole,        setUserRole]        = useState<'admin' | 'accountant' | 'member'>('member');
   const [needsOnboarding,         setNeedsOnboarding]         = useState(false);
   const [openingBalancesAdopted,  setOpeningBalancesAdopted]  = useState(false);
   const [plan,          setPlan]          = useState<PlanId>(MOCK ? 'solo' : 'solo');
@@ -141,7 +141,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setOrgId(resolvedOrgId);
       const validRoles = ['admin', 'accountant', 'member'] as const;
       const rawRole = membership?.role as string | undefined;
-      setUserRole(validRoles.includes(rawRole as typeof validRoles[number]) ? rawRole as typeof validRoles[number] : 'admin');
+      if (rawRole && !validRoles.includes(rawRole as typeof validRoles[number])) {
+        console.warn('[boot] unrecognized role value, defaulting to member:', rawRole);
+      }
+      setUserRole(validRoles.includes(rawRole as typeof validRoles[number]) ? rawRole as typeof validRoles[number] : 'member');
 
       if (!resolvedOrgId) {
         setNeedsOnboarding(true);
@@ -203,10 +206,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setQuotes(quo);
           setActivity(act);
           setOpeningBalancesAdopted(obAdopted);
+          setupRealtime(resolvedOrgId);
         } catch (err) {
           console.error('[boot] data fetch error:', err);
+          showToast('Erreur lors du chargement des données. Veuillez réessayer.', true);
+          setLoading(false);
+          return;
         }
-        setupRealtime(resolvedOrgId);
       }
       setLoading(false);
     }
