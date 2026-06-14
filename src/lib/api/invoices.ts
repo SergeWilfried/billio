@@ -18,15 +18,17 @@ export function dbToInvoice(row: Record<string, unknown>): Invoice {
 
 export async function nextInvoiceId(orgId: string): Promise<string> {
   if (MOCK) return 'INV-' + String(Math.floor(Math.random() * 9000) + 1000);
+  // Fetch all IDs and compute numeric max — text ordering on 'INV-NNNN' is
+  // lexicographic, so 'INV-0100' sorts before 'INV-0041', causing 409s past INV-0099.
   const { data } = await supabase
     .from('invoices')
     .select('id')
-    .eq('org_id', orgId)
-    .order('id', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const last = data ? parseInt((data.id as string).split('-')[1], 10) : 0;
-  return 'INV-' + String((isNaN(last) ? 0 : last) + 1).padStart(4, '0');
+    .eq('org_id', orgId);
+  const nums = (data ?? [])
+    .map(r => parseInt(String(r.id).split('-')[1], 10))
+    .filter(n => !isNaN(n));
+  const max = nums.length ? Math.max(...nums) : 0;
+  return 'INV-' + String(max + 1).padStart(4, '0');
 }
 
 export async function fetchInvoices(orgId: string): Promise<Invoice[]> {

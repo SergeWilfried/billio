@@ -35,8 +35,9 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 function nextQuoteId(quotes: Quote[]): string {
-  const nums = quotes.map(q => parseInt(q.id.split('-')[1], 10));
-  return 'DEV-' + String(Math.max(...nums) + 1).padStart(4, '0');
+  const nums = quotes.map(q => parseInt(q.id.split('-')[1], 10)).filter(n => isFinite(n));
+  const next  = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+  return 'DEV-' + String(next).padStart(4, '0');
 }
 
 function fmtCompact(n: number) {
@@ -68,6 +69,7 @@ export default function QuotesPage() {
   ]);
   const [showPicker, setShowPicker]   = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
+  const [converting,  setConverting]  = useState<Set<string>>(new Set());
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -155,8 +157,10 @@ export default function QuotesPage() {
 
   async function convertToInvoice(id: string, e: React.MouseEvent) {
     e.stopPropagation();
+    if (converting.has(id)) return;
     const quote = quotes.find(q => q.id === id);
     if (!quote) return;
+    setConverting(prev => new Set(prev).add(id));
 
     const today   = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
@@ -190,6 +194,7 @@ export default function QuotesPage() {
       clientName: cName,
     });
 
+    setConverting(prev => { const s = new Set(prev); s.delete(id); return s; });
     posthog.capture('quote_converted_to_invoice', { quote_id: id, invoice_id: invId });
     showToast(`Devis ${id} → Facture #${invId} créée`);
   }

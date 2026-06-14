@@ -43,6 +43,7 @@ export default function InvoicesPage() {
   const [fNotes,   setFNotes]   = useState('');
   const [showPicker, setShowPicker]   = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
+  const [submitting, setSubmitting]   = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,8 +116,10 @@ export default function InvoicesPage() {
   };
 
   const submitInvoice = async (status: 'draft' | 'pending') => {
+    if (submitting)    return;
     if (!fClient)      { showToast('Veuillez sélectionner un client.', true); return; }
     if (subtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
+    setSubmitting(true);
 
     const isFirstInvoice = invoices.length === 0;
     const id    = await nextInvoiceId(orgId);
@@ -154,6 +157,8 @@ export default function InvoicesPage() {
     } catch (err) {
       console.error('[submitInvoice] error:', err);
       showToast('Une erreur est survenue. Veuillez réessayer.', true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -442,11 +447,11 @@ export default function InvoicesPage() {
         </div>
 
         <div className="panel-footer">
-          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => submitInvoice('draft')}>
-            Enregistrer brouillon
+          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting} onClick={() => submitInvoice('draft')}>
+            {submitting ? 'Enregistrement…' : 'Enregistrer brouillon'}
           </button>
-          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => submitInvoice('pending')}>
-            <Icon name="send" ariaHidden /> Envoyer la facture
+          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting} onClick={() => submitInvoice('pending')}>
+            <Icon name="send" ariaHidden /> {submitting ? 'Envoi en cours…' : 'Envoyer la facture'}
           </button>
         </div>
       </div>
