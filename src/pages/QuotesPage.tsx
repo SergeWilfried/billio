@@ -7,7 +7,7 @@ import { QuotesEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { createQuote, updateQuote, removeQuote } from '../lib/api/quotes';
-import { createInvoice } from '../lib/api/invoices';
+import { createInvoice, nextInvoiceId } from '../lib/api/invoices';
 import { fetchLineItems, saveLineItems } from '../lib/api/line-items';
 import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { fmt, fmtDate, newLineItem, nextId } from '../data';
@@ -87,7 +87,7 @@ export default function QuotesPage() {
   function addFromProduct(productId: string) {
     const p = products.find(pr => pr.id === productId);
     if (!p) return;
-    setLines(prev => [...prev, newLineItem(p.name, 1, p.price)]);
+    setLines(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit)]);
     setShowPicker(false);
     setPickerQuery('');
   }
@@ -131,10 +131,10 @@ export default function QuotesPage() {
   function removeLine(id: string) {
     setLines(prev => prev.length > 1 ? prev.filter(l => l.id !== id) : prev);
   }
-  function updateLine(id: string, field: 'desc' | 'qty' | 'price', val: string) {
+  function updateLine(id: string, field: 'desc' | 'unit' | 'qty' | 'price', val: string) {
     setLines(prev => prev.map(l => l.id !== id ? l : {
       ...l,
-      [field]: field === 'desc' ? val : parseFloat(val) || 0,
+      [field]: field === 'desc' || field === 'unit' ? val : parseFloat(val) || 0,
     }));
   }
 
@@ -160,7 +160,7 @@ export default function QuotesPage() {
 
     const today   = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-    const invId   = nextId(invoices);
+    const invId   = await nextInvoiceId(orgId);
     const cName   = clientsMap[quote.client]?.name ?? quote.client;
     const htAmount  = Math.round(quote.amount / 1.18);
     const tvaAmount = quote.amount - htAmount;
@@ -449,6 +449,7 @@ export default function QuotesPage() {
           <div className="subhead">Lignes</div>
           <div className="line-items-head">
             <div className="li-col">Description</div>
+            <div className="li-col">Unité</div>
             <div className="li-col right">Qté</div>
             <div className="li-col right">Prix</div>
             <div />
@@ -464,6 +465,15 @@ export default function QuotesPage() {
                   value={li.desc}
                   onChange={e => updateLine(li.id, 'desc', e.target.value)}
                 />
+                <select
+                  className="li-input"
+                  value={li.unit ?? 'unité'}
+                  onChange={e => updateLine(li.id, 'unit', e.target.value)}
+                >
+                  {['unité','heure','jour','mois','an','projet','article','licence'].map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
                 <input
                   type="number"
                   className="li-input num"

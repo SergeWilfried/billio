@@ -16,6 +16,19 @@ export function dbToInvoice(row: Record<string, unknown>): Invoice {
   };
 }
 
+export async function nextInvoiceId(orgId: string): Promise<string> {
+  if (MOCK) return 'INV-' + String(Math.floor(Math.random() * 9000) + 1000);
+  const { data } = await supabase
+    .from('invoices')
+    .select('id')
+    .eq('org_id', orgId)
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const last = data ? parseInt((data.id as string).split('-')[1], 10) : 0;
+  return 'INV-' + String((isNaN(last) ? 0 : last) + 1).padStart(4, '0');
+}
+
 export async function fetchInvoices(orgId: string): Promise<Invoice[]> {
   if (MOCK) return [...INITIAL_INVOICES];
   const { data, error } = await supabase

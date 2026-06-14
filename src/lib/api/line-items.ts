@@ -7,6 +7,7 @@ function dbToLineItem(row: Record<string, unknown>): LineItem {
   return {
     id:    String(row.id),
     desc:  String(row.description),
+    unit:  String(row.unit ?? 'unité'),
     qty:   Number(row.qty),
     price: Number(row.price),
   };
@@ -17,7 +18,7 @@ export async function fetchLineItems(
   quoteId?: string,
 ): Promise<LineItem[]> {
   if (MOCK) return [];
-  let query = supabase.from('line_items').select('id, description, qty, price');
+  let query = supabase.from('line_items').select('id, description, unit, qty, price');
   if (invoiceId) query = query.eq('invoice_id', invoiceId);
   else if (quoteId) query = query.eq('quote_id', quoteId);
   else return [];
@@ -37,6 +38,7 @@ export async function saveLineItems(
     invoice_id:  opts.invoiceId ?? null,
     quote_id:    opts.quoteId   ?? null,
     description: l.desc,
+    unit:        l.unit ?? 'unité',
     qty:         l.qty,
     price:       l.price,
   }));

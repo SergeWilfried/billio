@@ -246,6 +246,7 @@ export default function InvoicePage() {
               <thead>
                 <tr>
                   <th>Description</th>
+                  <th>Unité</th>
                   <th className="r">Qté</th>
                   <th className="r">Prix unitaire</th>
                   <th className="r">Montant</th>
@@ -253,10 +254,11 @@ export default function InvoicePage() {
               </thead>
               <tbody>
                 {lines.length === 0 ? (
-                  <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '16px 0' }}>Aucune ligne</td></tr>
+                  <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '16px 0' }}>Aucune ligne</td></tr>
                 ) : lines.map(li => (
                   <tr key={li.id}>
                     <td><div className="li-desc">{li.desc}</div></td>
+                    <td style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>{li.unit ?? 'unité'}</td>
                     <td className="r">{li.qty}</td>
                     <td className="r">{fmt(li.price)}</td>
                     <td className="r">{fmt(li.qty * li.price)}</td>

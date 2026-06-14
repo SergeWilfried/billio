@@ -6,7 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { InvoicesEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
-import { createInvoice } from '../lib/api/invoices';
+import { createInvoice, nextInvoiceId } from '../lib/api/invoices';
 import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { saveLineItems } from '../lib/api/line-items';
 import { createActivity } from '../lib/api/activities';
@@ -62,7 +62,7 @@ export default function InvoicesPage() {
   function addFromProduct(productId: string) {
     const p = products.find(pr => pr.id === productId);
     if (!p) return;
-    setLineItems(prev => [...prev, newLineItem(p.name, 1, p.price)]);
+    setLineItems(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit)]);
     setShowPicker(false);
     setPickerQuery('');
   }
@@ -95,9 +95,9 @@ export default function InvoicesPage() {
   const addLine    = () => setLineItems(prev => [...prev, newLineItem()]);
   const removeLine = (id: string) =>
     setLineItems(prev => prev.length > 1 ? prev.filter(li => li.id !== id) : [newLineItem()]);
-  const updateLine = (id: string, field: 'desc' | 'qty' | 'price', val: string) =>
+  const updateLine = (id: string, field: 'desc' | 'unit' | 'qty' | 'price', val: string) =>
     setLineItems(prev => prev.map(li => li.id !== id ? li : {
-      ...li, [field]: field === 'desc' ? val : (parseFloat(val) || 0),
+      ...li, [field]: field === 'desc' || field === 'unit' ? val : (parseFloat(val) || 0),
     }));
 
   const sendReminder = async (e: React.MouseEvent, id: string) => {
@@ -119,7 +119,7 @@ export default function InvoicesPage() {
     if (subtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
 
     const isFirstInvoice = invoices.length === 0;
-    const id    = nextId(invoices);
+    const id    = await nextInvoiceId(orgId);
     const cName = clientsMap[fClient]?.name ?? fClient;
     const newInv = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status };
 
@@ -355,6 +355,7 @@ export default function InvoicesPage() {
           <div className="subhead"><span>Lignes de facturation</span></div>
           <div className="line-items-head">
             <div className="li-col">Description</div>
+            <div className="li-col">Unité</div>
             <div className="li-col right">Qté</div>
             <div className="li-col right">Prix</div>
             <div />
@@ -365,6 +366,12 @@ export default function InvoicesPage() {
               <div className="line-item-row">
                 <input className="li-input" placeholder="Description du service" value={li.desc}
                   onChange={e => updateLine(li.id, 'desc', e.target.value)} />
+                <select className="li-input" value={li.unit ?? 'unité'}
+                  onChange={e => updateLine(li.id, 'unit', e.target.value)}>
+                  {['unité','heure','jour','mois','an','projet','article','licence'].map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
                 <input className="li-input num" type="number" min="0" value={li.qty}
                   onChange={e => updateLine(li.id, 'qty', e.target.value)} />
                 <input className="li-input num" type="number" min="0" value={li.price || ''}

@@ -6,7 +6,7 @@ import Icon from '../components/Icon';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { updateQuote } from '../lib/api/quotes';
-import { createInvoice } from '../lib/api/invoices';
+import { createInvoice, nextInvoiceId } from '../lib/api/invoices';
 import { fetchLineItems, saveLineItems } from '../lib/api/line-items';
 import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { InvoicePDFDocument } from '../components/InvoicePDF';
@@ -114,7 +114,7 @@ export default function QuotePage() {
     setConverting(true);
     const today   = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-    const invId   = nextId(invoices);
+    const invId   = await nextInvoiceId(orgId);
     const htAmount  = Math.round(total / 1.18);
     const tvaAmount = total - htAmount;
     const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: total, status: 'pending' as const };
@@ -222,6 +222,7 @@ export default function QuotePage() {
               <thead>
                 <tr>
                   <th>Description</th>
+                  <th>Unité</th>
                   <th className="r">Qté</th>
                   <th className="r">Prix unitaire</th>
                   <th className="r">Montant</th>
@@ -229,10 +230,11 @@ export default function QuotePage() {
               </thead>
               <tbody>
                 {lines.length === 0 ? (
-                  <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '16px 0' }}>Aucune ligne</td></tr>
+                  <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '16px 0' }}>Aucune ligne</td></tr>
                 ) : lines.map(li => (
                   <tr key={li.id}>
                     <td><div className="li-desc">{li.desc}</div></td>
+                    <td style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>{li.unit ?? 'unité'}</td>
                     <td className="r">{li.qty}</td>
                     <td className="r">{fmt(li.price)}</td>
                     <td className="r">{fmt(li.qty * li.price)}</td>
