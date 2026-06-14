@@ -108,10 +108,11 @@ export default function InvoicePage() {
     );
   }
 
-  const client    = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
-  const subtotal  = lines.reduce((s, li) => s + li.qty * li.price, 0);
-  const tax       = Math.round(subtotal * 0.18);
-  const total     = subtotal + tax;
+  const client        = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
+  const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
+  const subtotal      = lines.reduce((s, li) => s + li.qty * li.price, 0);
+  const tax           = canInvoiceTVA ? Math.round(subtotal * 0.18) : 0;
+  const total         = subtotal + tax;
   const isOverdue = invoice.status === 'overdue';
   const timeline  = timelineForStatus(invoice.status, client.name);
 
@@ -269,8 +270,8 @@ export default function InvoicePage() {
 
             <div className="pp-totals">
               <div className="pp-totals-inner">
-                <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
-                <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>
+                <div className="tot-row"><span>Sous-total HT</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
+                {canInvoiceTVA && <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>}
                 {invoice.status === 'paid' && (
                   <div className="tot-row"><span>Montant payé</span><span className="tv paid-amt">−{fmt(total)} F CFA</span></div>
                 )}

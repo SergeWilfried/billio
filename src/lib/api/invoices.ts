@@ -18,17 +18,12 @@ export function dbToInvoice(row: Record<string, unknown>): Invoice {
 
 export async function nextInvoiceId(orgId: string): Promise<string> {
   if (MOCK) return 'INV-' + String(Math.floor(Math.random() * 9000) + 1000);
-  // Fetch all IDs and compute numeric max — text ordering on 'INV-NNNN' is
-  // lexicographic, so 'INV-0100' sorts before 'INV-0041', causing 409s past INV-0099.
-  const { data } = await supabase
-    .from('invoices')
-    .select('id')
-    .eq('org_id', orgId);
-  const nums = (data ?? [])
-    .map(r => parseInt(String(r.id).split('-')[1], 10))
-    .filter(n => !isNaN(n));
-  const max = nums.length ? Math.max(...nums) : 0;
-  return 'INV-' + String(max + 1).padStart(4, '0');
+  // Atomic per-org sequence — safe against concurrent requests and cross-org
+  // collisions. The DB function holds a row-level lock so two callers for the
+  // same org always get different numbers.
+  const { data, error } = await supabase.rpc('next_invoice_number', { p_org_id: orgId });
+  if (error) throw error;
+  return 'INV-' + String(data as number).padStart(4, '0');
 }
 
 export async function fetchInvoices(orgId: string): Promise<Invoice[]> {

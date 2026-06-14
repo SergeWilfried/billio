@@ -25,7 +25,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
-  const { invoices, setInvoices, setActivity, showToast, clientsMap, products, orgId, loading } = useApp();
+  const { invoices, setInvoices, setActivity, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
 
   if (loading) return <PageSkeleton title="Factures" subtitle="Gérez et suivez vos factures" metrics={4} rows={6} />;
   const navigate = useNavigate();
@@ -44,6 +44,7 @@ export default function InvoicesPage() {
   const [showPicker, setShowPicker]   = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
   const [submitting, setSubmitting]   = useState(false);
+  const submittingRef = useRef(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,8 +80,9 @@ export default function InvoicesPage() {
     return counts;
   }, [invoices]);
 
+  const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
   const subtotal = useMemo(() => lineItems.reduce((s, li) => s + li.qty * li.price, 0), [lineItems]);
-  const tax      = Math.round(subtotal * 0.18);
+  const tax      = canInvoiceTVA ? Math.round(subtotal * 0.18) : 0;
   const total    = subtotal + tax;
 
   const openPanel = () => {
@@ -116,9 +118,10 @@ export default function InvoicesPage() {
   };
 
   const submitInvoice = async (status: 'draft' | 'pending') => {
-    if (submitting)    return;
+    if (submittingRef.current) return;
     if (!fClient)      { showToast('Veuillez sélectionner un client.', true); return; }
     if (subtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
+    submittingRef.current = true;
     setSubmitting(true);
 
     const isFirstInvoice = invoices.length === 0;
@@ -158,6 +161,7 @@ export default function InvoicesPage() {
       console.error('[submitInvoice] error:', err);
       showToast('Une erreur est survenue. Veuillez réessayer.', true);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -424,8 +428,8 @@ export default function InvoicesPage() {
           </div>
 
           <div className="total-block">
-            <div className="total-row"><span>Sous-total</span><span>{fmt(subtotal)} F CFA</span></div>
-            <div className="total-row"><span>TVA (18 %)</span><span>{fmt(tax)} F CFA</span></div>
+            <div className="total-row"><span>Sous-total HT</span><span>{fmt(subtotal)} F CFA</span></div>
+            {canInvoiceTVA && <div className="total-row"><span>TVA (18 %)</span><span>{fmt(tax)} F CFA</span></div>}
             <div className="total-row final"><span>Total à payer</span><span>{fmt(total)} F CFA</span></div>
           </div>
 
