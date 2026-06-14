@@ -18,11 +18,12 @@ export const activityKindSchema  = z.enum(['paid', 'sent', 'overdue', 'viewed'])
 // ---------------------------------------------------------------------------
 
 export const lineItemSchema = z.object({
-  id:    z.string(),
-  desc:  z.string(),
-  unit:  z.string().default('unité'),
-  qty:   z.number().min(0),
-  price: z.number().min(0),
+  id:        z.string(),
+  desc:      z.string(),
+  unit:      z.string().default('unité'),
+  qty:       z.number().min(0),
+  price:     z.number().min(0),
+  productId: z.string().optional(),
 });
 
 export const invoiceSchema = z.object({

@@ -35,8 +35,9 @@ export async function saveLineItems(
   if (MOCK || lines.length === 0) return;
   const rows = lines.map(l => ({
     org_id:      orgId,
-    invoice_id:  opts.invoiceId ?? null,
-    quote_id:    opts.quoteId   ?? null,
+    invoice_id:  opts.invoiceId  ?? null,
+    quote_id:    opts.quoteId    ?? null,
+    product_id:  l.productId     ?? null,
     description: l.desc,
     unit:        l.unit ?? 'unité',
     qty:         l.qty,

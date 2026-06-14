@@ -89,7 +89,7 @@ export default function QuotesPage() {
   function addFromProduct(productId: string) {
     const p = products.find(pr => pr.id === productId);
     if (!p) return;
-    setLines(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit)]);
+    setLines(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit, p.id)]);
     setShowPicker(false);
     setPickerQuery('');
   }

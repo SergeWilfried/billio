@@ -64,7 +64,7 @@ export default function InvoicesPage() {
   function addFromProduct(productId: string) {
     const p = products.find(pr => pr.id === productId);
     if (!p) return;
-    setLineItems(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit)]);
+    setLineItems(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit, p.id)]);
     setShowPicker(false);
     setPickerQuery('');
   }
