@@ -18,7 +18,7 @@ export async function fetchLineItems(
   quoteId?: string,
 ): Promise<LineItem[]> {
   if (MOCK) return [];
-  let query = supabase.from('line_items').select('id, description, unit, qty, price');
+  let query = supabase.from('line_items').select('*');
   if (invoiceId) query = query.eq('invoice_id', invoiceId);
   else if (quoteId) query = query.eq('quote_id', quoteId);
   else return [];

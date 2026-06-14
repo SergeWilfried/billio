@@ -37,7 +37,7 @@ export default function QuotePage() {
   const [converting, setConverting] = useState(false);
 
   useEffect(() => {
-    if (id) fetchLineItems(undefined, id).then(setLines).catch(() => setLines([]));
+    if (id) fetchLineItems(undefined, id).then(setLines).catch(err => { console.error('[QuotePage] fetchLineItems error:', err); setLines([]); });
   }, [id]);
 
   if (loading) return <PageSkeleton title="Devis" variant="table-only" metrics={0} rows={4} />;
