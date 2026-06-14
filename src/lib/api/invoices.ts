@@ -42,6 +42,7 @@ export async function createInvoice(
   payload: Pick<Invoice, 'id' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'status'>,
 ): Promise<Invoice> {
   if (MOCK) return { ...payload };
+  const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from('invoices')
     .insert({
@@ -53,6 +54,7 @@ export async function createInvoice(
       due_at:      payload.due,
       amount:      payload.amount,
       status:      payload.status,
+      created_by:  user?.id ?? null,
     })
     .select()
     .single();

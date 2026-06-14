@@ -37,6 +37,7 @@ export async function createQuote(
   const daysLeft = (new Date(payload.valid).getTime() - Date.now()) / 86_400_000;
   const expSoon  = daysLeft > 0 && daysLeft <= 14;
   if (MOCK) return { ...payload, expSoon };
+  const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from('quotes')
     .insert({
@@ -48,6 +49,7 @@ export async function createQuote(
       valid_until: payload.valid,
       amount:      payload.amount,
       status:      payload.status,
+      created_by:  user?.id ?? null,
     })
     .select()
     .single();
