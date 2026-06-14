@@ -181,23 +181,24 @@ export default function QuotesPage() {
         status:  'pending' as const,
       };
 
-      setInvoices(prev => [newInv, ...prev]);
-      setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced' } : q));
-
       const quoteLines = await fetchLineItems(undefined, id);
       await createInvoice(orgId, newInv);
       await saveLineItems(orgId, quoteLines.map(l => ({ ...l })), { invoiceId: invId });
       await updateQuote(id, { status: 'invoiced' });
-      await recordInvoiceIssuanceEntry(orgId, {
+
+      setInvoices(prev => [newInv, ...prev]);
+      setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced' } : q));
+
+      posthog.capture('quote_converted_to_invoice', { quote_id: id, invoice_id: invId });
+      showToast(`Devis ${id} → Facture #${invId} créée`);
+
+      recordInvoiceIssuanceEntry(orgId, {
         invoiceId:  invId,
         htAmount,
         tvaAmount,
         date:       today,
         clientName: cName,
-      });
-
-      posthog.capture('quote_converted_to_invoice', { quote_id: id, invoice_id: invId });
-      showToast(`Devis ${id} → Facture #${invId} créée`);
+      }).catch(err => console.error('[recordInvoiceIssuanceEntry] failed:', err));
     } finally {
       convertingRef.current.delete(id);
     }

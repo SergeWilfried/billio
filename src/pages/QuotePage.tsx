@@ -120,16 +120,19 @@ export default function QuotePage() {
     const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: total, status: 'pending' as const };
     const prevStatus = quote.status;
     try {
-      setInvoices(prev => [newInv, ...prev]);
-      setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced' } : q));
       const quoteLines = await fetchLineItems(undefined, quote.id);
       await createInvoice(orgId, newInv);
       await saveLineItems(orgId, quoteLines, { invoiceId: invId });
       await updateQuote(quote.id, { status: 'invoiced' });
-      await recordInvoiceIssuanceEntry(orgId, { invoiceId: invId, htAmount, tvaAmount, date: today, clientName: client.name });
+
+      setInvoices(prev => [newInv, ...prev]);
+      setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced' } : q));
       posthog.capture('quote_converted_to_invoice', { quote_id: quote.id, invoice_id: invId });
       showToast(`Devis ${quote.id} → Facture #${invId} créée`);
       navigate(`/invoices/${invId}`);
+
+      recordInvoiceIssuanceEntry(orgId, { invoiceId: invId, htAmount, tvaAmount, date: today, clientName: client.name })
+        .catch(err => console.error('[recordInvoiceIssuanceEntry] failed:', err));
     } catch {
       showToast('Erreur lors de la conversion. Veuillez réessayer.', true);
       setInvoices(prev => prev.filter(i => i.id !== invId));

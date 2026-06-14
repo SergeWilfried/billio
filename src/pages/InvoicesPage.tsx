@@ -132,15 +132,6 @@ export default function InvoicesPage() {
     try {
       await createInvoice(orgId, newInv);
       await saveLineItems(orgId, lineItems, { invoiceId: id });
-      if (status === 'pending') {
-        await recordInvoiceIssuanceEntry(orgId, {
-          invoiceId:  id,
-          htAmount:   subtotal,
-          tvaAmount:  tax,
-          date:       fDate,
-          clientName: cName,
-        });
-      }
 
       posthog.capture('invoice_created', { invoice_type: status, item_count: lineItems.length, total_amount: total, currency: 'XOF' });
       if (status === 'pending') posthog.capture('invoice_sent', { invoice_id: id, delivery_method: fPay });
@@ -157,6 +148,16 @@ export default function InvoicesPage() {
 
       closePanel();
       showToast(status === 'pending' ? `Facture #${id} envoyée à ${cName}` : `Brouillon #${id} enregistré`);
+
+      if (status === 'pending') {
+        recordInvoiceIssuanceEntry(orgId, {
+          invoiceId:  id,
+          htAmount:   subtotal,
+          tvaAmount:  tax,
+          date:       fDate,
+          clientName: cName,
+        }).catch(err => console.error('[recordInvoiceIssuanceEntry] failed:', err));
+      }
     } catch (err) {
       console.error('[submitInvoice] error:', err);
       showToast('Une erreur est survenue. Veuillez réessayer.', true);

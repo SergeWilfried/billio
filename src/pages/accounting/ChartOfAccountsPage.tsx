@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Icon from '../../components/Icon';
 import { PageSkeleton } from '../../components/SkeletonLoader';
 import KPIStrip from '../../components/accounting/KPIStrip';
 import DrawerPanel from '../../components/accounting/DrawerPanel';
-import type { Account, AccountClass, Journal } from '../../lib/accounting-data';
-import { fmt, fmtCompact, clsOf, openingOf, ledgerOf } from '../../lib/accounting-data';
+import type { Account, AccountClass, Journal, LedgerRow } from '../../lib/accounting-data';
+import { fmt, fmtCompact, clsOf, openingOf } from '../../lib/accounting-data';
 import { useChartOfAccounts, useBalanceFns } from '../../lib/accounting-hooks';
+import { useApp } from '../../context/AppContext';
+import { supabase } from '../../lib/supabase';
 import { EmptyState } from '../../components/EmptyState';
 import { ChartOfAccountsEmptyIllustration } from '../../components/accounting/EmptyIllustrations';
 
@@ -29,10 +31,38 @@ function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }:
   mvtOf: (num: string) => { debit: number; credit: number };
   signedOf: (num: string) => number;
 }) {
+  const { orgId } = useApp();
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    supabase
+      .from('journal_entries')
+      .select('id, date, piece, label, posted, journals!inner(code), entry_lines!inner(account_num, debit, credit)')
+      .eq('org_id', orgId)
+      .eq('entry_lines.account_num', account.num)
+      .eq('posted', true)
+      .order('date', { ascending: true })
+      .then(({ data }) => {
+        if (!data) return;
+        let running = openingOf(account.num);
+        const rows: LedgerRow[] = [];
+        for (const e of data as Array<Record<string, unknown>>) {
+          const j = e.journals as Record<string, unknown>;
+          const lines = (e.entry_lines as Array<Record<string, unknown>>) ?? [];
+          for (const l of lines) {
+            const d = Number(l.debit), c = Number(l.credit);
+            running += d - c;
+            rows.push({ entry: { id: String(e.id), date: String(e.date), piece: String(e.piece), label: String(e.label), journal: String(j?.code ?? ''), lines: [], posted: Boolean(e.posted) }, d, c, running });
+          }
+        }
+        setLedger(rows);
+      });
+  }, [orgId, account.num]);
+
   const mvt = mvtOf(account.num);
   const opening = openingOf(account.num);
   const closing = signedOf(account.num);
-  const ledger = ledgerOf(account.num);
   const cls = clsOf(account.num);
   const clsInfo = classes[cls];
 

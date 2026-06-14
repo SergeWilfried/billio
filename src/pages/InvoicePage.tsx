@@ -7,11 +7,12 @@ import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { removeInvoice, updateInvoice } from '../lib/api/invoices';
 import { recordInvoicePaymentEntry, deleteInvoiceEntries } from '../lib/api/accounting';
+import { createPayment } from '../lib/api/payments';
 import { fetchLineItems } from '../lib/api/line-items';
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL } from '../data';
 import { InvoicePDFDocument } from '../components/InvoicePDF';
 import type { Status } from '../data';
-import type { LineItem } from '../lib/schemas';
+import type { LineItem, PayMethod, Payment } from '../lib/schemas';
 
 type DotKind = 'paid' | 'sent' | 'overdue' | 'viewed' | '';
 interface TlEntry { dot: DotKind; text: string; time: string; }
@@ -80,8 +81,11 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, showToast, clientsMap, orgSettings, orgId, loading } = useApp();
+  const { invoices, setInvoices, payments, setPayments, showToast, clientsMap, orgSettings, orgId, loading } = useApp();
   const [lines, setLines] = useState<LineItem[]>([]);
+  const [payDialog, setPayDialog] = useState(false);
+  const [payMethod, setPayMethod] = useState<PayMethod>('cash');
+  const [payRef, setPayRef] = useState('');
 
   useEffect(() => {
     if (id) fetchLineItems(id).then(setLines).catch(() => setLines([]));
@@ -144,19 +148,56 @@ export default function InvoicePage() {
       navigate('/invoices');
     }
   };
-  const handleMarkPaid = async () => {
-    setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' } : i));
-    await updateInvoice(invoice.id, { status: 'paid' });
-    await recordInvoicePaymentEntry(orgId, {
-      invoiceId: invoice.id,
-      total,
-      date: new Date().toISOString().slice(0, 10),
-      clientName: client.name,
-    });
-    showToast('Facture marquée comme payée');
+  const REF_PLACEHOLDER: Record<PayMethod, string> = {
+    cash: 'Reçu #0212',
+    wire: '#WV0000',
+    momo: 'Réf MTN / Orange',
+    cheque: 'ch_3PXyZ...',
+  };
+  const METHOD_LABEL: Record<PayMethod, string> = {
+    cash: 'Cash',
+    wire: 'Wave',
+    momo: 'Mobile Money',
+    cheque: 'Carte',
+  };
+
+  const handleConfirmPayment = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const maxNum = payments.length
+      ? Math.max(...payments.map(p => parseInt(p.id.split('-')[1], 10)))
+      : 2052;
+    const newPayment: Payment = {
+      id:     `PAI-${maxNum + 1}`,
+      date:   today,
+      client: invoice.client,
+      inv:    invoice.id,
+      method: payMethod,
+      ref:    payRef.trim() || METHOD_LABEL[payMethod],
+      amount: total,
+      status: 'completed',
+      source: 'manual',
+    };
+    try {
+      await createPayment(orgId, newPayment);
+      await updateInvoice(invoice.id, { status: 'paid' });
+      await recordInvoicePaymentEntry(orgId, {
+        invoiceId:  invoice.id,
+        total,
+        date:       today,
+        clientName: client.name,
+      });
+      setPayments(prev => [newPayment, ...prev]);
+      setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' as const } : i));
+      setPayDialog(false);
+      showToast(`Paiement ${METHOD_LABEL[payMethod]} de ${fmt(total)} F CFA enregistré`);
+    } catch (err) {
+      console.error('Payment recording failed:', err);
+      showToast('Erreur lors de l\'enregistrement du paiement');
+    }
   };
 
   return (
+    <>
     <div className="main">
       {/* Topbar — breadcrumb variant */}
       <div className="topbar">
@@ -347,7 +388,7 @@ export default function InvoicePage() {
               )}
               <div className="rail-actions">
                 {(isOverdue || invoice.status === 'pending') && (<>
-                  <button className="btn btn-primary btn-block" onClick={handleMarkPaid}>
+                  <button className="btn btn-primary btn-block" onClick={() => { setPayRef(''); setPayMethod('cash'); setPayDialog(true); }}>
                     <Icon name="cash" ariaHidden /> Enregistrer un paiement
                   </button>
                   <button
@@ -398,5 +439,59 @@ export default function InvoicePage() {
         </div>
       </div>
     </div>
+
+    {payDialog && (
+      <div className="inv-overlay" onClick={() => setPayDialog(false)}>
+        <div className="inv-modal" onClick={e => e.stopPropagation()}>
+          <div className="inv-modal-head">
+            <div className="inv-modal-title">
+              <Icon name="cash" size={16} ariaHidden />
+              Enregistrer un paiement
+            </div>
+            <button className="btn btn-icon" onClick={() => setPayDialog(false)} aria-label="Fermer">
+              <Icon name="x" size={16} ariaHidden />
+            </button>
+          </div>
+          <div className="inv-modal-body">
+            <div>
+              <div className="form-label">Méthode de paiement</div>
+              <div className="method-pick" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
+                {(['cash', 'wave', 'momo', 'card'] as PayMethod[]).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`mp-opt${payMethod === m ? ' active' : ''}`}
+                    onClick={() => setPayMethod(m)}
+                  >
+                    <Icon name={m === 'cash' ? 'cash' : m === 'wave' ? 'activity' : m === 'momo' ? 'device-mobile' : 'credit-card'} size={18} ariaHidden />
+                    <span>{METHOD_LABEL[m]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Référence (optionnel)</label>
+              <input
+                className="form-input"
+                type="text"
+                value={payRef}
+                onChange={e => setPayRef(e.target.value)}
+                placeholder={REF_PLACEHOLDER[payMethod]}
+              />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+              Montant : <b>{fmt(total)} F CFA</b>
+            </div>
+          </div>
+          <div className="inv-modal-foot">
+            <button className="btn" onClick={() => setPayDialog(false)}>Annuler</button>
+            <button className="btn btn-primary" onClick={handleConfirmPayment}>
+              <Icon name="check" size={14} ariaHidden /> Confirmer
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

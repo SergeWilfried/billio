@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 export const invoiceStatusSchema = z.enum(['paid', 'pending', 'overdue', 'draft']);
 export const clientStatusSchema  = z.enum(['active', 'lead', 'inactive']);
-export const payMethodSchema     = z.enum(['cash', 'wave', 'momo', 'card']);
+export const payMethodSchema     = z.enum(['cash', 'wire', 'momo', 'cheque']);
 export const paySourceSchema     = z.enum(['online', 'manual']);
 export const payStatusSchema     = z.enum(['completed', 'pending', 'failed']);
 export const productTypeSchema   = z.enum(['service', 'product']);
