@@ -33,9 +33,11 @@ function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }:
 }) {
   const { orgId } = useApp();
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [loadingLedger, setLoadingLedger] = useState(true);
 
   useEffect(() => {
     if (!orgId) return;
+    setLoadingLedger(true);
     supabase
       .from('journal_entries')
       .select('id, date, piece, label, posted, journals!inner(code), entry_lines!inner(account_num, debit, credit)')
@@ -57,7 +59,8 @@ function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }:
           }
         }
         setLedger(rows);
-      });
+      })
+      .finally(() => setLoadingLedger(false));
   }, [orgId, account.num]);
 
   const mvt = mvtOf(account.num);
@@ -105,10 +108,25 @@ function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }:
 
       <div className="dsec-label">
         <Icon name="list" size={13} />
-        Mouvements ({ledger.length})
+        Mouvements ({loadingLedger ? '…' : ledger.length})
       </div>
 
-      {ledger.length === 0 ? (
+      {loadingLedger ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, padding: '13px 0', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="skel" style={{ width: '65%', height: 12, borderRadius: 5 }} />
+                <div className="skel" style={{ width: '40%', height: 10, borderRadius: 5 }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                <div className="skel" style={{ width: 72, height: 12, borderRadius: 5 }} />
+                <div className="skel" style={{ width: 52, height: 10, borderRadius: 5 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : ledger.length === 0 ? (
         <EmptyState
           illustration={<ChartOfAccountsEmptyIllustration />}
           title="Aucun mouvement trouvé"
