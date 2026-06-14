@@ -303,6 +303,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserInitials('??');
         setOrgSettings(EMPTY_ORG);
         setNeedsOnboarding(false);
+        setInvoices([]);
+        setClients([]);
+        setPayments([]);
+        setProducts([]);
+        setQuotes([]);
+        setActivity([]);
         setLoading(false);
       }
     });
