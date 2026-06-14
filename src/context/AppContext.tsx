@@ -322,7 +322,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const completeOnboarding = useCallback((bizName: string, newOrgId?: string) => {
     setNeedsOnboarding(false);
     setUserLabel(prev => prev || bizName);
-    if (newOrgId) setOrgId(newOrgId);
+    if (newOrgId) {
+      setOrgId(newOrgId);
+      // Fetch data for the newly created org so the app doesn't start empty
+      fetchClients(newOrgId).then(setClients).catch(console.error);
+    }
   }, []);
 
   const hasFeature = useCallback((feature: Feature) => checkFeature(plan, feature), [plan]);
