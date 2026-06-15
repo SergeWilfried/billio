@@ -27,13 +27,14 @@ export const lineItemSchema = z.object({
 });
 
 export const invoiceSchema = z.object({
-  id:      z.string(),
-  subject: z.string(),
-  client:  z.string(),
-  issued:  z.string(),
-  due:     z.string(),
-  amount:  z.number().min(0),
-  status:  invoiceStatusSchema,
+  id:          z.string(),
+  subject:     z.string(),
+  client:      z.string(),
+  issued:      z.string(),
+  due:         z.string(),
+  amount:      z.number().min(0),
+  status:      invoiceStatusSchema,
+  discountPct: z.number().min(0).max(100).default(0),
 });
 
 export const clientSchema = z.object({

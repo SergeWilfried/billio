@@ -39,8 +39,9 @@ export default function InvoicesPage() {
   const [fDue,     setFDue]     = useState(() => new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10));
   const [fSubject, setFSubject] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
-  const [fPay,     setFPay]     = useState('Mobile Money (MTN / Orange / Wave)');
-  const [fNotes,   setFNotes]   = useState('');
+  const [fPay,      setFPay]      = useState('Mobile Money (MTN / Orange / Wave)');
+  const [fNotes,    setFNotes]    = useState('');
+  const [fDiscount, setFDiscount] = useState(0);
   const [showPicker, setShowPicker]   = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
   const [submitting, setSubmitting]   = useState(false);
@@ -80,15 +81,17 @@ export default function InvoicesPage() {
     return counts;
   }, [invoices]);
 
-  const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
-  const subtotal = useMemo(() => lineItems.reduce((s, li) => s + li.qty * li.price, 0), [lineItems]);
-  const tax      = canInvoiceTVA ? Math.round(subtotal * 0.18) : 0;
-  const total    = subtotal + tax;
+  const canInvoiceTVA   = orgSettings.taxRegime === 'RNI';
+  const subtotal        = useMemo(() => lineItems.reduce((s, li) => s + li.qty * li.price, 0), [lineItems]);
+  const discountAmt     = Math.round(subtotal * (fDiscount / 100));
+  const discountedSub   = subtotal - discountAmt;
+  const tax             = canInvoiceTVA ? Math.round(discountedSub * 0.18) : 0;
+  const total           = discountedSub + tax;
 
   const openPanel = () => {
     const today = new Date().toISOString().slice(0, 10);
     const due = new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
-    setFClient(''); setFDate(today); setFDue(due); setFSubject(''); setFNotes('');
+    setFClient(''); setFDate(today); setFDue(due); setFSubject(''); setFNotes(''); setFDiscount(0);
     setLineItems([newLineItem('', 1, 250_000), newLineItem('', 3, 75_000)]);
     setShowPicker(false); setPickerQuery('');
     setPanelOpen(true);
@@ -127,7 +130,7 @@ export default function InvoicesPage() {
     const isFirstInvoice = invoices.length === 0;
     const id    = await nextInvoiceId(orgId);
     const cName = clientsMap[fClient]?.name ?? fClient;
-    const newInv = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status };
+    const newInv = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status, discountPct: fDiscount };
 
     try {
       await createInvoice(orgId, newInv);
@@ -152,7 +155,7 @@ export default function InvoicesPage() {
       if (status === 'pending') {
         recordInvoiceIssuanceEntry(orgId, {
           invoiceId:  id,
-          htAmount:   subtotal,
+          htAmount:   discountedSub,
           tvaAmount:  tax,
           date:       fDate,
           clientName: cName,
@@ -430,6 +433,18 @@ export default function InvoicesPage() {
 
           <div className="total-block">
             <div className="total-row"><span>Sous-total HT</span><span>{fmt(subtotal)} F CFA</span></div>
+            <div className="total-row" style={{ alignItems: 'center' }}>
+              <span>Remise (%)</span>
+              <input
+                type="number" min="0" max="100" step="0.5"
+                className="form-input"
+                style={{ width: 80, textAlign: 'right', padding: '3px 8px', fontSize: 13 }}
+                value={fDiscount || ''}
+                placeholder="0"
+                onChange={e => setFDiscount(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+              />
+            </div>
+            {fDiscount > 0 && <div className="total-row" style={{ color: 'var(--color-text-secondary)' }}><span>Montant remise</span><span>−{fmt(discountAmt)} F CFA</span></div>}
             {canInvoiceTVA && <div className="total-row"><span>TVA (18 %)</span><span>{fmt(tax)} F CFA</span></div>}
             <div className="total-row final"><span>Total à payer</span><span>{fmt(total)} F CFA</span></div>
           </div>

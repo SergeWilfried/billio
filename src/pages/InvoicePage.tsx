@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
 import { pdf } from '@react-pdf/renderer';
@@ -6,10 +6,10 @@ import Icon from '../components/Icon';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { removeInvoice, updateInvoice } from '../lib/api/invoices';
-import { recordInvoicePaymentEntry, deleteInvoiceEntries } from '../lib/api/accounting';
+import { recordInvoicePaymentEntry, deleteInvoiceEntries, updateInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { createPayment } from '../lib/api/payments';
-import { fetchLineItems } from '../lib/api/line-items';
-import { fmt, fmtDate, fmtDateLong, STATUS_LABEL } from '../data';
+import { fetchLineItems, saveLineItems, deleteLineItems } from '../lib/api/line-items';
+import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '../data';
 import { InvoicePDFDocument } from '../components/InvoicePDF';
 import type { Status } from '../data';
 import type { LineItem, PayMethod, Payment } from '../lib/schemas';
@@ -81,11 +81,33 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, payments, setPayments, showToast, clientsMap, orgSettings, orgId, loading } = useApp();
+  const { invoices, setInvoices, payments, setPayments, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
   const [lines, setLines] = useState<LineItem[]>([]);
   const [payDialog, setPayDialog] = useState(false);
   const [payMethod, setPayMethod] = useState<PayMethod>('cash');
   const [payRef, setPayRef] = useState('');
+
+  // Edit panel state
+  const [editOpen,   setEditOpen]   = useState(false);
+  const [eClient,    setEClient]    = useState('');
+  const [eSubject,   setESubject]   = useState('');
+  const [eDate,      setEDate]      = useState('');
+  const [eDue,       setEDue]       = useState('');
+  const [eLines,     setELines]     = useState<LineItem[]>([]);
+  const [eDiscount,  setEDiscount]  = useState(0);
+  const [saving,     setSaving]     = useState(false);
+  const [showPicker,   setShowPicker]   = useState(false);
+  const [pickerQuery,  setPickerQuery]  = useState('');
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showPicker) return;
+    function onClickOutside(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowPicker(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showPicker]);
 
   useEffect(() => {
     if (id) fetchLineItems(id).then(setLines).catch(() => setLines([]));
@@ -115,8 +137,11 @@ export default function InvoicePage() {
   const client        = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
   const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
   const subtotal      = lines.reduce((s, li) => s + li.qty * li.price, 0);
-  const tax           = canInvoiceTVA ? Math.round(subtotal * 0.18) : 0;
-  const total         = subtotal + tax;
+  const discountPct   = invoice.discountPct ?? 0;
+  const discountAmt   = Math.round(subtotal * (discountPct / 100));
+  const discountedSub = subtotal - discountAmt;
+  const tax           = canInvoiceTVA ? Math.round(discountedSub * 0.18) : 0;
+  const total         = discountedSub + tax;
   const isOverdue = invoice.status === 'overdue';
   const timeline  = timelineForStatus(invoice.status, client.name);
 
@@ -159,6 +184,59 @@ export default function InvoicePage() {
     wire: 'Wave',
     momo: 'Mobile Money',
     cheque: 'Carte',
+  };
+
+  const canEdit = invoice.status === 'draft' || invoice.status === 'pending';
+
+  const openEdit = () => {
+    setEClient(invoice.client);
+    setESubject(invoice.subject);
+    setEDate(invoice.issued);
+    setEDue(invoice.due);
+    setEDiscount(invoice.discountPct ?? 0);
+    setELines(lines.length ? lines.map(l => ({ ...l })) : [newLineItem()]);
+    setEditOpen(true);
+  };
+
+  const updateELine = (lid: string, field: string, val: string) =>
+    setELines(prev => prev.map(l => l.id === lid ? { ...l, [field]: field === 'qty' || field === 'price' ? Number(val) : val } : l));
+
+  const filteredProducts = products.filter(p => !pickerQuery || p.name.toLowerCase().includes(pickerQuery.toLowerCase()));
+
+  const eSubtotal      = eLines.reduce((s, l) => s + l.qty * l.price, 0);
+  const eDiscountAmt   = Math.round(eSubtotal * (eDiscount / 100));
+  const eDiscountedSub = eSubtotal - eDiscountAmt;
+  const eTax           = canInvoiceTVA ? Math.round(eDiscountedSub * 0.18) : 0;
+  const eTotal         = eDiscountedSub + eTax;
+
+  const handleSaveEdit = async () => {
+    if (!eClient) { showToast('Veuillez sélectionner un client.', true); return; }
+    if (eSubtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
+    setSaving(true);
+    try {
+      await updateInvoice(invoice.id, { subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount });
+      await deleteLineItems({ invoiceId: invoice.id });
+      await saveLineItems(orgId, eLines, { invoiceId: invoice.id });
+      const editedClientName = (clientsMap[eClient] ?? { name: eClient }).name;
+      updateInvoiceIssuanceEntry(orgId, {
+        invoiceId:  invoice.id,
+        htAmount:   eDiscountedSub,
+        tvaAmount:  eTax,
+        date:       eDate,
+        clientName: editedClientName,
+      }).catch(err => console.error('Accounting update failed:', err));
+      setInvoices(prev => prev.map(i => i.id === invoice.id
+        ? { ...i, subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount }
+        : i));
+      setLines(eLines);
+      setEditOpen(false);
+      showToast('Facture mise à jour');
+    } catch (err) {
+      console.error('Edit invoice failed:', err);
+      showToast('Erreur lors de la mise à jour', true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleConfirmPayment = async () => {
@@ -214,9 +292,11 @@ export default function InvoicePage() {
           <button className="btn" onClick={handleDownloadPDF}>
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
-          <button className="btn">
-            <Icon name="edit" ariaHidden /> Modifier
-          </button>
+          {canEdit && (
+            <button className="btn" onClick={openEdit}>
+              <Icon name="edit" ariaHidden /> Modifier
+            </button>
+          )}
           {(isOverdue || invoice.status === 'pending') && (
             <button className="btn btn-primary" onClick={handleSendReminder}>
               <Icon name="send" ariaHidden /> Envoyer une relance
@@ -312,6 +392,9 @@ export default function InvoicePage() {
             <div className="pp-totals">
               <div className="pp-totals-inner">
                 <div className="tot-row"><span>Sous-total HT</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
+                {discountPct > 0 && (
+                  <div className="tot-row"><span>Remise ({discountPct}%)</span><span className="tv" style={{ color: 'var(--color-text-secondary)' }}>−{fmt(discountAmt)} F CFA</span></div>
+                )}
                 {canInvoiceTVA && <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>}
                 {invoice.status === 'paid' && (
                   <div className="tot-row"><span>Montant payé</span><span className="tv paid-amt">−{fmt(total)} F CFA</span></div>
@@ -492,6 +575,140 @@ export default function InvoicePage() {
         </div>
       </div>
     )}
+      {/* Edit panel */}
+      <div className={`scrim${editOpen ? ' open' : ''}`} onClick={() => setEditOpen(false)} />
+      <div className={`new-inv-panel${editOpen ? ' open' : ''}`} role="dialog" aria-label="Modifier la facture" aria-modal="true">
+        <div className="panel-slide-head">
+          <div>
+            <div className="panel-slide-title">Modifier la facture</div>
+            <div className="panel-slide-sub">#{invoice.id}</div>
+          </div>
+          <button className="icon-btn" onClick={() => setEditOpen(false)} aria-label="Fermer">
+            <Icon name="x" size={15} ariaHidden />
+          </button>
+        </div>
+
+        <div className="panel-body">
+          <div className="form-group">
+            <label className="form-label">Client</label>
+            <select className="form-input" value={eClient} onChange={e => setEClient(e.target.value)}>
+              <option value="">Sélectionner un client…</option>
+              {Object.entries(clientsMap).map(([code, c]) => (
+                <option key={code} value={code}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Date de facturation</label>
+              <input type="date" className="form-input" value={eDate} onChange={e => setEDate(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date d'échéance</label>
+              <input type="date" className="form-input" value={eDue} onChange={e => setEDue(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Référence / Objet</label>
+            <input type="text" className="form-input" placeholder="ex. Développement web — sprint 5"
+              maxLength={255} value={eSubject} onChange={e => setESubject(e.target.value)} />
+          </div>
+
+          <div className="subhead"><span>Lignes de facturation</span></div>
+          <div className="line-items-head">
+            <div className="li-col">Description</div>
+            <div className="li-col">Unité</div>
+            <div className="li-col right">Qté</div>
+            <div className="li-col right">Prix</div>
+            <div />
+          </div>
+
+          {eLines.map(li => (
+            <div key={li.id} className="line-item">
+              <div className="line-item-row">
+                <input className="li-input" placeholder="Description du service" value={li.desc}
+                  onChange={e => updateELine(li.id, 'desc', e.target.value)} />
+                <select className="li-input" value={li.unit ?? 'unité'}
+                  onChange={e => updateELine(li.id, 'unit', e.target.value)}>
+                  {['unité','heure','jour','mois','an','projet','article','licence'].map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+                <input className="li-input num" type="number" min="0" value={li.qty}
+                  onChange={e => updateELine(li.id, 'qty', e.target.value)} />
+                <input className="li-input num" type="number" min="0" value={li.price || ''}
+                  placeholder="0" onChange={e => updateELine(li.id, 'price', e.target.value)} />
+                <button className="li-del" onClick={() => setELines(prev => prev.length > 1 ? prev.filter(l => l.id !== li.id) : prev)} aria-label="Supprimer la ligne">
+                  <Icon name="trash" size={15} ariaHidden />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <div className="line-actions">
+            <button className="add-line" onClick={() => setELines(prev => [...prev, newLineItem()])}>
+              <Icon name="plus" size={14} ariaHidden /> Ajouter une ligne
+            </button>
+            {products.length > 0 && (
+              <div className="product-picker-wrap" ref={pickerRef}>
+                <button className="catalog-btn" onClick={() => setShowPicker(v => !v)}>
+                  <Icon name="package" size={14} ariaHidden /> Depuis le catalogue
+                </button>
+                {showPicker && (
+                  <div className="product-picker-dropdown">
+                    <input autoFocus placeholder="Rechercher…" value={pickerQuery}
+                      onChange={e => setPickerQuery(e.target.value)} />
+                    {filteredProducts.length === 0
+                      ? <div className="picker-empty">Aucun produit trouvé</div>
+                      : filteredProducts.map(p => (
+                          <div key={p.id} className="picker-item" onClick={() => {
+                            setELines(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit, p.id)]);
+                            setShowPicker(false); setPickerQuery('');
+                          }}>
+                            <div>
+                              <div className="picker-item-name">{p.name}</div>
+                              <div className="picker-item-meta">{p.unit}</div>
+                            </div>
+                            <div className="picker-item-price">{fmt(p.price)} F</div>
+                          </div>
+                        ))
+                    }
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="total-block">
+            <div className="total-row"><span>Sous-total HT</span><span>{fmt(eSubtotal)} F CFA</span></div>
+            <div className="total-row" style={{ alignItems: 'center' }}>
+              <span>Remise (%)</span>
+              <input
+                type="number" min="0" max="100" step="0.5"
+                className="form-input"
+                style={{ width: 80, textAlign: 'right', padding: '3px 8px', fontSize: 13 }}
+                value={eDiscount || ''}
+                placeholder="0"
+                onChange={e => setEDiscount(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+              />
+            </div>
+            {eDiscount > 0 && <div className="total-row" style={{ color: 'var(--color-text-secondary)' }}><span>Montant remise</span><span>−{fmt(eDiscountAmt)} F CFA</span></div>}
+            {canInvoiceTVA && <div className="total-row"><span>TVA (18 %)</span><span>{fmt(eTax)} F CFA</span></div>}
+            <div className="total-row final"><span>Total à payer</span><span>{fmt(eTotal)} F CFA</span></div>
+          </div>
+        </div>
+
+        <div className="panel-footer">
+          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditOpen(false)}>
+            Annuler
+          </button>
+          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={saving} onClick={handleSaveEdit}>
+            <Icon name="check" ariaHidden /> {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </div>
     </>
   );
 }

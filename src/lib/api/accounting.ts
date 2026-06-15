@@ -609,6 +609,32 @@ export async function recordSupplierBillPaymentEntry(
   await postJournalEntry(entryId);
 }
 
+export async function updateInvoiceIssuanceEntry(
+  orgId: string,
+  opts: {
+    invoiceId: string;
+    htAmount: number;
+    tvaAmount: number;
+    date: string;
+    clientName: string;
+  },
+): Promise<void> {
+  if (MOCK) return;
+  // Delete the original VE entry, then re-record with updated amounts
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('piece', `VE-${opts.invoiceId}`);
+  if (error) throw error;
+  if (data?.length) {
+    await Promise.all(
+      (data as Array<Record<string, unknown>>).map(r => deleteJournalEntry(String(r.id)))
+    );
+  }
+  await recordInvoiceIssuanceEntry(orgId, opts);
+}
+
 export async function deleteInvoiceEntries(orgId: string, invoiceId: string): Promise<void> {
   if (MOCK) return;
   const { data, error } = await supabase
