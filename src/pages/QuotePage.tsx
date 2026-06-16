@@ -6,7 +6,7 @@ import Icon from '../components/Icon';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { updateQuote } from '../lib/api/quotes';
-import { createInvoice, nextInvoiceId } from '../lib/api/invoices';
+import { createInvoice, nextInvoiceId, removeInvoice } from '../lib/api/invoices';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '../lib/api/line-items';
 import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { InvoicePDFDocument } from '../components/InvoicePDF';
@@ -35,6 +35,7 @@ export default function QuotePage() {
   const { quotes, setQuotes, invoices, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
   const [lines, setLines] = useState<LineItem[]>([]);
   const [converting, setConverting] = useState(false);
+  const convertingRef = useRef(false);
 
   // Edit panel state
   const [editOpen,    setEditOpen]    = useState(false);
@@ -91,7 +92,7 @@ export default function QuotePage() {
   const quoteUrl    = window.location.href;
   const isTerminal  = ['invoiced', 'declined', 'expired'].includes(quote.status);
   const canConvert  = !isTerminal;
-  const canEdit     = ['draft', 'sent'].includes(quote.status);
+  const canEdit     = !isTerminal;
 
   const eSubtotal = eLines.reduce((s, l) => s + l.qty * l.price, 0);
   const eTax      = canInvoiceTVA ? Math.round(eSubtotal * 0.18) : 0;
@@ -115,10 +116,19 @@ export default function QuotePage() {
     if (!eClient) { showToast('Veuillez sélectionner un client.', true); return; }
     if (eSubtotal <= 0) { showToast('Ajoutez au moins une ligne.', true); return; }
     setSaving(true);
+    const prevLines = lines;
     try {
       await updateQuote(quote.id, { subject: eSubject.trim() || 'Devis sans titre', client: eClient, issued: eDate, valid: eValid, amount: eTotal });
       await deleteLineItems({ quoteId: quote.id });
-      await saveLineItems(orgId, eLines, { quoteId: quote.id });
+      try {
+        await saveLineItems(orgId, eLines, { quoteId: quote.id });
+      } catch (lineErr) {
+        // Restore original lines so the quote is not left empty in the DB
+        if (prevLines.length > 0) {
+          await saveLineItems(orgId, prevLines, { quoteId: quote.id }).catch(() => {});
+        }
+        throw lineErr;
+      }
       setQuotes(prev => prev.map(q => q.id === quote.id
         ? { ...q, subject: eSubject.trim() || 'Devis sans titre', client: eClient, issued: eDate, valid: eValid, amount: eTotal }
         : q));
@@ -173,18 +183,24 @@ export default function QuotePage() {
   };
 
   const handleConvertToInvoice = async () => {
-    if (converting) return;
+    if (convertingRef.current) return;
+    convertingRef.current = true;
     setConverting(true);
     const today   = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-    const invId   = await nextInvoiceId(orgId);
-    const htAmount  = canInvoiceTVA ? Math.round(total / 1.18) : total;
-    const tvaAmount = canInvoiceTVA ? total - htAmount : 0;
-    const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: total, status: 'pending' as const };
-    const prevStatus = quote.status;
+    let invId: string | undefined;
+    let invoiceCreated = false;
     try {
+      invId = await nextInvoiceId(orgId);
+      // Use the stored quote.amount to avoid drift if orgSettings.taxRegime changed
+      // after the quote was issued.
+      const invAmount = quote.amount;
+      const htAmount  = canInvoiceTVA ? Math.round(invAmount / 1.18) : invAmount;
+      const tvaAmount = canInvoiceTVA ? invAmount - htAmount : 0;
+      const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: invAmount, status: 'pending' as const };
       const quoteLines = await fetchLineItems(undefined, quote.id);
       await createInvoice(orgId, newInv);
+      invoiceCreated = true;
       await saveLineItems(orgId, quoteLines, { invoiceId: invId });
       await updateQuote(quote.id, { status: 'invoiced' });
 
@@ -192,15 +208,21 @@ export default function QuotePage() {
       setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced' } : q));
       posthog.capture('quote_converted_to_invoice', { quote_id: quote.id, invoice_id: invId });
       showToast(`Devis ${quote.id} → Facture #${invId} créée`);
-      navigate(`/invoices/${invId}`);
 
       recordInvoiceIssuanceEntry(orgId, { invoiceId: invId, htAmount, tvaAmount, date: today, clientName: client.name })
-        .catch(err => console.error('[recordInvoiceIssuanceEntry] failed:', err));
+        .catch(err => {
+          console.error('[recordInvoiceIssuanceEntry] failed:', err);
+          showToast('Écriture comptable non enregistrée. Vérifiez la comptabilité.', true);
+        });
+
+      navigate(`/invoices/${invId}`);
     } catch {
       showToast('Erreur lors de la conversion. Veuillez réessayer.', true);
-      setInvoices(prev => prev.filter(i => i.id !== invId));
-      setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: prevStatus } : q));
+      if (invoiceCreated && invId) {
+        removeInvoice(invId).catch(e => console.error('[rollback] removeInvoice failed:', e));
+      }
     } finally {
+      convertingRef.current = false;
       setConverting(false);
     }
   };

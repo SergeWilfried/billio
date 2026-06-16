@@ -461,7 +461,7 @@ async function resolveJournalAndPeriod(
 
   const { data: period } = await supabase
     .from('fiscal_periods')
-    .select('id')
+    .select('id, status')
     .eq('org_id', orgId)
     .eq('year', year)
     .eq('month', month)
@@ -469,7 +469,9 @@ async function resolveJournalAndPeriod(
 
   let periodId: string;
   if (period) {
-    periodId = String((period as Record<string, unknown>).id);
+    const p = period as Record<string, unknown>;
+    if (p.status === 'closed') throw new Error(`Fiscal period ${year}-${String(month).padStart(2, '0')} is closed`);
+    periodId = String(p.id);
   } else {
     const { data: newPeriod, error: cpErr } = await supabase
       .from('fiscal_periods')
@@ -510,7 +512,7 @@ export async function recordInvoiceIssuanceEntry(
     lines: [
       { accountNum: '411', debit: total,          credit: 0              },
       { accountNum: '706', debit: 0,               credit: opts.htAmount  },
-      { accountNum: '443', debit: 0,               credit: opts.tvaAmount },
+      ...(opts.tvaAmount > 0 ? [{ accountNum: '443', debit: 0, credit: opts.tvaAmount }] : []),
     ],
   });
   await postJournalEntry(entryId);
