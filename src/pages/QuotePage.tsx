@@ -109,11 +109,18 @@ export default function QuotePage() {
     setEditOpen(true);
   };
 
-  const updateELine = (lid: string, field: string, val: string) =>
-    setELines(prev => prev.map(l => l.id === lid ? { ...l, [field]: field === 'qty' || field === 'price' ? Number(val) : val } : l));
+  const updateELine = (lid: string, field: string, val: string) => {
+    const asNum = Number(val);
+    setELines(prev => prev.map(l => l.id === lid
+      ? { ...l, [field]: field === 'qty' || field === 'price' ? (isNaN(asNum) ? 0 : asNum) : val }
+      : l));
+  };
 
   const handleSaveEdit = async () => {
     if (!eClient) { showToast('Veuillez sélectionner un client.', true); return; }
+    if (!eDate)   { showToast('La date du devis est requise.', true); return; }
+    if (!eValid)  { showToast('La date de validité est requise.', true); return; }
+    if (eValid < eDate) { showToast('La date de validité doit être après la date du devis.', true); return; }
     if (eSubtotal <= 0) { showToast('Ajoutez au moins une ligne.', true); return; }
     setSaving(true);
     const prevLines = lines;
@@ -165,10 +172,15 @@ export default function QuotePage() {
   };
 
   const handleDownloadPDF = async () => {
+    const pdfLines   = editOpen ? eLines : lines;
+    const pdfSubject = editOpen ? (eSubject.trim() || 'Devis sans titre') : quote.subject;
+    const pdfIssued  = editOpen ? eDate : quote.issued;
+    const pdfValid   = editOpen ? eValid : quote.valid;
+    const pdfAmount  = editOpen ? eTotal : total;
     const blob = await pdf(
       <InvoicePDFDocument
-        invoice={{ id: quote.id, subject: quote.subject, client: quote.client, issued: quote.issued, due: quote.valid, amount: total, status: 'pending' }}
-        lines={lines}
+        invoice={{ id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending' }}
+        lines={pdfLines}
         client={client}
         biz={orgSettings}
       />
@@ -219,7 +231,11 @@ export default function QuotePage() {
     } catch {
       showToast('Erreur lors de la conversion. Veuillez réessayer.', true);
       if (invoiceCreated && invId) {
-        removeInvoice(invId).catch(e => console.error('[rollback] removeInvoice failed:', e));
+        const id = invId;
+        deleteLineItems({ invoiceId: id })
+          .catch(() => {})
+          .then(() => removeInvoice(id))
+          .catch(e => console.error('[rollback] removeInvoice failed:', e));
       }
     } finally {
       convertingRef.current = false;
@@ -245,7 +261,7 @@ export default function QuotePage() {
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
           {canEdit && (
-            <button className="btn" onClick={openEdit}>
+            <button className="btn" onClick={openEdit} disabled={converting}>
               <Icon name="edit" ariaHidden /> Modifier
             </button>
           )}
@@ -421,14 +437,14 @@ export default function QuotePage() {
     </div>
 
     {/* Edit panel */}
-    <div className={`scrim${editOpen ? ' open' : ''}`} onClick={() => setEditOpen(false)} />
+    <div className={`scrim${editOpen ? ' open' : ''}`} onClick={() => { if (!saving) setEditOpen(false); }} />
     <div className={`new-inv-panel${editOpen ? ' open' : ''}`} role="dialog" aria-label="Modifier le devis" aria-modal="true">
       <div className="panel-slide-head">
         <div>
           <div className="panel-slide-title">Modifier le devis</div>
           <div className="panel-slide-sub">#{quote.id}</div>
         </div>
-        <button className="icon-btn" onClick={() => setEditOpen(false)} aria-label="Fermer">
+        <button className="icon-btn" onClick={() => setEditOpen(false)} aria-label="Fermer" disabled={saving}>
           <Icon name="x" size={15} ariaHidden />
         </button>
       </div>
@@ -534,7 +550,7 @@ export default function QuotePage() {
       </div>
 
       <div className="panel-footer">
-        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditOpen(false)}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditOpen(false)} disabled={saving}>
           Annuler
         </button>
         <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={saving} onClick={handleSaveEdit}>

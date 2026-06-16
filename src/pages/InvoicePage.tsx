@@ -180,10 +180,10 @@ export default function InvoicePage() {
     cheque: 'ch_3PXyZ...',
   };
   const METHOD_LABEL: Record<PayMethod, string> = {
-    cash: 'Cash',
-    wire: 'Wave',
-    momo: 'Mobile Money',
-    cheque: 'Carte',
+    cash:   'Cash',
+    wire:   'Virement',
+    momo:   'Mobile Money',
+    cheque: 'Chèque',
   };
 
   const canEdit = invoice.status === 'draft' || invoice.status === 'pending';
@@ -258,19 +258,22 @@ export default function InvoicePage() {
     try {
       await createPayment(orgId, newPayment);
       await updateInvoice(invoice.id, { status: 'paid' });
-      await recordInvoicePaymentEntry(orgId, {
-        invoiceId:  invoice.id,
-        total,
-        date:       today,
-        clientName: client.name,
-      });
       setPayments(prev => [newPayment, ...prev]);
       setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' as const } : i));
       setPayDialog(false);
       showToast(`Paiement ${METHOD_LABEL[payMethod]} de ${fmt(total)} F CFA enregistré`);
+      recordInvoicePaymentEntry(orgId, {
+        invoiceId:  invoice.id,
+        total,
+        date:       today,
+        clientName: client.name,
+      }).catch(err => {
+        console.error('[recordInvoicePaymentEntry] failed:', err);
+        showToast('Écriture comptable non enregistrée. Vérifiez la comptabilité.', true);
+      });
     } catch (err) {
       console.error('Payment recording failed:', err);
-      showToast('Erreur lors de l\'enregistrement du paiement');
+      showToast('Erreur lors de l\'enregistrement du paiement', true);
     }
   };
 
@@ -539,14 +542,14 @@ export default function InvoicePage() {
             <div>
               <div className="form-label">Méthode de paiement</div>
               <div className="method-pick" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                {(['cash', 'wave', 'momo', 'card'] as PayMethod[]).map(m => (
+                {(['cash', 'wire', 'momo', 'cheque'] as PayMethod[]).map(m => (
                   <button
                     key={m}
                     type="button"
                     className={`mp-opt${payMethod === m ? ' active' : ''}`}
                     onClick={() => setPayMethod(m)}
                   >
-                    <Icon name={m === 'cash' ? 'cash' : m === 'wave' ? 'activity' : m === 'momo' ? 'device-mobile' : 'credit-card'} size={18} ariaHidden />
+                    <Icon name={m === 'cash' ? 'cash' : m === 'wire' ? 'building-bank' : m === 'momo' ? 'device-mobile' : 'writing'} size={18} ariaHidden />
                     <span>{METHOD_LABEL[m]}</span>
                   </button>
                 ))}

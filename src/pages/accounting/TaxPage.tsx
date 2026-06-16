@@ -165,33 +165,96 @@ export default function TaxPage() {
   const ytdCA         = periodRevenue; // rough proxy: period revenue credits
   const caduciteAlert = isRegimeCaducite(regime, ytdCA, creationDate, EXERCISE_YEAR);
 
-  // ── Fiscal calendar ───────────────────────────────────────────────────────
+  // ── Fiscal calendar helpers ───────────────────────────────────────────────
   const isMonthly   = declarations === 'monthly';
   const isQuarterly = declarations === 'quarterly';
 
-  const deadlines: { label: string; date: string; amount: number; status: 'overdue' | 'pending' | 'upcoming'; category: string }[] = [
-    { label: 'TVM — Taxe sur la Valeur Marginale 2026', date: '2026-03-31', amount: 0, status: 'overdue', category: 'Annuelle' },
+  const MONTH_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  const todayISO  = new Date().toISOString().slice(0, 10);
+
+  const isoDate = (year: number, month: number, day: number) =>
+    `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+
+  const dlStatus = (date: string): 'overdue' | 'pending' | 'upcoming' => {
+    if (date < todayISO) return 'overdue';
+    return (new Date(date).getTime() - Date.now()) / 86_400_000 <= 45 ? 'pending' : 'upcoming';
+  };
+
+  // Per-month TVA net (collected − deductible) derived from journal entries
+  const monthlyNetTVA = Array.from({ length: 12 }, (_, i) => {
+    const prefix = `${EXERCISE_YEAR}-${String(i + 1).padStart(2, '0')}`;
+    const c = taxLines.filter(l => l.type === 'collected'  && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+    const d = taxLines.filter(l => l.type === 'deductible' && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+    return c - d;
+  });
+
+  type Deadline = { label: string; date: string; amount: number; status: 'overdue' | 'pending' | 'upcoming'; category: string };
+  const dl = (label: string, date: string, amount: number, category: string): Deadline =>
+    ({ label, date, amount, status: dlStatus(date), category });
+
+  const deadlines: Deadline[] = [
+    // ── Annual fixed (early year) ──────────────────────────────────────────
+    dl(`TVM — Taxe sur la Valeur Marginale ${EXERCISE_YEAR}`,   isoDate(EXERCISE_YEAR, 3, 31), 0, 'Annuelle'),
+    ...(regime === 'CME-declaratif' ? [
+      dl(`CME — Déclaration annuelle ${EXERCISE_YEAR}`,         isoDate(EXERCISE_YEAR, 3, 31), 0, 'Annuelle'),
+    ] : []),
+
+    // ── 1ᵉʳ acompte IS (25 %) — juin ──────────────────────────────────────
     ...(isMonthly || isQuarterly ? [
-      { label: 'IRB Déclaration Définitive — juin 2026', date: '2026-07-10', amount: 0, status: 'pending' as const, category: isMonthly ? 'Mensuelle' : 'Trimestrielle' },
+      dl(`1ᵉʳ acompte provisionnel IS (25 %) — juin ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 6, 15), Math.round(isEstimate * 0.25), 'Acomptes IS'),
     ] : []),
-    ...(canInvoiceTVA ? [
-      { label: 'TVA nette due — juin 2026', date: '2026-07-15', amount: netDue > 0 ? netDue : 0, status: 'pending' as const, category: 'Mensuelle' },
+
+    // ── Monthly TVA CA3 — one entry per month (RNI only) ──────────────────
+    ...(canInvoiceTVA && isMonthly ? Array.from({ length: 12 }, (_, i) => {
+      const ref      = i + 1;
+      const dueYear  = ref === 12 ? EXERCISE_YEAR + 1 : EXERCISE_YEAR;
+      const dueMonth = ref === 12 ? 1 : ref + 1;
+      return dl(`TVA CA3 — ${MONTH_FR[i]} ${EXERCISE_YEAR}`, isoDate(dueYear, dueMonth, 15), Math.max(0, monthlyNetTVA[i]), 'Mensuelle TVA');
+    }) : []),
+
+    // ── IUTS + TPA monthly (RNI) ───────────────────────────────────────────
+    ...(isMonthly ? Array.from({ length: 12 }, (_, i) => {
+      const ref      = i + 1;
+      const dueYear  = ref === 12 ? EXERCISE_YEAR + 1 : EXERCISE_YEAR;
+      const dueMonth = ref === 12 ? 1 : ref + 1;
+      return dl(`IUTS + TPA — ${MONTH_FR[i]} ${EXERCISE_YEAR}`, isoDate(dueYear, dueMonth, 15), 0, 'Mensuelle');
+    }) : []),
+
+    // ── IUTS + TPA quarterly (RSI) ─────────────────────────────────────────
+    ...(!isMonthly && isQuarterly ? [
+      dl(`IUTS + TPA — T1 ${EXERCISE_YEAR} (jan–mar)`, isoDate(EXERCISE_YEAR,      4, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T2 ${EXERCISE_YEAR} (avr–jun)`, isoDate(EXERCISE_YEAR,      7, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T3 ${EXERCISE_YEAR} (jul–sep)`, isoDate(EXERCISE_YEAR,     10, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T4 ${EXERCISE_YEAR} (oct–déc)`, isoDate(EXERCISE_YEAR + 1,  1, 15), 0, 'Trimestrielle'),
     ] : []),
-    ...(isMonthly || isQuarterly ? [
-      { label: 'IUTS retenu à la source — juin 2026', date: '2026-07-15', amount: iutsAmount, status: 'pending' as const, category: isMonthly ? 'Mensuelle' : 'Trimestrielle' },
-      { label: 'TPA (3%) — juin 2026', date: '2026-07-15', amount: tpaAmount, status: 'pending' as const, category: isMonthly ? 'Mensuelle' : 'Trimestrielle' },
-    ] : []),
-    { label: 'Droit de licence des Étrangers 2026', date: '2026-10-20', amount: 0, status: 'upcoming', category: 'Annuelle' },
-    { label: 'Taxe sur Actions 2026', date: '2026-10-20', amount: 0, status: 'upcoming', category: 'Annuelle' },
-    { label: 'Autres Droits de Licence 2026', date: '2026-10-30', amount: 0, status: 'upcoming', category: 'Annuelle' },
-    { label: '2ᵉ acomptes provisionnels — nov. 2026', date: '2026-11-15', amount: Math.round(isEstimate * 0.25), status: 'upcoming', category: 'Acomptes' },
-    { label: 'Patente 2026', date: '2026-12-15', amount: 0, status: 'upcoming', category: 'Annuelle' },
-    ...(isQuarterly ? [
-      { label: 'TVA — Déclaration trimestrielle (RSI) 2026', date: '2026-12-15', amount: 0, status: 'upcoming' as const, category: 'Trimestrielle' },
-    ] : []),
-    { label: '3ᵉ acomptes provisionnels — déc. 2026', date: '2026-12-15', amount: Math.round(isEstimate * 0.25), status: 'upcoming', category: 'Acomptes' },
-    { label: 'IS / IBICA — Déclaration annuelle 2026', date: '2027-02-28', amount: isEstimate, status: 'upcoming', category: 'Annuelle IS' },
-  ];
+
+    // ── Annual fixed (later in year) ───────────────────────────────────────
+    dl(`Droit de licence des Étrangers ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 10, 20), 0, 'Annuelle'),
+    dl(`Taxe sur Actions ${EXERCISE_YEAR}`,               isoDate(EXERCISE_YEAR, 10, 20), 0, 'Annuelle'),
+    dl(`Autres Droits de Licence ${EXERCISE_YEAR}`,       isoDate(EXERCISE_YEAR, 10, 30), 0, 'Annuelle'),
+    dl(`2ᵉ acompte provisionnel IS (25 %) — nov. ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 11, 15), Math.round(isEstimate * 0.25), 'Acomptes IS'),
+    dl(`Patente ${EXERCISE_YEAR}`,                        isoDate(EXERCISE_YEAR, 12, 15), 0, 'Annuelle'),
+    dl(`3ᵉ acompte provisionnel IS (25 %) — déc. ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 12, 15), Math.round(isEstimate * 0.25), 'Acomptes IS'),
+    dl(`IS / IBICA — Déclaration annuelle ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR + 1, 2, 28), isEstimate, 'Annuelle IS'),
+  ].sort((a, b) => a.date < b.date ? -1 : 1);
+
+  // ── Risk KPI ──────────────────────────────────────────────────────────────
+  const overdueCount  = deadlines.filter(d => d.status === 'overdue').length;
+  const pendingItems  = deadlines.filter(d => d.status === 'pending');
+  const riskKpi = overdueCount > 0
+    ? { icon: 'alert-triangle' as const, iconBg: '#FCEBEB', iconColor: '#A32D2D',
+        label: 'Échéances en retard', value: String(overdueCount),
+        unit: overdueCount === 1 ? 'déclaration' : 'déclarations',
+        sub: 'Risque pénalité 25 % – 200 %' }
+    : pendingItems.length > 0
+    ? { icon: 'clock' as const, iconBg: '#FAEEDA', iconColor: '#B26A09',
+        label: 'Prochaine échéance', value: pendingItems[0].date,
+        unit: '',
+        sub: pendingItems[0].label.length > 32 ? pendingItems[0].label.slice(0, 31) + '…' : pendingItems[0].label }
+    : { icon: 'check' as const, iconBg: '#E7F3E2', iconColor: '#2E7D32',
+        label: 'Situation fiscale', value: 'À jour', unit: '',
+        sub: deadlines.find(d => d.status === 'upcoming')?.date
+          ? `Prochain : ${deadlines.find(d => d.status === 'upcoming')!.date}` : 'Aucune échéance imminente' };
 
   return (
     <div className="main">
@@ -235,18 +298,24 @@ export default function TaxPage() {
           ] as const),
           { icon: 'building-bank', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'IS estimé (27,5%)', value: fmtCompact(isEstimate), unit: 'F CFA', sub: taxableProfit >= 0 ? `Bénéfice estimé ${fmtCompact(taxableProfit)} F` : `Déficit — minimum forfaitaire` },
           { icon: 'users', iconBg: '#F3E8FF', iconColor: '#6B21A8', label: 'IUTS + TPA dus', value: fmtCompact(iutsAmount + tpaAmount), unit: 'F CFA', sub: `IUTS ${fmtCompact(iutsAmount)} · TPA ${fmtCompact(tpaAmount)}` },
+          riskKpi,
         ]} />
 
         {/* TVA section — only for RNI */}
         {canInvoiceTVA ? (
           <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 20 }}>
             <div style={{ padding: '13px 18px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="receipt" size={15} />Détail TVA · Juin 2026
-              {!tvaCheck && (
-                <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#FAEEDA', color: '#B26A09' }}>
-                  Incohérence taux détectée
+              <Icon name="receipt" size={15} />Détail TVA · Exercice {EXERCISE_YEAR}
+              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#E9F0FA', color: 'var(--brand)' }}>
+                  Formulaire CA3 · eSINTAX
                 </span>
-              )}
+                {!tvaCheck && (
+                  <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#FAEEDA', color: '#B26A09' }}>
+                    Incohérence taux détectée
+                  </span>
+                )}
+              </span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '80px 70px 1fr 100px 110px 60px 110px', gap: 12, padding: '9px 18px', background: 'var(--color-background-secondary)', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
               {['Date', 'Journal', 'Libellé', 'Taux', 'Base HT', 'TVA', 'Type'].map((h, i) => (
@@ -355,6 +424,7 @@ export default function TaxPage() {
             );
           })}
         </div>
+
       </div>
     </div>
   );

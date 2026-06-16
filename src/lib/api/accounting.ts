@@ -573,13 +573,15 @@ export async function recordSupplierBillEntry(
 
 const PAYMENT_METHOD_JOURNAL: Record<string, string> = {
   wire:   'BQ',
-  mobile: 'BQ',
+  momo:   'BQ',
   cash:   'CA',
+  cheque: 'BQ',
 };
 const PAYMENT_METHOD_ACCOUNT: Record<string, string> = {
   wire:   '521',
-  mobile: '521',
+  momo:   '521',
   cash:   '571',
+  cheque: '521',
 };
 
 export async function recordSupplierBillPaymentEntry(
