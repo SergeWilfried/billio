@@ -57,9 +57,19 @@ export async function createQuote(
   return dbToQuote(data as Record<string, unknown>);
 }
 
-export async function updateQuote(id: string, patch: Partial<Pick<Quote, 'status'>>): Promise<void> {
+export async function updateQuote(
+  id: string,
+  patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount'>>,
+): Promise<void> {
   if (MOCK) return;
-  const { error } = await supabase.from('quotes').update(patch).eq('id', id);
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.status  !== undefined) dbPatch.status       = patch.status;
+  if (patch.subject !== undefined) dbPatch.subject      = patch.subject;
+  if (patch.client  !== undefined) dbPatch.client_code  = patch.client;
+  if (patch.issued  !== undefined) dbPatch.issued_at    = patch.issued;
+  if (patch.valid   !== undefined) dbPatch.valid_until  = patch.valid;
+  if (patch.amount  !== undefined) dbPatch.amount       = patch.amount;
+  const { error } = await supabase.from('quotes').update(dbPatch).eq('id', id);
   if (error) throw error;
 }
 

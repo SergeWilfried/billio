@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
 import { pdf } from '@react-pdf/renderer';
@@ -7,10 +7,10 @@ import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { updateQuote } from '../lib/api/quotes';
 import { createInvoice, nextInvoiceId } from '../lib/api/invoices';
-import { fetchLineItems, saveLineItems } from '../lib/api/line-items';
+import { fetchLineItems, saveLineItems, deleteLineItems } from '../lib/api/line-items';
 import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
 import { InvoicePDFDocument } from '../components/InvoicePDF';
-import { fmt, fmtDateLong, nextId } from '../data';
+import { fmt, fmtDateLong, newLineItem } from '../data';
 import type { LineItem } from '../lib/schemas';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -32,9 +32,30 @@ const BillioLogoSvg = () => (
 export default function QuotePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { quotes, setQuotes, invoices, setInvoices, showToast, clientsMap, orgSettings, orgId, loading } = useApp();
+  const { quotes, setQuotes, invoices, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
   const [lines, setLines] = useState<LineItem[]>([]);
   const [converting, setConverting] = useState(false);
+
+  // Edit panel state
+  const [editOpen,    setEditOpen]    = useState(false);
+  const [eClient,     setEClient]     = useState('');
+  const [eSubject,    setESubject]    = useState('');
+  const [eDate,       setEDate]       = useState('');
+  const [eValid,      setEValid]      = useState('');
+  const [eLines,      setELines]      = useState<LineItem[]>([]);
+  const [saving,      setSaving]      = useState(false);
+  const [showPicker,  setShowPicker]  = useState(false);
+  const [pickerQuery, setPickerQuery] = useState('');
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showPicker) return;
+    function onClickOutside(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowPicker(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showPicker]);
 
   useEffect(() => {
     if (id) fetchLineItems(undefined, id).then(setLines).catch(err => { console.error('[QuotePage] fetchLineItems error:', err); setLines([]); });
@@ -61,14 +82,56 @@ export default function QuotePage() {
     );
   }
 
-  const client   = clientsMap[quote.client] ?? { name: quote.client, city: '—', av: 'av-a' };
-  const subtotal = lines.reduce((s, li) => s + li.qty * li.price, 0);
-  const tax      = Math.round(subtotal * 0.18);
-  const total    = subtotal + tax;
+  const client       = clientsMap[quote.client] ?? { name: quote.client, city: '—', av: 'av-a' };
+  const subtotal     = lines.reduce((s, li) => s + li.qty * li.price, 0);
+  const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
+  const tax          = canInvoiceTVA ? Math.round(subtotal * 0.18) : 0;
+  const total        = subtotal + tax;
 
   const quoteUrl    = window.location.href;
   const isTerminal  = ['invoiced', 'declined', 'expired'].includes(quote.status);
   const canConvert  = !isTerminal;
+  const canEdit     = ['draft', 'sent'].includes(quote.status);
+
+  const eSubtotal = eLines.reduce((s, l) => s + l.qty * l.price, 0);
+  const eTax      = canInvoiceTVA ? Math.round(eSubtotal * 0.18) : 0;
+  const eTotal    = eSubtotal + eTax;
+
+  const filteredProducts = products.filter(p => !pickerQuery || p.name.toLowerCase().includes(pickerQuery.toLowerCase()));
+
+  const openEdit = () => {
+    setEClient(quote.client);
+    setESubject(quote.subject);
+    setEDate(quote.issued);
+    setEValid(quote.valid);
+    setELines(lines.length ? lines.map(l => ({ ...l })) : [newLineItem()]);
+    setEditOpen(true);
+  };
+
+  const updateELine = (lid: string, field: string, val: string) =>
+    setELines(prev => prev.map(l => l.id === lid ? { ...l, [field]: field === 'qty' || field === 'price' ? Number(val) : val } : l));
+
+  const handleSaveEdit = async () => {
+    if (!eClient) { showToast('Veuillez sélectionner un client.', true); return; }
+    if (eSubtotal <= 0) { showToast('Ajoutez au moins une ligne.', true); return; }
+    setSaving(true);
+    try {
+      await updateQuote(quote.id, { subject: eSubject.trim() || 'Devis sans titre', client: eClient, issued: eDate, valid: eValid, amount: eTotal });
+      await deleteLineItems({ quoteId: quote.id });
+      await saveLineItems(orgId, eLines, { quoteId: quote.id });
+      setQuotes(prev => prev.map(q => q.id === quote.id
+        ? { ...q, subject: eSubject.trim() || 'Devis sans titre', client: eClient, issued: eDate, valid: eValid, amount: eTotal }
+        : q));
+      setLines(eLines);
+      setEditOpen(false);
+      showToast('Devis mis à jour');
+    } catch (err) {
+      console.error('Edit quote failed:', err);
+      showToast('Erreur lors de la mise à jour', true);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(quoteUrl);
@@ -115,8 +178,8 @@ export default function QuotePage() {
     const today   = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
     const invId   = await nextInvoiceId(orgId);
-    const htAmount  = Math.round(total / 1.18);
-    const tvaAmount = total - htAmount;
+    const htAmount  = canInvoiceTVA ? Math.round(total / 1.18) : total;
+    const tvaAmount = canInvoiceTVA ? total - htAmount : 0;
     const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: total, status: 'pending' as const };
     const prevStatus = quote.status;
     try {
@@ -143,6 +206,7 @@ export default function QuotePage() {
   };
 
   return (
+    <>
     <div className="main">
       <div className="topbar">
         <div className="crumbs">
@@ -158,6 +222,11 @@ export default function QuotePage() {
           <button className="btn" onClick={handleDownloadPDF}>
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
+          {canEdit && (
+            <button className="btn" onClick={openEdit}>
+              <Icon name="edit" ariaHidden /> Modifier
+            </button>
+          )}
           {canConvert && (
             <button className="btn btn-primary" onClick={handleConvertToInvoice} disabled={converting}>
               <Icon name="arrow-right" ariaHidden />
@@ -249,7 +318,9 @@ export default function QuotePage() {
             <div className="pp-totals">
               <div className="pp-totals-inner">
                 <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
-                <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>
+                {canInvoiceTVA && (
+                  <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>
+                )}
                 <div className="tot-row grand"><span>Total estimé</span><span className="tv">{fmt(total)} F CFA</span></div>
               </div>
             </div>
@@ -326,5 +397,129 @@ export default function QuotePage() {
         </div>
       </div>
     </div>
+
+    {/* Edit panel */}
+    <div className={`scrim${editOpen ? ' open' : ''}`} onClick={() => setEditOpen(false)} />
+    <div className={`new-inv-panel${editOpen ? ' open' : ''}`} role="dialog" aria-label="Modifier le devis" aria-modal="true">
+      <div className="panel-slide-head">
+        <div>
+          <div className="panel-slide-title">Modifier le devis</div>
+          <div className="panel-slide-sub">#{quote.id}</div>
+        </div>
+        <button className="icon-btn" onClick={() => setEditOpen(false)} aria-label="Fermer">
+          <Icon name="x" size={15} ariaHidden />
+        </button>
+      </div>
+
+      <div className="panel-body">
+        <div className="form-group">
+          <label className="form-label">Client</label>
+          <select className="form-input" value={eClient} onChange={e => setEClient(e.target.value)}>
+            <option value="">Sélectionner un client…</option>
+            {Object.entries(clientsMap).map(([code, c]) => (
+              <option key={code} value={code}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Date du devis</label>
+            <input type="date" className="form-input" value={eDate} onChange={e => setEDate(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Valide jusqu'au</label>
+            <input type="date" className="form-input" value={eValid} onChange={e => setEValid(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Objet</label>
+          <input type="text" className="form-input" placeholder="ex. Refonte site web — périmètre complet"
+            maxLength={255} value={eSubject} onChange={e => setESubject(e.target.value)} />
+        </div>
+
+        <div className="subhead">Lignes</div>
+        <div className="line-items-head">
+          <div className="li-col">Description</div>
+          <div className="li-col">Unité</div>
+          <div className="li-col right">Qté</div>
+          <div className="li-col right">Prix</div>
+          <div />
+        </div>
+
+        {eLines.map(li => (
+          <div key={li.id} className="line-item">
+            <div className="line-item-row">
+              <input className="li-input" placeholder="Description du service" value={li.desc}
+                onChange={e => updateELine(li.id, 'desc', e.target.value)} />
+              <select className="li-input" value={li.unit ?? 'unité'}
+                onChange={e => updateELine(li.id, 'unit', e.target.value)}>
+                {['unité','heure','jour','mois','an','projet','article','licence'].map(u => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+              <input className="li-input num" type="number" min="0" value={li.qty}
+                onChange={e => updateELine(li.id, 'qty', e.target.value)} />
+              <input className="li-input num" type="number" min="0" value={li.price || ''}
+                placeholder="0" onChange={e => updateELine(li.id, 'price', e.target.value)} />
+              <button className="li-del" onClick={() => setELines(prev => prev.length > 1 ? prev.filter(l => l.id !== li.id) : prev)} aria-label="Supprimer la ligne">
+                <Icon name="trash" size={15} ariaHidden />
+              </button>
+            </div>
+          </div>
+        ))}
+
+        <div className="line-actions">
+          <button className="add-line" onClick={() => setELines(prev => [...prev, newLineItem()])}>
+            <Icon name="plus" size={14} ariaHidden /> Ajouter une ligne
+          </button>
+          {products.length > 0 && (
+            <div className="product-picker-wrap" ref={pickerRef}>
+              <button className="catalog-btn" onClick={() => setShowPicker(v => !v)}>
+                <Icon name="package" size={14} ariaHidden /> Depuis le catalogue
+              </button>
+              {showPicker && (
+                <div className="product-picker-dropdown">
+                  <input autoFocus placeholder="Rechercher…" value={pickerQuery}
+                    onChange={e => setPickerQuery(e.target.value)} />
+                  {filteredProducts.length === 0
+                    ? <div className="picker-empty">Aucun produit trouvé</div>
+                    : filteredProducts.map(p => (
+                        <div key={p.id} className="picker-item" onClick={() => {
+                          setELines(prev => [...prev, newLineItem(p.name, 1, p.price, p.unit, p.id)]);
+                          setShowPicker(false); setPickerQuery('');
+                        }}>
+                          <div>
+                            <div className="picker-item-name">{p.name}</div>
+                            <div className="picker-item-meta">{p.unit}</div>
+                          </div>
+                          <div className="picker-item-price">{fmt(p.price)} F</div>
+                        </div>
+                      ))
+                  }
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="total-block">
+          <div className="total-row"><span>Sous-total HT</span><span>{fmt(eSubtotal)} F CFA</span></div>
+          {canInvoiceTVA && <div className="total-row"><span>TVA (18 %)</span><span>{fmt(eTax)} F CFA</span></div>}
+          <div className="total-row final"><span>Total estimé</span><span>{fmt(eTotal)} F CFA</span></div>
+        </div>
+      </div>
+
+      <div className="panel-footer">
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditOpen(false)}>
+          Annuler
+        </button>
+        <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={saving} onClick={handleSaveEdit}>
+          <Icon name="check" ariaHidden /> {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
+    </>
   );
 }
