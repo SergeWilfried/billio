@@ -1092,6 +1092,15 @@ export default function ContactsPage() {
         />
       )}
       {showBillForm && <NewBillDrawer initialSupplier={billInitialSupplier} onSave={handleCreateBill} onClose={() => setShowBillForm(false)} />}
+      {deleteClient && (
+        <ConfirmModal
+          title="Supprimer le client"
+          body={`Supprimer "${deleteClient.name}" ? Cette action est irréversible.`}
+          confirmLabel="Supprimer le client"
+          onConfirm={confirmDeleteClient}
+          onClose={() => setDeleteClient(null)}
+        />
+      )}
     </>
   );
 }
