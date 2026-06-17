@@ -794,6 +794,16 @@ export default function InvoicePage() {
           </button>
         </div>
       </div>
+
+      {deleteDialog && (
+        <ConfirmModal
+          title="Supprimer la facture"
+          body={`Supprimer la facture #${invoice.id} ? Cette action est irréversible et effacera également les écritures comptables associées.`}
+          confirmLabel="Supprimer la facture"
+          onConfirm={handleConfirmDelete}
+          onClose={() => setDeleteDialog(false)}
+        />
+      )}
     </>
   );
 }

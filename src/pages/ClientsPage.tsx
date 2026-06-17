@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import posthog from 'posthog-js';
 import Icon from '../components/Icon';
+import ConfirmModal from '../components/ConfirmModal';
 import { EmptyState, EmptyInline } from '../components/EmptyState';
 import { ClientsEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
