@@ -3,6 +3,7 @@ import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
 import { pdf } from '@react-pdf/renderer';
 import Icon from '../components/Icon';
+import ConfirmModal from '../components/ConfirmModal';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
 import { removeInvoice, updateInvoice } from '../lib/api/invoices';
@@ -15,32 +16,36 @@ import type { Status } from '../data';
 import { calculateServiceWithholding, SERVICE_WITHHOLDING_THRESHOLD } from '../lib/tax-bf';
 import type { LineItem, PayMethod, Payment, ServiceWithholdingScenario } from '../lib/schemas';
 
-type DotKind = 'paid' | 'sent' | 'overdue' | 'viewed' | '';
+type DotKind = 'paid' | 'sent' | 'overdue' | '';
 interface TlEntry { dot: DotKind; text: string; time: string; }
 
-function timelineForStatus(status: Status, clientName: string): TlEntry[] {
-  const created: TlEntry = { dot: '', text: 'Créée par Serge W.', time: '18 mai 2026, 16h55' };
-  if (status === 'draft') return [created];
-  const sent: TlEntry = { dot: 'sent', text: 'Envoyée par e-mail', time: '18 mai 2026, 17h02' };
-  if (status === 'paid') {
+function buildTimeline(
+  invoice: { issued: string; due: string; status: Status },
+  clientName: string,
+  payment?: { date: string },
+): TlEntry[] {
+  const issuedStr = fmtDateLong(invoice.issued);
+  const created: TlEntry = { dot: '', text: 'Facture créée', time: issuedStr };
+  if (invoice.status === 'draft') return [created];
+
+  const sent: TlEntry = { dot: 'sent', text: 'Envoyée', time: issuedStr };
+
+  if (invoice.status === 'paid') {
+    const paidEntry: TlEntry = payment
+      ? { dot: 'paid', text: `Paiement reçu de ${clientName}`, time: fmtDateLong(payment.date) }
+      : { dot: 'paid', text: `Paiement reçu de ${clientName}`, time: '—' };
+    return [paidEntry, sent, created];
+  }
+
+  if (invoice.status === 'overdue') {
     return [
-      { dot: 'paid',   text: `Paiement reçu de ${clientName}`, time: '5 juin 2026, 14h00' },
-      { dot: 'viewed', text: `Consultée par ${clientName}`,    time: '20 mai 2026, 9h18' },
-      sent, created,
+      { dot: 'overdue', text: 'Passée en retard', time: fmtDateLong(invoice.due) },
+      sent,
+      created,
     ];
   }
-  if (status === 'overdue') {
-    return [
-      { dot: 'sent',    text: `Relance envoyée à ${clientName}`, time: '4 juin 2026, 15h40' },
-      { dot: 'overdue', text: 'Facture passée en retard',        time: '2 juin 2026, automatique' },
-      { dot: 'viewed',  text: `Consultée par ${clientName}`,     time: '20 mai 2026, 9h18' },
-      sent, created,
-    ];
-  }
-  return [
-    { dot: 'viewed', text: `Consultée par ${clientName}`, time: '20 mai 2026, 9h18' },
-    sent, created,
-  ];
+
+  return [sent, created];
 }
 
 function QrCodeSvg() {
