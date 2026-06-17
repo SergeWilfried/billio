@@ -14,56 +14,56 @@ const GROUPS: Group[] = [
   {
     label: 'DME — Directions des Moyennes Entreprises',
     options: [
-      { value: 'DME-CI',   label: 'DME du Centre I' },
-      { value: 'DME-CII',  label: 'DME du Centre II' },
-      { value: 'DME-CIII', label: 'DME du Centre III' },
-      { value: 'DME-CIV',  label: 'DME du Centre IV' },
-      { value: 'DME-CV',   label: 'DME du Centre V' },
-      { value: 'DME-HB',   label: 'DME des Hauts-Bassins' },
+      { value: 'DME du Centre 1',       label: 'DME du Centre 1' },
+      { value: 'DME du Centre 2',       label: 'DME du Centre 2' },
+      { value: 'DME du Centre 3',       label: 'DME du Centre 3' },
+      { value: 'DME du Centre 4',       label: 'DME du Centre 4' },
+      { value: 'DME du Centre 5',       label: 'DME du Centre 5' },
+      { value: 'DME des Hauts-Bassins', label: 'DME des Hauts-Bassins' },
     ],
   },
   {
     label: 'DCI — Directions du Centre des Impôts',
     options: [
-      { value: 'DCI-OI',    label: 'DCI Ouaga I' },
-      { value: 'DCI-OII',   label: 'DCI Ouaga II' },
-      { value: 'DCI-OIII',  label: 'DCI Ouaga III' },
-      { value: 'DCI-OIV',   label: 'DCI Ouaga IV' },
-      { value: 'DCI-OV',    label: 'DCI Ouaga V' },
-      { value: 'DCI-OVI',   label: 'DCI Ouaga VI' },
-      { value: 'DCI-OVII',  label: 'DCI Ouaga VII' },
-      { value: 'DCI-OVIII', label: 'DCI Ouaga VIII' },
-      { value: 'DCI-OIX',   label: 'DCI Ouaga IX' },
-      { value: 'DCI-BI',    label: 'DCI Bobo I' },
-      { value: 'DCI-BII',   label: 'DCI Bobo II' },
-      { value: 'DCI-BIII',  label: 'DCI Bobo III' },
-      { value: 'DCI-BIV',   label: 'DCI Bobo IV' },
-      { value: 'DCI-NDO',   label: "DCI de N'Dorola" },
-      { value: 'DCI-SAM',   label: 'DCI de Samorogouan' },
+      { value: 'DCI Ouaga 1',        label: 'DCI Ouaga 1' },
+      { value: 'DCI Ouaga 2',        label: 'DCI Ouaga 2' },
+      { value: 'DCI Ouaga 3',        label: 'DCI Ouaga 3' },
+      { value: 'DCI Ouaga 4',        label: 'DCI Ouaga 4' },
+      { value: 'DCI Ouaga 5',        label: 'DCI Ouaga 5' },
+      { value: 'DCI Ouaga 6',        label: 'DCI Ouaga 6' },
+      { value: 'DCI Ouaga 7',        label: 'DCI Ouaga 7' },
+      { value: 'DCI Ouaga 8',        label: 'DCI Ouaga 8' },
+      { value: 'DCI Ouaga 9',        label: 'DCI Ouaga 9' },
+      { value: 'DCI Bobo 1',         label: 'DCI Bobo 1' },
+      { value: 'DCI Bobo 2',         label: 'DCI Bobo 2' },
+      { value: 'DCI Bobo 3',         label: 'DCI Bobo 3' },
+      { value: 'DCI Bobo 4',         label: 'DCI Bobo 4' },
+      { value: "DCI de N'Dorola",    label: "DCI de N'Dorola" },
+      { value: 'DCI de Samorogouan', label: 'DCI de Samorogouan' },
     ],
   },
   {
     label: 'DRI — Directions Régionales des Impôts',
     options: [
-      { value: 'DRI-CE',  label: 'DRI du Centre-Est' },
-      { value: 'DRI-CO',  label: 'DRI du Centre-Ouest' },
-      { value: 'DRI-CN',  label: 'DRI du Centre-Nord' },
-      { value: 'DRI-CS',  label: 'DRI du Centre-Sud' },
-      { value: 'DRI-CA',  label: 'DRI des Cascades' },
-      { value: 'DRI-BM',  label: 'DRI de la Boucle du Mouhoun' },
-      { value: 'DRI-SA',  label: 'DRI du Sahel' },
-      { value: 'DRI-EST', label: "DRI de l'Est" },
-      { value: 'DRI-SO',  label: 'DRI du Sud-Ouest' },
-      { value: 'DRI-NO',  label: 'DRI du Nord' },
-      { value: 'DRI-PC',  label: 'DRI du Plateau central' },
+      { value: 'DRI du Centre-Est',           label: 'DRI du Centre-Est' },
+      { value: 'DRI du Centre-Ouest',         label: 'DRI du Centre-Ouest' },
+      { value: 'DRI du Centre-Nord',          label: 'DRI du Centre-Nord' },
+      { value: 'DRI du Centre-Sud',           label: 'DRI du Centre-Sud' },
+      { value: 'DRI des Cascades',            label: 'DRI des Cascades' },
+      { value: 'DRI de la Boucle du Mouhoun', label: 'DRI de la Boucle du Mouhoun' },
+      { value: 'DRI du Sahel',                label: 'DRI du Sahel' },
+      { value: "DRI de l'Est",                label: "DRI de l'Est" },
+      { value: 'DRI du Sud-Ouest',            label: 'DRI du Sud-Ouest' },
+      { value: 'DRI du Nord',                 label: 'DRI du Nord' },
+      { value: 'DRI du Plateau central',      label: 'DRI du Plateau central' },
     ],
   },
   {
     label: 'DPI — Directions Provinciales des Impôts',
     options: [
-      { value: 'DPI-KEN', label: 'DPI du Kénédougou' },
-      { value: 'DPI-TUY', label: 'DPI du Tuy' },
-      { value: 'DPI-BOU', label: 'DPI du Boulgou' },
+      { value: 'DPI du Kénédougou', label: 'DPI du Kénédougou' },
+      { value: 'DPI du Tuy',        label: 'DPI du Tuy' },
+      { value: 'DPI du Boulgou',    label: 'DPI du Boulgou' },
     ],
   },
 ];
@@ -81,10 +81,10 @@ interface Props {
 }
 
 export default function FiscalDivisionSelect({ value, onChange, placeholder = 'Rechercher une division…' }: Props) {
-  const [open, setOpen]     = useState(false);
-  const [query, setQuery]   = useState('');
-  const containerRef        = useRef<HTMLDivElement>(null);
-  const inputRef            = useRef<HTMLInputElement>(null);
+  const [open, setOpen]   = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef      = useRef<HTMLDivElement>(null);
+  const inputRef          = useRef<HTMLInputElement>(null);
 
   const selectedLabel = ALL_OPTIONS.find(o => o.value === value)?.label ?? '';
 
@@ -130,7 +130,6 @@ export default function FiscalDivisionSelect({ value, onChange, placeholder = 'R
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
-      {/* Trigger */}
       <div
         className="form-input"
         onClick={openDropdown}
@@ -152,7 +151,6 @@ export default function FiscalDivisionSelect({ value, onChange, placeholder = 'R
         </span>
       </div>
 
-      {/* Dropdown */}
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 9999,
@@ -162,7 +160,6 @@ export default function FiscalDivisionSelect({ value, onChange, placeholder = 'R
           boxShadow: 'var(--shadow-md, 0 4px 16px rgba(0,0,0,.12))',
           overflow: 'hidden',
         }}>
-          {/* Search input */}
           <div style={{ padding: '8px 10px', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', alignItems: 'center', gap: 7 }}>
             <Icon name="search" size={13} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
             <input
@@ -174,10 +171,9 @@ export default function FiscalDivisionSelect({ value, onChange, placeholder = 'R
             />
           </div>
 
-          {/* Options list */}
           <div style={{ maxHeight: 260, overflowY: 'auto' }}>
             {filtered.length === 0 ? (
-              <div style={{ padding: '14px 14px', fontSize: 12.5, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>Aucun résultat</div>
+              <div style={{ padding: '14px', fontSize: 12.5, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>Aucun résultat</div>
             ) : filtered.map(group => (
               <div key={group.label}>
                 <div style={{ padding: '8px 12px 4px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--color-text-tertiary)' }}>
