@@ -51,7 +51,6 @@ function fmtCompact(n: number) {
 export default function ClientsPage() {
   const { clients, setClients, invoices, orgId, showToast, loading } = useApp();
 
-  if (loading) return <PageSkeleton title="Clients" subtitle="Gérez vos clients" variant="table-only" rows={6} />;
   const [filter, setFilter]   = useState<FilterKey>('all');
   const [search, setSearch]   = useState('');
   const [panel, setPanel]     = useState<null | { kind: 'detail'; code: string } | { kind: 'new' }>(null);
@@ -96,13 +95,13 @@ export default function ClientsPage() {
 
   function openDetailEdit(cl: ClientRecord | null) {
     if (!cl) return;
-    setEditForm({ name: cl.name, contact: cl.contact === '—' ? '' : cl.contact, email: cl.email === '—' ? '' : cl.email, phone: cl.phone === '—' ? '' : cl.phone, city: cl.city === '—' ? '' : cl.city, status: cl.status, ifu: cl.ifu ?? '', rccm: cl.rccm ?? '', taxRegime: cl.taxRegime ?? '' });
+    setEditForm({ name: cl.name, contact: cl.contact === '—' ? '' : cl.contact, email: cl.email === '—' ? '' : cl.email, phone: cl.phone === '—' ? '' : cl.phone, city: cl.city === '—' ? '' : cl.city, status: cl.status, ifu: cl.ifu ?? '', rccm: cl.rccm ?? '', taxRegime: cl.taxRegime ?? '', withholdingScenario: cl.withholdingScenario });
     setEditMode(true);
   }
 
   async function handleSaveEdit(cl: ClientRecord | null) {
     if (!cl) return;
-    const patch = { name: editForm.name, contact: editForm.contact || '—', email: editForm.email || '—', phone: editForm.phone || '—', city: editForm.city || '—', status: editForm.status, ifu: editForm.ifu, rccm: editForm.rccm, taxRegime: editForm.taxRegime };
+    const patch = { name: editForm.name, contact: editForm.contact || '—', email: editForm.email || '—', phone: editForm.phone || '—', city: editForm.city || '—', status: editForm.status, ifu: editForm.ifu, rccm: editForm.rccm, taxRegime: editForm.taxRegime, withholdingScenario: editForm.withholdingScenario };
     setClients(prev => prev.map(c => c.code === cl.code ? { ...c, ...patch } : c));
     await updateClient(orgId, cl.code, patch);
     setEditMode(false);
@@ -129,6 +128,7 @@ export default function ClientsPage() {
       name: form.name, contact: form.contact || '—',
       email: form.email || '—', phone: form.phone || '—',
       city: form.city || '—', ifu: form.ifu, rccm: form.rccm, taxRegime: form.taxRegime,
+      withholdingScenario: form.withholdingScenario,
       status: form.status,
     };
     const isFirstClient = clients.length === 0;
@@ -139,6 +139,8 @@ export default function ClientsPage() {
     setForm(EMPTY_FORM);
     closePanel();
   }
+
+  if (loading) return <PageSkeleton title="Clients" subtitle="Gérez vos clients" variant="table-only" rows={6} />;
 
   return (
     <>
@@ -247,7 +249,10 @@ export default function ClientsPage() {
                 <div
                   key={cl.code}
                   className="client-row client-grid-cols"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setPanel({ kind: 'detail', code: cl.code })}
+                  onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setPanel({ kind: 'detail', code: cl.code })}
                 >
                   {/* Name */}
                   <div className="name-cell">
@@ -552,6 +557,19 @@ export default function ClientsPage() {
               <option value="RNI">RNI — Régime normal d'imposition (CA ≥ 50M F CFA)</option>
               <option value="RSI">RSI — Régime simplifié d'imposition (CA 15–50M F CFA)</option>
               <option value="CME">CME — Contribution des micro-entreprises (CA &lt; 15M F CFA)</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">
+              Retenue à la source <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 500 }}>— optionnel (Arts. 206–214 CGI)</span>
+            </label>
+            <select className="form-input" value={form.withholdingScenario ?? ''}
+              onChange={e => setForm(f => ({ ...f, withholdingScenario: e.target.value as NewClientForm['withholdingScenario'] || undefined }))}>
+              <option value="">— Pas de retenue —</option>
+              <option value="resident-with-ifu">5 % — Prestataire résident avec IFU (Art.207)</option>
+              <option value="resident-without-ifu">25 % — Prestataire résident sans IFU (Art.207)</option>
+              <option value="construction">1 % — Travaux / BTP (Art.207)</option>
+              <option value="non-resident">20 % — Prestataire non-résident (Art.212)</option>
             </select>
           </div>
         </form>

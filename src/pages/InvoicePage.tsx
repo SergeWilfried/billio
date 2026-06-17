@@ -12,7 +12,8 @@ import { fetchLineItems, saveLineItems, deleteLineItems } from '../lib/api/line-
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '../data';
 import { InvoicePDFDocument } from '../components/InvoicePDF';
 import type { Status } from '../data';
-import type { LineItem, PayMethod, Payment } from '../lib/schemas';
+import { calculateServiceWithholding, SERVICE_WITHHOLDING_THRESHOLD } from '../lib/tax-bf';
+import type { LineItem, PayMethod, Payment, ServiceWithholdingScenario } from '../lib/schemas';
 
 type DotKind = 'paid' | 'sent' | 'overdue' | 'viewed' | '';
 interface TlEntry { dot: DotKind; text: string; time: string; }
@@ -137,6 +138,7 @@ export default function InvoicePage() {
   }
 
   const client        = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
+  const clientWithholdingScenario = (client as { withholdingScenario?: ServiceWithholdingScenario }).withholdingScenario;
   const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
   const subtotal      = lines.reduce((s, li) => s + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
@@ -593,15 +595,46 @@ export default function InvoicePage() {
               </div>
             )}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Retenue services opérée par le client (optionnel)</label>
-              <input
-                className="form-input"
-                type="number"
-                min={0}
-                value={serviceWithholding || ''}
-                placeholder="0 — ex. 20–25% pour prestataire non-résident"
-                onChange={e => setServiceWithholding(Math.max(0, Number(e.target.value) || 0))}
-              />
+              {(() => {
+                const suggested = clientWithholdingScenario
+                  ? calculateServiceWithholding(discountedSub, clientWithholdingScenario)
+                  : null;
+                const belowThreshold = discountedSub < SERVICE_WITHHOLDING_THRESHOLD;
+                const RATE_LABEL: Record<string, string> = {
+                  'resident-with-ifu':    '5 %',
+                  'resident-without-ifu': '25 %',
+                  'construction':         '1 %',
+                  'non-resident':         '20 %',
+                };
+                return (<>
+                  <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Retenue à la source services (Art.207/212)</span>
+                    {suggested !== null && !belowThreshold && (
+                      <button
+                        type="button"
+                        style={{ fontSize: 11, color: 'var(--brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        onClick={() => setServiceWithholding(suggested)}
+                      >
+                        Appliquer {RATE_LABEL[clientWithholdingScenario!]} ({fmt(suggested)} F)
+                      </button>
+                    )}
+                  </label>
+                  {belowThreshold ? (
+                    <div style={{ fontSize: 12, color: 'var(--color-text-tertiary)', padding: '6px 0' }}>
+                      Montant HT sous le seuil de {fmt(SERVICE_WITHHOLDING_THRESHOLD)} F — pas de retenue requise (Art.208.3)
+                    </div>
+                  ) : (
+                    <input
+                      className="form-input"
+                      type="number"
+                      min={0}
+                      value={serviceWithholding || ''}
+                      placeholder={suggested !== null ? `Suggéré : ${fmt(suggested)} F` : '0'}
+                      onChange={e => setServiceWithholding(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  )}
+                </>);
+              })()}
             </div>
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', display: 'flex', flexDirection: 'column', gap: 3 }}>
               <div>Montant facturé : <b>{fmt(total)} F CFA</b></div>
