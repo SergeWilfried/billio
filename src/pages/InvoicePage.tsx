@@ -106,6 +106,7 @@ export default function InvoicePage() {
   const [saving,     setSaving]     = useState(false);
   const [showPicker,   setShowPicker]   = useState(false);
   const [pickerQuery,  setPickerQuery]  = useState('');
+  const [deleteDialog, setDeleteDialog] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -151,8 +152,9 @@ export default function InvoicePage() {
   const discountedSub = subtotal - discountAmt;
   const tax           = canInvoiceTVA ? Math.round(discountedSub * 0.18) : 0;
   const total         = discountedSub + tax;
-  const isOverdue = invoice.status === 'overdue';
-  const timeline  = timelineForStatus(invoice.status, client.name);
+  const isOverdue       = invoice.status === 'overdue';
+  const invoicePayment  = payments.find(p => p.inv === invoice.id);
+  const timeline        = buildTimeline(invoice, client.name, invoicePayment);
 
   const handleSendReminder = () => showToast(`Relance envoyée à ${client.name}`);
   const handleDuplicate    = () => showToast('Facture dupliquée en brouillon');
@@ -173,14 +175,13 @@ export default function InvoicePage() {
     URL.revokeObjectURL(url);
     posthog.capture('invoice_pdf_downloaded', { invoice_id: invoice.id });
   };
-  const handleDelete = async () => {
-    if (window.confirm(`Supprimer la facture #${invoice.id} ? Cette action est irréversible.`)) {
-      setInvoices(prev => prev.filter(i => i.id !== invoice.id));
-      await removeInvoice(invoice.id);
-      await deleteInvoiceEntries(orgId, invoice.id);
-      showToast('Facture supprimée');
-      navigate('/invoices');
-    }
+  const handleDelete = () => setDeleteDialog(true);
+  const handleConfirmDelete = async () => {
+    setInvoices(prev => prev.filter(i => i.id !== invoice.id));
+    await removeInvoice(invoice.id);
+    await deleteInvoiceEntries(orgId, invoice.id);
+    showToast('Facture supprimée');
+    navigate('/invoices');
   };
   const REF_PLACEHOLDER: Record<PayMethod, string> = {
     cash: 'Reçu #0212',
