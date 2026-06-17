@@ -58,6 +58,7 @@ export default function ClientsPage() {
   const [form, setForm]       = useState<NewClientForm>(EMPTY_FORM);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<NewClientForm>(EMPTY_FORM);
+  const [deleteTarget, setDeleteTarget] = useState<ClientRecord | null>(null);
 
   const totalBilled  = clients.reduce((s, c) => s + c.billed, 0);
   const outstanding  = clients.reduce((s, c) => s + c.balance, 0);
@@ -109,13 +110,18 @@ export default function ClientsPage() {
     showToast('Client mis à jour');
   }
 
-  async function handleDeleteClient(cl: ClientRecord | null) {
+  function handleDeleteClient(cl: ClientRecord | null) {
     if (!cl) return;
-    if (!window.confirm(`Supprimer "${cl.name}" ? Cette action est irréversible.`)) return;
-    setClients(prev => prev.filter(c => c.code !== cl.code));
-    await removeClient(orgId, cl.code);
+    setDeleteTarget(cl);
+  }
+
+  async function handleConfirmDeleteClient() {
+    if (!deleteTarget) return;
+    const { code, name } = deleteTarget;
+    setClients(prev => prev.filter(c => c.code !== code));
+    await removeClient(orgId, code);
     closePanel();
-    showToast(`"${cl.name}" supprimé`);
+    showToast(`"${name}" supprimé`);
   }
 
   async function handleAddClient(e: React.FormEvent) {
@@ -585,6 +591,16 @@ export default function ClientsPage() {
           </button>
         </div>
       </div>
+
+      {deleteTarget && (
+        <ConfirmModal
+          title="Supprimer le client"
+          body={`Supprimer "${deleteTarget.name}" ? Cette action est irréversible.`}
+          confirmLabel="Supprimer le client"
+          onConfirm={handleConfirmDeleteClient}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
     </>
   );
 }
