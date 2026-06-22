@@ -349,7 +349,7 @@ export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = 
             </View>
             {invoice.subject ? (
               <View style={s.metaRow}>
-                <Text style={s.metaKey}>Référence</Text>
+                <Text style={s.metaKey}>Objet</Text>
                 <Text style={s.metaVal}>{invoice.subject}</Text>
               </View>
             ) : null}

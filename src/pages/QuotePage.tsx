@@ -337,7 +337,7 @@ export default function QuotePage() {
                   <div className="v">{orgSettings.paymentTerms || 'Net 14 jours'}</div>
                   <div className="k">Livraison</div>
                   <div className="v">{orgSettings.deliveryTerms || 'À convenir'}</div>
-                  <div className="k">Référence</div>
+                  <div className="k">Objet</div>
                   <div className="v">{quote.subject}</div>
                 </div>
               </div>
