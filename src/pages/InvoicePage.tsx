@@ -386,11 +386,11 @@ export default function InvoicePage() {
                   <div className="v">{orgSettings.paymentTerms || 'Net 14 jours'}</div>
                   <div className="k">Livraison</div>
                   <div className="v">{orgSettings.deliveryTerms || 'À convenir'}</div>
-                  <div className="k">Objet</div>
-                  <div className="v">{invoice.subject}</div>
                 </div>
               </div>
             </div>
+
+            <div className="pp-subject"><span className="pp-subject-label">Objet :</span>{invoice.subject}</div>
 
             <table className="li-table">
               <thead>
