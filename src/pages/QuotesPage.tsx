@@ -7,7 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { QuotesEmptyIllustration } from '../components/PageEmptyIllustrations';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useApp } from '../context/AppContext';
-import { createQuote, updateQuote, removeQuote } from '../lib/api/quotes';
+import { createQuote, updateQuote, removeQuote, nextQuoteId } from '../lib/api/quotes';
 import { createInvoice, nextInvoiceId } from '../lib/api/invoices';
 import { fetchLineItems, saveLineItems } from '../lib/api/line-items';
 import { recordInvoiceIssuanceEntry } from '../lib/api/accounting';
