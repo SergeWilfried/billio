@@ -2,14 +2,14 @@
 // Each function is MOCK-aware: when VITE_MOCK_AUTH=true it returns the
 // same mock constants used by the static prototype pages.
 
-import { supabase } from '../supabase';
+import { supabase } from '@/lib/supabase';
 import {
   CLASSES, ACCOUNTS, JOURNALS, ENTRIES, OPENING,
   FIXED_ASSETS, SUPPLIER_BILLS,
-} from '../accounting-data';
+} from '@/lib/accounting-data';
 import type {
   AccountClass, Account, Journal, JournalEntry, FixedAsset, SupplierBill,
-} from '../accounting-data';
+} from '@/lib/accounting-data';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
