@@ -683,6 +683,36 @@ export async function deleteInvoiceEntries(orgId: string, invoiceId: string): Pr
   );
 }
 
+export async function recordCreditNoteEntry(
+  orgId: string,
+  opts: {
+    creditNoteId: string;
+    invoiceId: string;
+    htAmount: number;
+    tvaAmount: number;
+    date: string;
+    clientName: string;
+  },
+): Promise<void> {
+  if (MOCK) return;
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'VE', opts.date);
+  const total = opts.htAmount + opts.tvaAmount;
+  // Mirror of recordInvoiceIssuanceEntry but with debits/credits swapped
+  const entryId = await createJournalEntry(orgId, {
+    journalId,
+    periodId,
+    date:  opts.date,
+    piece: `AV-${opts.creditNoteId}`,
+    label: `Avoir — ${opts.clientName} (réf. ${opts.invoiceId})`,
+    lines: [
+      { accountNum: '706', debit: opts.htAmount,  credit: 0     },
+      ...(opts.tvaAmount > 0 ? [{ accountNum: '443', debit: opts.tvaAmount, credit: 0 }] : []),
+      { accountNum: '411', debit: 0,               credit: total },
+    ],
+  });
+  await postJournalEntry(entryId);
+}
+
 export async function markBillPaid(billId: string): Promise<void> {
   if (MOCK) return;
   const { error } = await supabase
