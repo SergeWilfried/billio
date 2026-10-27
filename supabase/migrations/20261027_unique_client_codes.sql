@@ -11,14 +11,23 @@
 --    suffix. Invoices that were meant for a renamed client must be
 --    re-assigned by hand — this query lists the renamed clients:
 --      select org_id, code, name from clients where code ~ '-DUP[0-9]+$';
+--    Suffixes continue after any -DUP<n> already in use for the same base code.
 with ranked as (
-  select id,
+  select id, org_id, code,
          row_number() over (partition by org_id, code order by created_at, id) as rn
   from public.clients
+), suffixes as (
+  select org_id,
+         regexp_replace(code, '-DUP[0-9]+$', '') as base_code,
+         max(substring(code from '-DUP([0-9]+)$')::integer) as max_suffix
+  from public.clients
+  where code ~ '-DUP[0-9]+$'
+  group by org_id, regexp_replace(code, '-DUP[0-9]+$', '')
 )
 update public.clients c
-set code = c.code || '-DUP' || (r.rn - 1)
+set code = c.code || '-DUP' || (coalesce(s.max_suffix, 0) + r.rn - 1)
 from ranked r
+left join suffixes s on s.org_id = r.org_id and s.base_code = r.code
 where r.id = c.id and r.rn > 1;
 
 -- 2. Enforce uniqueness

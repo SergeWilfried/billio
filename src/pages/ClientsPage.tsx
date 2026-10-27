@@ -137,7 +137,14 @@ export default function ClientsPage() {
       status: form.status,
     };
     const isFirstClient = clients.length === 0;
-    const created = await createClient(orgId, payload);
+    let created: ClientRecord;
+    try {
+      created = await createClient(orgId, payload);
+    } catch (err) {
+      console.error('[createClient]', err);
+      showToast('Erreur lors de l\'enregistrement du client. Veuillez réessayer.', true);
+      return;
+    }
     setClients(prev => prev.some(c => c.code === created.code) ? prev : [created, ...prev]);
     posthog.capture('client_created');
     if (isFirstClient) posthog.capture('first_client_added');
