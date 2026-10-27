@@ -18,6 +18,14 @@ export function dbToPayment(row: Record<string, unknown>): Payment {
   };
 }
 
+export async function nextPaymentId(orgId: string): Promise<string> {
+  if (MOCK) return 'PAI-' + String(Math.floor(Math.random() * 9000) + 1000);
+  // Atomic per-org sequence — see next_payment_number()
+  const { data, error } = await supabase.rpc('next_payment_number', { p_org_id: orgId });
+  if (error) throw error;
+  return 'PAI-' + String(data as number).padStart(4, '0');
+}
+
 export async function fetchPayments(orgId: string): Promise<Payment[]> {
   if (MOCK) return [...INITIAL_PAYMENTS];
   const { data, error } = await supabase
@@ -55,8 +63,8 @@ export async function createPayment(
   return dbToPayment(data as Record<string, unknown>);
 }
 
-export async function removePayment(id: string): Promise<void> {
+export async function removePayment(orgId: string, id: string): Promise<void> {
   if (MOCK) return;
-  const { error } = await supabase.from('payments').delete().eq('id', id);
+  const { error } = await supabase.from('payments').delete().eq('org_id', orgId).eq('id', id);
   if (error) throw error;
 }

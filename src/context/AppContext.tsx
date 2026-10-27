@@ -57,7 +57,8 @@ interface AppContextValue {
   userRole:    'admin' | 'accountant' | 'member';
   // Onboarding
   needsOnboarding:    boolean;
-  completeOnboarding: (bizName: string, newOrgId?: string) => void;
+  /** Reloads the org (settings, data, realtime) once onboarding has been saved. */
+  completeOnboarding: () => Promise<void>;
   // Opening balances
   openingBalancesAdopted:    boolean;
   setOpeningBalancesAdopted: Dispatch<SetStateAction<boolean>>;
@@ -99,6 +100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const { showToast } = useToast();
   const realtimeRef  = useRef<RealtimeChannel | null>(null);
+  const bootRef      = useRef<((user: User) => Promise<void>) | null>(null);
 
   // Derived client lookup
   const clientsMap = useMemo<Record<string, Client>>(
@@ -239,31 +241,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .channel(`org:${orgId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices',  filter: `org_id=eq.${orgId}` }, ({ eventType, new: n, old: o }) => {
           const row = n as Record<string, unknown>;
-          if (eventType === 'INSERT') setInvoices(prev => [dbToInvoice(row), ...prev]);
+          if (eventType === 'INSERT') setInvoices(prev => prev.some(x => x.id === row.id) ? prev : [dbToInvoice(row), ...prev]);
           if (eventType === 'UPDATE') setInvoices(prev => prev.map(x => x.id === row.id ? dbToInvoice(row) : x));
           if (eventType === 'DELETE') setInvoices(prev => prev.filter(x => x.id !== (o as Record<string, unknown>).id));
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'clients',   filter: `org_id=eq.${orgId}` }, ({ eventType, new: n, old: o }) => {
           const row = n as Record<string, unknown>;
-          if (eventType === 'INSERT') setClients(prev => [...prev, dbToClient(row)].sort((a, b) => a.name.localeCompare(b.name)));
+          if (eventType === 'INSERT') setClients(prev => prev.some(x => x.code === row.code) ? prev : [...prev, dbToClient(row)].sort((a, b) => a.name.localeCompare(b.name)));
           if (eventType === 'UPDATE') setClients(prev => prev.map(x => x.code === row.code ? dbToClient(row) : x));
           if (eventType === 'DELETE') setClients(prev => prev.filter(x => x.code !== (o as Record<string, unknown>).code));
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'payments',  filter: `org_id=eq.${orgId}` }, ({ eventType, new: n, old: o }) => {
           const row = n as Record<string, unknown>;
-          if (eventType === 'INSERT') setPayments(prev => [dbToPayment(row), ...prev]);
+          if (eventType === 'INSERT') setPayments(prev => prev.some(x => x.id === row.id) ? prev : [dbToPayment(row), ...prev]);
           if (eventType === 'UPDATE') setPayments(prev => prev.map(x => x.id === row.id ? dbToPayment(row) : x));
           if (eventType === 'DELETE') setPayments(prev => prev.filter(x => x.id !== (o as Record<string, unknown>).id));
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'products',  filter: `org_id=eq.${orgId}` }, ({ eventType, new: n, old: o }) => {
           const row = n as Record<string, unknown>;
-          if (eventType === 'INSERT') setProducts(prev => [...prev, dbToProduct(row)].sort((a, b) => a.name.localeCompare(b.name)));
+          if (eventType === 'INSERT') setProducts(prev => prev.some(x => x.id === row.id) ? prev : [...prev, dbToProduct(row)].sort((a, b) => a.name.localeCompare(b.name)));
           if (eventType === 'UPDATE') setProducts(prev => prev.map(x => x.id === row.id ? dbToProduct(row) : x));
           if (eventType === 'DELETE') setProducts(prev => prev.filter(x => x.id !== (o as Record<string, unknown>).id));
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes',    filter: `org_id=eq.${orgId}` }, ({ eventType, new: n, old: o }) => {
           const row = n as Record<string, unknown>;
-          if (eventType === 'INSERT') setQuotes(prev => [dbToQuote(row), ...prev]);
+          if (eventType === 'INSERT') setQuotes(prev => prev.some(x => x.id === row.id) ? prev : [dbToQuote(row), ...prev]);
           if (eventType === 'UPDATE') setQuotes(prev => prev.map(x => x.id === row.id ? dbToQuote(row) : x));
           if (eventType === 'DELETE') setQuotes(prev => prev.filter(x => x.id !== (o as Record<string, unknown>).id));
         })
@@ -280,6 +282,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         realtimeRef.current = null;
       }
     }
+
+    bootRef.current = boot;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user) {
@@ -325,14 +329,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const completeOnboarding = useCallback((bizName: string, newOrgId?: string) => {
-    setNeedsOnboarding(false);
-    setUserLabel(prev => prev || bizName);
-    if (newOrgId) {
-      setOrgId(newOrgId);
-      // Fetch data for the newly created org so the app doesn't start empty
-      fetchClients(newOrgId).then(setClients).catch(console.error);
-    }
+  const completeOnboarding = useCallback(async () => {
+    if (MOCK) { setNeedsOnboarding(false); return; }
+    // Re-run the full boot so a newly created org gets its settings, data and
+    // realtime channel — not just its clients.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && bootRef.current) await bootRef.current(user);
+    else setNeedsOnboarding(false);
   }, []);
 
   const hasFeature = useCallback((feature: Feature) => checkFeature(plan, feature), [plan]);

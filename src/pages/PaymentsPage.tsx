@@ -5,10 +5,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { PaymentsEmptyIllustration } from '@/components/PageEmptyIllustrations';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
-import { createPayment } from '@/lib/api/payments';
+import { createPayment, nextPaymentId } from '@/lib/api/payments';
 import { updateInvoice } from '@/lib/api/invoices';
 import { recordInvoicePaymentEntry } from '@/lib/api/accounting';
-import { fmt, fmtDate } from '@/data';
+import { fmt, fmtDate, clientInitials } from '@/data';
 import type { PayMethod, PayStatus, Payment } from '@/lib/schemas';
 
 type FilterKey = 'all' | 'cash' | 'wire' | 'momo' | 'cheque' | 'online' | 'pending';
@@ -112,13 +112,10 @@ export default function PaymentsPage() {
     const amt = parseFloat(amount) || 0;
     if (amt <= 0) { showToast('Saisissez un montant', true); return; }
 
-    const maxNum = payments.length
-      ? Math.max(...payments.map(p => parseInt(p.id.split('-')[1], 10)))
-      : 2052;
     const inv = invoices.find(i => i.id === invId);
     const m   = METHOD_META[method];
     const newPayment: Payment = {
-      id:     `PAI-${maxNum + 1}`,
+      id:     '',
       date,
       client: inv?.client ?? '?',
       inv:    invId,
@@ -130,8 +127,9 @@ export default function PaymentsPage() {
     };
 
     try {
+      newPayment.id = await nextPaymentId(orgId);
       await createPayment(orgId, newPayment);
-      await updateInvoice(invId, { status: 'paid' });
+      await updateInvoice(orgId, invId, { status: 'paid' });
     } catch (err) {
       console.error('Payment failed:', err);
       showToast('Erreur lors de l\'enregistrement du paiement', true);
@@ -297,7 +295,7 @@ export default function PaymentsPage() {
 
                     {/* Client & invoice */}
                     <div className="client-cell">
-                      {cl && <div className={`client-av ${cl.av}`}>{p.client}</div>}
+                      {cl && <div className={`client-av ${cl.av}`}>{clientInitials(cl.name)}</div>}
                       <div>
                         <div className="cell-text">{cl?.name ?? p.client}</div>
                         <div className="cell-sub">

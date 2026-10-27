@@ -8,7 +8,7 @@ import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { removeInvoice, updateInvoice } from '@/lib/api/invoices';
 import { recordInvoicePaymentEntry, deleteInvoiceEntries, updateInvoiceIssuanceEntry, recordCreditNoteEntry } from '@/lib/api/accounting';
-import { createPayment } from '@/lib/api/payments';
+import { createPayment, nextPaymentId } from '@/lib/api/payments';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
 import { fetchCreditNotes, createCreditNote, nextCreditNoteId } from '@/lib/api/credit-notes';
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '@/data';
@@ -126,8 +126,8 @@ export default function InvoicePage() {
   }, [showPicker]);
 
   useEffect(() => {
-    if (id) fetchLineItems(id).then(setLines).catch(() => setLines([]));
-  }, [id]);
+    if (id && orgId) fetchLineItems(orgId, { invoiceId: id }).then(setLines).catch(() => setLines([]));
+  }, [id, orgId]);
 
   useEffect(() => {
     if (id && orgId) fetchCreditNotes(orgId, id).then(setCreditNotes).catch(() => setCreditNotes([]));
@@ -191,7 +191,7 @@ export default function InvoicePage() {
   const handleDelete = () => setDeleteDialog(true);
   const handleConfirmDelete = async () => {
     setInvoices(prev => prev.filter(i => i.id !== invoice.id));
-    await removeInvoice(invoice.id);
+    await removeInvoice(orgId, invoice.id);
     await deleteInvoiceEntries(orgId, invoice.id);
     showToast('Facture supprimée');
     navigate('/invoices');
@@ -281,8 +281,8 @@ export default function InvoicePage() {
     if (eSubtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
     setSaving(true);
     try {
-      await updateInvoice(invoice.id, { subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount });
-      await deleteLineItems({ invoiceId: invoice.id });
+      await updateInvoice(orgId, invoice.id, { subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount });
+      await deleteLineItems(orgId, { invoiceId: invoice.id });
       await saveLineItems(orgId, eLines, { invoiceId: invoice.id });
       const editedClientName = (clientsMap[eClient] ?? { name: eClient }).name;
       updateInvoiceIssuanceEntry(orgId, {
@@ -308,11 +308,8 @@ export default function InvoicePage() {
 
   const handleConfirmPayment = async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const maxNum = payments.length
-      ? Math.max(...payments.map(p => parseInt(p.id.split('-')[1], 10)))
-      : 2052;
     const newPayment: Payment = {
-      id:     `PAI-${maxNum + 1}`,
+      id:     '',
       date:   today,
       client: invoice.client,
       inv:    invoice.id,
@@ -323,8 +320,9 @@ export default function InvoicePage() {
       source: 'manual',
     };
     try {
+      newPayment.id = await nextPaymentId(orgId);
       await createPayment(orgId, newPayment);
-      await updateInvoice(invoice.id, { status: 'paid' });
+      await updateInvoice(orgId, invoice.id, { status: 'paid' });
       setPayments(prev => [newPayment, ...prev]);
       setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' as const } : i));
       setPayDialog(false);

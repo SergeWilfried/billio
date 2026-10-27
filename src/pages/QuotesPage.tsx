@@ -11,7 +11,7 @@ import { createQuote, updateQuote, removeQuote, nextQuoteId } from '@/lib/api/qu
 import { createInvoice, nextInvoiceId } from '@/lib/api/invoices';
 import { fetchLineItems, saveLineItems } from '@/lib/api/line-items';
 import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
-import { fmt, fmtDate, newLineItem } from '@/data';
+import { fmt, fmtDate, newLineItem, clientInitials } from '@/data';
 import type { LineItem, QuoteStatus, Quote } from '@/lib/schemas';
 
 type FilterKey = 'all' | QuoteStatus;
@@ -179,10 +179,10 @@ export default function QuotesPage() {
         discountPct: 0,
       };
 
-      const quoteLines = await fetchLineItems(undefined, id);
+      const quoteLines = await fetchLineItems(orgId, { quoteId: id });
       await createInvoice(orgId, newInv);
       await saveLineItems(orgId, quoteLines.map(l => ({ ...l })), { invoiceId: invId });
-      await updateQuote(id, { status: 'invoiced' });
+      await updateQuote(orgId, id, { status: 'invoiced' });
 
       setInvoices(prev => [newInv, ...prev]);
       setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced' } : q));
@@ -217,7 +217,7 @@ export default function QuotesPage() {
     const id = deleteId;
     setDeleteId(null);
     setQuotes(prev => prev.filter(q => q.id !== id));
-    await removeQuote(id);
+    await removeQuote(orgId, id);
     showToast(`Devis ${id} supprimé`);
   }
 
@@ -338,7 +338,7 @@ export default function QuotesPage() {
 
                     {/* Client */}
                     <div className="client-cell">
-                      {cl && <div className={`client-av ${cl.av}`}>{q.client}</div>}
+                      {cl && <div className={`client-av ${cl.av}`}>{clientInitials(cl.name)}</div>}
                       <div>
                         <div className="cell-text">{cl?.name ?? q.client}</div>
                         <div className="cell-sub">{cl?.city}</div>

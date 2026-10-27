@@ -59,8 +59,8 @@ export default function QuotePage() {
   }, [showPicker]);
 
   useEffect(() => {
-    if (id) fetchLineItems(undefined, id).then(setLines).catch(err => { console.error('[QuotePage] fetchLineItems error:', err); setLines([]); });
-  }, [id]);
+    if (id && orgId) fetchLineItems(orgId, { quoteId: id }).then(setLines).catch(err => { console.error('[QuotePage] fetchLineItems error:', err); setLines([]); });
+  }, [id, orgId]);
 
   if (loading) return <PageSkeleton title="Devis" variant="table-only" metrics={0} rows={4} />;
 
@@ -125,8 +125,8 @@ export default function QuotePage() {
     setSaving(true);
     const prevLines = lines;
     try {
-      await updateQuote(quote.id, { subject: eSubject.trim() || 'Devis sans titre', client: eClient, issued: eDate, valid: eValid, amount: eTotal });
-      await deleteLineItems({ quoteId: quote.id });
+      await updateQuote(orgId, quote.id, { subject: eSubject.trim() || 'Devis sans titre', client: eClient, issued: eDate, valid: eValid, amount: eTotal });
+      await deleteLineItems(orgId, { quoteId: quote.id });
       try {
         await saveLineItems(orgId, eLines, { quoteId: quote.id });
       } catch (lineErr) {
@@ -214,11 +214,11 @@ export default function QuotePage() {
       const htAmount  = canInvoiceTVA ? Math.round(invAmount / 1.18) : invAmount;
       const tvaAmount = canInvoiceTVA ? invAmount - htAmount : 0;
       const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: invAmount, status: 'pending' as const, discountPct: 0 };
-      const quoteLines = await fetchLineItems(undefined, quote.id);
+      const quoteLines = await fetchLineItems(orgId, { quoteId: quote.id });
       await createInvoice(orgId, newInv);
       invoiceCreated = true;
       await saveLineItems(orgId, quoteLines, { invoiceId: invId });
-      await updateQuote(quote.id, { status: 'invoiced' });
+      await updateQuote(orgId, quote.id, { status: 'invoiced' });
 
       setInvoices(prev => [newInv, ...prev]);
       setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced' } : q));
@@ -236,9 +236,9 @@ export default function QuotePage() {
       showToast('Erreur lors de la conversion. Veuillez réessayer.', true);
       if (invoiceCreated && invId) {
         const id = invId;
-        deleteLineItems({ invoiceId: id })
+        deleteLineItems(orgId, { invoiceId: id })
           .catch(() => {})
-          .then(() => removeInvoice(id))
+          .then(() => removeInvoice(orgId, id))
           .catch(e => console.error('[rollback] removeInvoice failed:', e));
       }
     } finally {

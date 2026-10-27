@@ -11,7 +11,7 @@ import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { saveLineItems } from '@/lib/api/line-items';
 import { createActivity } from '@/lib/api/activities';
 import {
-  STATUS_LABEL, fmt, fmtCompact, fmtDate, fmtDue, nextId, newLineItem,
+  STATUS_LABEL, fmt, fmtCompact, fmtDate, fmtDue, nextId, newLineItem, clientInitials,
 } from '@/data';
 import type { FilterKey, Status, LineItem } from '@/data';
 import type { Activity } from '@/lib/schemas';
@@ -289,7 +289,7 @@ export default function InvoicesPage() {
                     <div className="inv-subject">{inv.subject}</div>
                   </div>
                   <div className="client-cell">
-                    <div className={`client-av ${c.av}`}>{inv.client}</div>
+                    <div className={`client-av ${c.av}`}>{clientInitials(c.name)}</div>
                     <div>
                       <div className="cell-text">{c.name}</div>
                       <div className="cell-sub">{c.city}</div>

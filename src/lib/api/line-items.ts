@@ -14,13 +14,13 @@ function dbToLineItem(row: Record<string, unknown>): LineItem {
 }
 
 export async function fetchLineItems(
-  invoiceId?: string,
-  quoteId?: string,
+  orgId: string,
+  opts: { invoiceId?: string; quoteId?: string },
 ): Promise<LineItem[]> {
   if (MOCK) return [];
-  let query = supabase.from('line_items').select('*');
-  if (invoiceId) query = query.eq('invoice_id', invoiceId);
-  else if (quoteId) query = query.eq('quote_id', quoteId);
+  let query = supabase.from('line_items').select('*').eq('org_id', orgId);
+  if (opts.invoiceId) query = query.eq('invoice_id', opts.invoiceId);
+  else if (opts.quoteId) query = query.eq('quote_id', opts.quoteId);
   else return [];
   const { data, error } = await query;
   if (error) throw error;
@@ -47,13 +47,13 @@ export async function saveLineItems(
   if (error) throw error;
 }
 
-export async function deleteLineItems(opts: { invoiceId?: string; quoteId?: string }): Promise<void> {
+export async function deleteLineItems(orgId: string, opts: { invoiceId?: string; quoteId?: string }): Promise<void> {
   if (MOCK) return;
   if (opts.invoiceId) {
-    const { error } = await supabase.from('line_items').delete().eq('invoice_id', opts.invoiceId);
+    const { error } = await supabase.from('line_items').delete().eq('org_id', orgId).eq('invoice_id', opts.invoiceId);
     if (error) throw error;
   } else if (opts.quoteId) {
-    const { error } = await supabase.from('line_items').delete().eq('quote_id', opts.quoteId);
+    const { error } = await supabase.from('line_items').delete().eq('org_id', orgId).eq('quote_id', opts.quoteId);
     if (error) throw error;
   }
 }
