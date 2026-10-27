@@ -4,46 +4,64 @@
 -- duplicate-key error. Scope every key (and the foreign keys pointing at them)
 -- to (org_id, id).
 --
+-- The live database does not always match the repo's base schema (some
+-- tables may be missing), so each step only runs for tables that exist.
+--
 -- If this fails on DROP CONSTRAINT because another object depends on one of
 -- the old primary keys, that dependency exists only in the live database and
 -- must be migrated explicitly — do not add CASCADE here.
 
--- 1. Drop foreign keys that reference the global primary keys
-alter table public.line_items   drop constraint if exists line_items_invoice_id_fkey;
-alter table public.line_items   drop constraint if exists line_items_quote_id_fkey;
-alter table public.payments     drop constraint if exists payments_inv_id_fkey;
-alter table public.credit_notes drop constraint if exists credit_notes_invoice_id_fkey;
+do $$
+declare
+  t text;
+begin
+  -- 1. Drop foreign keys that reference the global primary keys
+  if to_regclass('public.line_items') is not null then
+    alter table public.line_items drop constraint if exists line_items_invoice_id_fkey;
+    alter table public.line_items drop constraint if exists line_items_quote_id_fkey;
+  end if;
+  if to_regclass('public.payments') is not null then
+    alter table public.payments drop constraint if exists payments_inv_id_fkey;
+  end if;
+  if to_regclass('public.credit_notes') is not null then
+    alter table public.credit_notes drop constraint if exists credit_notes_invoice_id_fkey;
+  end if;
 
--- 2. Replace the global primary keys with per-org composite keys
-alter table public.invoices     drop constraint if exists invoices_pkey;
-alter table public.invoices     add constraint invoices_pkey     primary key (org_id, id);
+  -- 2. Replace the global primary keys with per-org composite keys
+  foreach t in array array['invoices', 'quotes', 'payments', 'credit_notes'] loop
+    if to_regclass('public.' || t) is not null then
+      execute format('alter table public.%I drop constraint if exists %I', t, t || '_pkey');
+      execute format('alter table public.%I add constraint %I primary key (org_id, id)', t, t || '_pkey');
+    end if;
+  end loop;
 
-alter table public.quotes       drop constraint if exists quotes_pkey;
-alter table public.quotes       add constraint quotes_pkey       primary key (org_id, id);
+  -- 3. Re-create the foreign keys as composite, org-scoped references
+  if to_regclass('public.line_items') is not null and to_regclass('public.invoices') is not null then
+    alter table public.line_items
+      add constraint line_items_invoice_id_fkey
+      foreign key (org_id, invoice_id) references public.invoices (org_id, id) on delete cascade;
+  end if;
 
-alter table public.payments     drop constraint if exists payments_pkey;
-alter table public.payments     add constraint payments_pkey     primary key (org_id, id);
+  if to_regclass('public.line_items') is not null and to_regclass('public.quotes') is not null then
+    alter table public.line_items
+      add constraint line_items_quote_id_fkey
+      foreign key (org_id, quote_id) references public.quotes (org_id, id) on delete cascade;
+  end if;
 
-alter table public.credit_notes drop constraint if exists credit_notes_pkey;
-alter table public.credit_notes add constraint credit_notes_pkey primary key (org_id, id);
+  -- SET NULL (inv_id) only clears the invoice reference, not org_id (PG 15+)
+  if to_regclass('public.payments') is not null and to_regclass('public.invoices') is not null then
+    alter table public.payments
+      add constraint payments_inv_id_fkey
+      foreign key (org_id, inv_id) references public.invoices (org_id, id) on delete set null (inv_id);
+  end if;
 
--- 3. Re-create the foreign keys as composite, org-scoped references
-alter table public.line_items
-  add constraint line_items_invoice_id_fkey
-  foreign key (org_id, invoice_id) references public.invoices (org_id, id) on delete cascade;
-
-alter table public.line_items
-  add constraint line_items_quote_id_fkey
-  foreign key (org_id, quote_id) references public.quotes (org_id, id) on delete cascade;
-
--- SET NULL (inv_id) only clears the invoice reference, not org_id (PG 15+)
-alter table public.payments
-  add constraint payments_inv_id_fkey
-  foreign key (org_id, inv_id) references public.invoices (org_id, id) on delete set null (inv_id);
-
-alter table public.credit_notes
-  add constraint credit_notes_invoice_id_fkey
-  foreign key (org_id, invoice_id) references public.invoices (org_id, id) on delete restrict;
+  if to_regclass('public.credit_notes') is not null and to_regclass('public.invoices') is not null then
+    alter table public.credit_notes
+      add constraint credit_notes_invoice_id_fkey
+      foreign key (org_id, invoice_id) references public.invoices (org_id, id) on delete restrict;
+  end if;
+end;
+$$;
 
 
 -- 4. Per-org payment sequence (payment ids used to be computed in the browser
