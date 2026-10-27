@@ -6,10 +6,10 @@ import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { updateQuote } from '@/lib/api/quotes';
-import { createInvoice, nextInvoiceId, removeInvoice } from '@/lib/api/invoices';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
-import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
+import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
 import { InvoicePDFDocument } from '@/components/InvoicePDF';
+import { downloadBlob } from '@/lib/download';
 import { fmt, fmtDateLong, newLineItem } from '@/data';
 import type { LineItem } from '@/lib/schemas';
 
@@ -177,70 +177,42 @@ export default function QuotePage() {
     const pdfIssued  = editOpen ? eDate : quote.issued;
     const pdfValid   = editOpen ? eValid : quote.valid;
     const pdfAmount  = editOpen ? eTotal : total;
-    const blob = await pdf(
-      <InvoicePDFDocument
-        invoice={{ id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 }}
-        lines={pdfLines}
-        client={client}
-        biz={orgSettings}
-        title="Facture Proforma"
-        clientLabel="Adressé à"
-        paymentTerms={orgSettings.paymentTerms || 'Net 14 jours'}
-        deliveryTerms={orgSettings.deliveryTerms || 'À convenir'}
-      />
-    ).toBlob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `devis-${quote.id.toLowerCase()}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    posthog.capture('quote_pdf_downloaded', { quote_id: quote.id });
+    try {
+      const blob = await pdf(
+        <InvoicePDFDocument
+          invoice={{ id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 }}
+          lines={pdfLines}
+          client={client}
+          biz={orgSettings}
+          title="Facture Proforma"
+          clientLabel="Adressé à"
+          paymentTerms={orgSettings.paymentTerms || 'Net 14 jours'}
+          deliveryTerms={orgSettings.deliveryTerms || 'À convenir'}
+        />
+      ).toBlob();
+      downloadBlob(blob, `devis-${quote.id.toLowerCase()}.pdf`);
+      posthog.capture('quote_pdf_downloaded', { quote_id: quote.id });
+    } catch (err) {
+      console.error('[handleDownloadPDF] failed:', err);
+      showToast('Impossible de générer le PDF. Veuillez réessayer.', true);
+    }
   };
 
   const handleConvertToInvoice = async () => {
     if (convertingRef.current) return;
     convertingRef.current = true;
     setConverting(true);
-    const today   = new Date().toISOString().slice(0, 10);
-    const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-    let invId: string | undefined;
-    let invoiceCreated = false;
     try {
-      invId = await nextInvoiceId(orgId);
-      // Use the stored quote.amount to avoid drift if orgSettings.taxRegime changed
-      // after the quote was issued.
-      const invAmount = quote.amount;
-      const htAmount  = canInvoiceTVA ? Math.round(invAmount / 1.18) : invAmount;
-      const tvaAmount = canInvoiceTVA ? invAmount - htAmount : 0;
-      const newInv = { id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate, amount: invAmount, status: 'pending' as const, discountPct: 0 };
-      const quoteLines = await fetchLineItems(orgId, { quoteId: quote.id });
-      await createInvoice(orgId, newInv);
-      invoiceCreated = true;
-      await saveLineItems(orgId, quoteLines, { invoiceId: invId });
-      await updateQuote(orgId, quote.id, { status: 'invoiced' });
-
-      setInvoices(prev => [newInv, ...prev]);
+      const { invoice, accountingOk } = await convertQuoteToInvoice(orgId, quote, { canInvoiceTVA, clientName: client.name });
+      setInvoices(prev => prev.some(i => i.id === invoice.id) ? prev : [invoice, ...prev]);
       setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced' } : q));
-      posthog.capture('quote_converted_to_invoice', { quote_id: quote.id, invoice_id: invId });
-      showToast(`Devis ${quote.id} → Facture #${invId} créée`);
-
-      recordInvoiceIssuanceEntry(orgId, { invoiceId: invId, htAmount, tvaAmount, date: today, clientName: client.name })
-        .catch(err => {
-          console.error('[recordInvoiceIssuanceEntry] failed:', err);
-          showToast('Écriture comptable non enregistrée. Vérifiez la comptabilité.', true);
-        });
-
-      navigate(`/invoices/${invId}`);
-    } catch {
-      showToast('Erreur lors de la conversion. Veuillez réessayer.', true);
-      if (invoiceCreated && invId) {
-        const id = invId;
-        deleteLineItems(orgId, { invoiceId: id })
-          .catch(() => {})
-          .then(() => removeInvoice(orgId, id))
-          .catch(e => console.error('[rollback] removeInvoice failed:', e));
-      }
+      posthog.capture('quote_converted_to_invoice', { quote_id: quote.id, invoice_id: invoice.id });
+      showToast(`Devis ${quote.id} → Facture #${invoice.id} créée`);
+      if (!accountingOk) showToast('Facture créée, mais l\'écriture comptable a échoué. Vérifiez la comptabilité.', true);
+      navigate(`/invoices/${invoice.id}`);
+    } catch (err) {
+      console.error('[convertToInvoice] failed:', err);
+      showToast('Erreur lors de la conversion. Aucune facture n\'a été créée — veuillez réessayer.', true);
     } finally {
       convertingRef.current = false;
       setConverting(false);

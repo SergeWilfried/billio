@@ -504,7 +504,7 @@ export default function ContactsPage() {
   }, [tab]);
 
   // Clients data
-  const { clients, setClients, invoices, orgId, showToast, loading: clientsLoading } = useApp();
+  const { clients, setClients, invoices, quotes, payments, orgId, showToast, loading: clientsLoading } = useApp();
   const [clientFilter, setClientFilter] = useState<ClientFilterKey>('all');
   const [clientSearch, setClientSearch] = useState('');
   const [clientPanel, setClientPanel] = useState<null | { kind: 'detail'; code: string } | { kind: 'new' }>(null);
@@ -619,9 +619,30 @@ export default function ContactsPage() {
     setDeleteClient(cl);
   }
 
+  // Invoices, quotes and payments reference clients by code; deleting a client
+  // that has any would leave those documents without a client.
+  function documentCount(code: string) {
+    return invoices.filter(i => i.client === code).length
+      + quotes.filter(q => q.client === code).length
+      + payments.filter(p => p.client === code).length;
+  }
+
+  async function archiveClient(cl: ClientRecord) {
+    setDeleteClient(null);
+    try {
+      await updateClient(orgId, cl.code, { status: 'inactive' });
+      setClients(prev => prev.map(c => c.code === cl.code ? { ...c, status: 'inactive' } : c));
+      showToast(`"${cl.name}" est maintenant inactif`);
+    } catch (err) {
+      console.error('[archiveClient]', err);
+      showToast('Erreur lors de la mise à jour. Veuillez réessayer.', true);
+    }
+  }
+
   async function confirmDeleteClient() {
     const cl = deleteClient;
     if (!cl) return;
+    if (documentCount(cl.code) > 0) { await archiveClient(cl); return; }
     setDeleteClient(null);
     setClients(prev => prev.filter(c => c.code !== cl.code));
     try {
@@ -1107,7 +1128,15 @@ export default function ContactsPage() {
         />
       )}
       {showBillForm && <NewBillDrawer initialSupplier={billInitialSupplier} onSave={handleCreateBill} onClose={() => setShowBillForm(false)} />}
-      {deleteClient && (
+      {deleteClient && (documentCount(deleteClient.code) > 0 ? (
+        <ConfirmModal
+          title="Ce client ne peut pas être supprimé"
+          body={`"${deleteClient.name}" a ${documentCount(deleteClient.code)} document(s) (factures, devis ou paiements). Pour le retirer de vos listes sans perdre l'historique, passez-le en Inactif.`}
+          confirmLabel="Passer en Inactif"
+          onConfirm={confirmDeleteClient}
+          onClose={() => setDeleteClient(null)}
+        />
+      ) : (
         <ConfirmModal
           title="Supprimer le client"
           body={`Supprimer "${deleteClient.name}" ? Cette action est irréversible.`}
@@ -1115,7 +1144,7 @@ export default function ContactsPage() {
           onConfirm={confirmDeleteClient}
           onClose={() => setDeleteClient(null)}
         />
-      )}
+      ))}
     </>
   );
 }

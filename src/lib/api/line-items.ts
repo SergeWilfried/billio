@@ -10,6 +10,7 @@ function dbToLineItem(row: Record<string, unknown>): LineItem {
     unit:  String(row.unit ?? 'unité'),
     qty:   Number(row.qty),
     price: Number(row.price),
+    ...(row.product_id ? { productId: String(row.product_id) } : {}),
   };
 }
 

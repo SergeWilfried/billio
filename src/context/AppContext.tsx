@@ -13,6 +13,7 @@ import { fetchActivities, dbToActivity } from '@/lib/api/activities';
 import { fetchOpeningBalanceAdopted } from '@/lib/api/accounting';
 import type { Invoice, Activity, ClientRecord, Payment, Product, Quote, Client } from '@/lib/schemas';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { withEffectiveStatus } from '@/lib/invoice-status';
 import { hasFeature as checkFeature, type PlanId, type PlanStatus, type Feature } from '@/lib/plans';
 
 export interface OrgSettings {
@@ -101,6 +102,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
   const realtimeRef  = useRef<RealtimeChannel | null>(null);
   const bootRef      = useRef<((user: User) => Promise<void>) | null>(null);
+  // User the current data was loaded for. supabase-js re-emits SIGNED_IN every
+  // time the tab regains focus; rebooting then would unmount the page (losing
+  // unsaved forms) and refetch everything.
+  const bootedUserRef = useRef<string | null>(null);
+
+  // Pending invoices past their due date are shown as overdue. Pages read this
+  // view; setInvoices still updates the stored list.
+  const invoicesView = useMemo(() => withEffectiveStatus(invoices), [invoices]);
 
   // Derived client lookup
   const clientsMap = useMemo<Record<string, Client>>(
@@ -142,6 +151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (memberErr && memberErr.code !== 'PGRST116') {
         console.error('[boot] org_members fetch error:', memberErr.message);
         showToast('Erreur lors du chargement de votre profil. Veuillez réessayer.', true);
+        bootedUserRef.current = null;
         setLoading(false);
         return;
       }
@@ -164,6 +174,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (orgErr) {
           console.error('[boot] org fetch error:', orgErr.message);
           showToast('Erreur lors du chargement de l\'organisation. Veuillez réessayer.', true);
+          bootedUserRef.current = null;
           setLoading(false);
           return;
         }
@@ -220,6 +231,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           console.error('[boot] data fetch error:', err);
           showToast('Erreur lors du chargement des données. Veuillez réessayer.', true);
+          bootedUserRef.current = null;
           setLoading(false);
           return;
         }
@@ -287,6 +299,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user) {
+        if (bootedUserRef.current === session.user.id) return;
+        bootedUserRef.current = session.user.id;
         boot(session.user);
       }
       if (event === 'USER_UPDATED' && session?.user) {
@@ -305,6 +319,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       if (event === 'SIGNED_OUT') {
+        bootedUserRef.current = null;
         posthog.reset();
         teardownRealtime();
         setUserId('');
@@ -342,7 +357,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      invoices,  setInvoices,
+      invoices: invoicesView, setInvoices,
       activity,  setActivity,
       clients,   setClients,
       payments,  setPayments,
