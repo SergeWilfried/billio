@@ -249,7 +249,7 @@ const s = StyleSheet.create({
   footerRight:  { fontSize: 7, color: '#aaa' },
 });
 
-interface Props {
+export interface InvoicePDFProps {
   invoice: Invoice;
   lines: LineItem[];
   client: ClientInfo;
@@ -263,7 +263,7 @@ interface Props {
   paymentMethods?: PaymentMethodLine[];
 }
 
-export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = '#185FA5', title = 'Facture', clientLabel = 'Facturé à', paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [] }: Props) {
+export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = '#185FA5', title = 'Facture', clientLabel = 'Facturé à', paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [] }: InvoicePDFProps) {
   const subtotal      = lines.reduce((sum, li) => sum + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
   const discountAmt   = Math.round(subtotal * (discountPct / 100));

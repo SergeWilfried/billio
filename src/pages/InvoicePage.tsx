@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import posthog from 'posthog-js';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { pdf } from '@react-pdf/renderer';
 import Icon from '@/components/Icon';
 import ConfirmModal from '@/components/ConfirmModal';
 import SendDocumentDialog, { type SendChannel } from '@/components/SendDocumentDialog';
@@ -18,7 +17,7 @@ import { contactValue } from '@/lib/share-links';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
 import { fetchCreditNotes, createCreditNote, nextCreditNoteId } from '@/lib/api/credit-notes';
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '@/data';
-import { InvoicePDFDocument } from '@/components/InvoicePDF';
+import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Status } from '@/data';
@@ -236,17 +235,15 @@ export default function InvoicePage() {
   const handleDownloadPDF = async () => {
     if (linesError) { showToast('Les lignes de la facture n\'ont pas pu être chargées — rechargez la page avant de télécharger le PDF.', true); return; }
     try {
-      const blob = await pdf(
-        <InvoicePDFDocument
-          invoice={invoice}
-          lines={lines}
-          client={client}
-          biz={orgSettings}
-          paymentTerms={orgSettings.paymentTerms || 'Net 14 jours'}
-          deliveryTerms={orgSettings.deliveryTerms || 'À convenir'}
-          paymentMethods={paymentMethods}
-        />
-      ).toBlob();
+      const blob = await renderInvoicePdf({
+        invoice,
+        lines,
+        client,
+        biz: orgSettings,
+        paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
+        deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
+        paymentMethods,
+      });
       downloadBlob(blob, `facture-${invoice.id.toLowerCase()}.pdf`);
       posthog.capture('invoice_pdf_downloaded', { invoice_id: invoice.id });
     } catch (err) {

@@ -1,14 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
-import { pdf } from '@react-pdf/renderer';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { updateQuote } from '@/lib/api/quotes';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
-import { InvoicePDFDocument } from '@/components/InvoicePDF';
+import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
 import { usePaymentMethods } from '@/lib/use-payment-methods';
 import { fmt, fmtDateLong, newLineItem } from '@/data';
@@ -180,19 +179,17 @@ export default function QuotePage() {
     const pdfValid   = editOpen ? eValid : quote.valid;
     const pdfAmount  = editOpen ? eTotal : total;
     try {
-      const blob = await pdf(
-        <InvoicePDFDocument
-          invoice={{ id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 }}
-          lines={pdfLines}
-          client={client}
-          biz={orgSettings}
-          title="Facture Proforma"
-          clientLabel="Adressé à"
-          paymentTerms={orgSettings.paymentTerms || 'Net 14 jours'}
-          paymentMethods={paymentMethods}
-          deliveryTerms={orgSettings.deliveryTerms || 'À convenir'}
-        />
-      ).toBlob();
+      const blob = await renderInvoicePdf({
+        invoice: { id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 },
+        lines: pdfLines,
+        client,
+        biz: orgSettings,
+        title: 'Facture Proforma',
+        clientLabel: 'Adressé à',
+        paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
+        paymentMethods,
+        deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
+      });
       downloadBlob(blob, `devis-${quote.id.toLowerCase()}.pdf`);
       posthog.capture('quote_pdf_downloaded', { quote_id: quote.id });
     } catch (err) {
