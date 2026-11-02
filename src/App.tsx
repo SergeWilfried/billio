@@ -5,6 +5,7 @@ import type { Session } from '@supabase/supabase-js';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { ToastProvider } from '@/context/ToastContext';
 import AppShell from '@/components/AppShell';
+import { ACCOUNTING_ENABLED } from '@/lib/features';
 
 // ── Lazy page chunks ────────────────────────────────────────────────────────
 // Each import() becomes its own JS chunk; the browser only downloads a page
@@ -17,12 +18,11 @@ const ResetPasswordPage      = lazy(() => import('./pages/ResetPasswordPage'));
 const InvitePage             = lazy(() => import('./pages/InvitePage'));
 const OnboardingPage         = lazy(() => import('./pages/OnboardingPage'));
 const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
-const InvoicesPage           = lazy(() => import('./pages/InvoicesPage'));
+const SalesPage              = lazy(() => import('./pages/SalesPage'));
 const InvoicePage            = lazy(() => import('./pages/InvoicePage'));
 const ContactsPage           = lazy(() => import('./pages/ContactsPage'));
 const ProductsPage           = lazy(() => import('./pages/ProductsPage'));
 const PaymentsPage           = lazy(() => import('./pages/PaymentsPage'));
-const QuotesPage             = lazy(() => import('./pages/QuotesPage'));
 const QuotePage              = lazy(() => import('./pages/QuotePage'));
 const TemplatesPage          = lazy(() => import('./pages/TemplatesPage'));
 const SettingsPage           = lazy(() => import('./pages/SettingsPage'));
@@ -104,23 +104,27 @@ export default function App() {
           {/* All other routes redirect to /onboarding when setup is missing */}
           <Route element={<OnboardingGuard />}>
             <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/invoices" element={<InvoicesPage />} />
+            <Route path="/invoices" element={<SalesPage />} />
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/clients"  element={<Navigate to="/contacts" replace />} />
             <Route path="/products" element={<ProductsPage />} />
-            <Route path="/accounting/chart-of-accounts"    element={<ChartOfAccountsPage />} />
-            <Route path="/accounting/journals"             element={<JournalsPage />} />
-            <Route path="/accounting/trial-balance"        element={<TrialBalancePage />} />
-            <Route path="/accounting/financial-statements" element={<FinancialStatementsPage />} />
-            <Route path="/accounting/fixed-assets"         element={<FixedAssetsPage />} />
-            <Route path="/accounting/suppliers"            element={<Navigate to="/contacts?tab=suppliers" replace />} />
-            <Route path="/accounting/tax"                  element={<TaxPage />} />
-            <Route path="/accounting/period-closing"       element={<PeriodClosingPage />} />
-            <Route path="/accounting/opening-balances"     element={<OpeningBalancesPage />} />
+            {ACCOUNTING_ENABLED ? (<>
+              <Route path="/accounting/chart-of-accounts"    element={<ChartOfAccountsPage />} />
+              <Route path="/accounting/journals"             element={<JournalsPage />} />
+              <Route path="/accounting/trial-balance"        element={<TrialBalancePage />} />
+              <Route path="/accounting/financial-statements" element={<FinancialStatementsPage />} />
+              <Route path="/accounting/fixed-assets"         element={<FixedAssetsPage />} />
+              <Route path="/accounting/suppliers"            element={<Navigate to="/contacts?tab=suppliers" replace />} />
+              <Route path="/accounting/tax"                  element={<TaxPage />} />
+              <Route path="/accounting/period-closing"       element={<PeriodClosingPage />} />
+              <Route path="/accounting/opening-balances"     element={<OpeningBalancesPage />} />
+            </>) : (
+              <Route path="/accounting/*" element={<Navigate to="/dashboard" replace />} />
+            )}
             <Route path="/reports"  element={<PlaceholderPage title="Rapports" />} />
             <Route path="/payments" element={<PaymentsPage />} />
-            <Route path="/quotes"     element={<QuotesPage />} />
+            <Route path="/quotes"     element={<Navigate to="/invoices?tab=quotes" replace />} />
             <Route path="/quotes/:id" element={<QuotePage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings"  element={<SettingsPage />} />

@@ -1,17 +1,18 @@
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
 import Icon from '@/components/Icon';
 import UpgradeModal from '@/components/UpgradeModal';
 import { useApp } from '@/context/AppContext';
 import { PLAN_LABELS, minPlanForFeature, type Feature } from '@/lib/plans';
 import BillioMark from '@/components/BillioMark';
+import { ACCOUNTING_ENABLED } from '@/lib/features';
 
 type NavItem = { icon: string; label: string; to: string };
 
 const NAV_WORKSPACE: NavItem[] = [
   { icon: 'layout-dashboard', label: 'Tableau de bord', to: '/dashboard' },
-  { icon: 'receipt',          label: 'Factures',        to: '/invoices'  },
+  { icon: 'receipt',          label: 'Facturation',     to: '/invoices'  },
   { icon: 'users',            label: 'Contacts',        to: '/contacts'  },
   { icon: 'package',          label: 'Produits',        to: '/products'  },
   { icon: 'layout-grid',      label: 'Modèles',         to: '/templates' },
@@ -20,7 +21,6 @@ const NAV_WORKSPACE: NavItem[] = [
 const NAV_FINANCE: NavItem[] = [
   { icon: 'chart-bar',   label: 'Rapports',  to: '/reports'  },
   { icon: 'credit-card', label: 'Paiements', to: '/payments' },
-  { icon: 'file-text',   label: 'Devis',     to: '/quotes'   },
 ];
 
 const NAV_ACCOUNTING: NavItem[] = [
@@ -48,7 +48,6 @@ const NAV_ACCOUNT: NavItem[] = [
 const ROUTE_FEATURE: Record<string, Feature> = {
   // Business+
   '/reports':                            'reports',
-  '/quotes':                             'quotes',
   '/payments':                           'payments_mobilemoney',
   '/accounting/opening-balances':        'accounting_syscohada',
   '/accounting/chart-of-accounts':       'accounting_syscohada',
@@ -71,6 +70,8 @@ const PLAN_BADGE_CLASS: Record<string, string> = {
 export default function Sidebar({ onLogout }: { onLogout: () => void }) {
   const { invoices, userLabel, userInitials, openingBalancesAdopted, plan, hasFeature } = useApp();
   const [lockedFeature, setLockedFeature] = useState<Feature | null>(null);
+  // Quote detail pages live under /quotes but belong to the Facturation item
+  const onQuotePage = useLocation().pathname.startsWith('/quotes');
 
   const overdueCount = useMemo(
     () => invoices.filter(i => i.status === 'overdue').length,
@@ -102,7 +103,7 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
       <NavLink
         key={to}
         to={to}
-        className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        className={({ isActive }) => `nav-item${isActive || (to === '/invoices' && onQuotePage) ? ' active' : ''}`}
       >
         <Icon name={icon} ariaHidden />
         {label}
@@ -140,11 +141,13 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
           <div className="nav-section">Finance</div>
           {NAV_FINANCE.map(item => renderNavItem(item))}
 
-          <div className="nav-section">Comptabilité</div>
-          {NAV_ACCOUNTING
-            .filter(({ to }) => to !== '/accounting/opening-balances' || !openingBalancesAdopted)
-            .map(item => renderNavItem(item))
-          }
+          {ACCOUNTING_ENABLED && (<>
+            <div className="nav-section">Comptabilité</div>
+            {NAV_ACCOUNTING
+              .filter(({ to }) => to !== '/accounting/opening-balances' || !openingBalancesAdopted)
+              .map(item => renderNavItem(item))
+            }
+          </>)}
 
           <div className="nav-section">Compte</div>
           {NAV_ACCOUNT.map(item => renderNavItem(item))}
