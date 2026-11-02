@@ -518,7 +518,7 @@ export default function ContactsPage() {
   const [deleteClient, setDeleteClient] = useState<ClientRecord | null>(null);
 
   // Suppliers data
-  const { data: bills, loading: suppLoading, markPaid, createBill } = useSupplierBills();
+  const { data: bills, loading: suppLoading, markPaid, createBill } = useSupplierBills(ACCOUNTING_ENABLED);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierContact | null>(null);
   const [showBillForm, setShowBillForm] = useState(false);
   const [billInitialSupplier, setBillInitialSupplier] = useState('');
