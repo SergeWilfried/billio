@@ -12,6 +12,13 @@ describe('authErrorMessage', () => {
     expect(authErrorMessage(new TypeError('Failed to fetch'))).toMatch(/^Connexion impossible/);
   });
 
+  it('explains password policy rejections', () => {
+    expect(authErrorMessage(new Error('Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyz, ABCDEFGHIJKLMNOPQRSTUVWXYZ, 0123456789.')))
+      .toBe('Le mot de passe doit contenir au moins un caractère de chaque groupe : abcdefghijklmnopqrstuvwxyz, ABCDEFGHIJKLMNOPQRSTUVWXYZ, 0123456789.');
+    expect(authErrorMessage(new Error('Password is known to be weak and easy to guess, please choose a different one.')))
+      .toMatch(/^Ce mot de passe figure dans des fuites/);
+  });
+
   it('falls back to a generic French message', () => {
     expect(authErrorMessage(new Error('Something odd'))).toBe('Une erreur est survenue. Veuillez réessayer.');
     expect(authErrorMessage(null)).toBe('Une erreur est survenue. Veuillez réessayer.');

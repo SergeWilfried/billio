@@ -29,7 +29,7 @@ describe('paymentMethodLines', () => {
       { label: 'MTN Mobile Money',  value: '70 00 00 01' },
       { label: 'Wave',              value: '77 00 11 22' },
       { label: 'Virement bancaire', value: 'BF00 1234' },
-      { label: 'Espèces',           value: 'à nos bureaux' },
+      { label: 'Espèces',           value: 'acceptées' },
     ]);
   });
 

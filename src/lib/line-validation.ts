@@ -2,9 +2,13 @@
 
 import type { LineItem } from '@/lib/schemas';
 
-/** Lines the user actually filled in; untouched blank rows are dropped. */
+/**
+ * Lines the user actually filled in; untouched blank rows are dropped. A row
+ * whose quantity was changed counts as touched, so validation reports its
+ * missing description instead of silently discarding it.
+ */
 export function filledLines(lines: LineItem[]): LineItem[] {
-  return lines.filter(l => l.desc.trim() !== '' || l.price !== 0);
+  return lines.filter(l => l.desc.trim() !== '' || l.price !== 0 || l.qty !== 1);
 }
 
 /** French error message, or null when the lines can be saved. */

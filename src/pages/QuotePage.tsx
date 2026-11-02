@@ -9,7 +9,7 @@ import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-i
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
 import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
-import { usePaymentMethods } from '@/lib/use-payment-methods';
+import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import { fmt, fmtDateLong, newLineItem } from '@/data';
 import type { LineItem } from '@/lib/schemas';
 
@@ -33,7 +33,8 @@ export default function QuotePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { quotes, setQuotes, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
-  const paymentMethods = usePaymentMethods();
+  const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
+  const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [lines, setLines] = useState<LineItem[]>([]);
   const [converting, setConverting] = useState(false);
   const convertingRef = useRef(false);
@@ -173,6 +174,7 @@ export default function QuotePage() {
   };
 
   const handleDownloadPDF = async () => {
+    if (!paymentMethodsReady) { showToast(paymentMethodsNotReadyMessage(paymentMethodsStatus), true); return; }
     const pdfLines   = editOpen ? eLines : lines;
     const pdfSubject = editOpen ? (eSubject.trim() || 'Devis sans titre') : quote.subject;
     const pdfIssued  = editOpen ? eDate : quote.issued;
@@ -233,7 +235,7 @@ export default function QuotePage() {
           </div>
         </div>
         <div className="topbar-actions">
-          <button className="btn" onClick={handleDownloadPDF}>
+          <button className="btn" onClick={handleDownloadPDF} disabled={!paymentMethodsReady}>
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
           {canEdit && (
@@ -395,7 +397,7 @@ export default function QuotePage() {
 
                 <div className="rail-divider" />
 
-                <button className="btn btn-block" onClick={handleDownloadPDF}>
+                <button className="btn btn-block" onClick={handleDownloadPDF} disabled={!paymentMethodsReady}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
               </div>

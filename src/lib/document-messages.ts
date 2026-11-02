@@ -25,8 +25,7 @@ export function invoiceMessage(
       subject: `Facture ${opts.invoiceId} — ${opts.orgName || 'Facture'}`,
       message:
         `Bonjour ${opts.clientName},\n\n` +
-        `Veuillez trouver ci-joint la facture ${opts.invoiceId} d'un montant de ${amount}, ` +
-        `à régler avant le ${fmtDateLong(opts.due)}.` +
+        `Votre facture ${opts.invoiceId} d'un montant de ${amount} est à régler avant le ${fmtDateLong(opts.due)}.` +
         paymentBlock(opts.methods) +
         signature(opts.orgName),
     };
@@ -51,7 +50,7 @@ export function quoteMessage(
 ): DocMessage {
   const amount = `${fmt(opts.amount)} F CFA`;
   const body = kind === 'send'
-    ? `Veuillez trouver ci-joint notre devis ${opts.quoteId} d'un montant de ${amount}, valable jusqu'au ${fmtDateLong(opts.validUntil)}.`
+    ? `Notre devis ${opts.quoteId} s'élève à ${amount} et reste valable jusqu'au ${fmtDateLong(opts.validUntil)}. Nous pouvons vous transmettre le document détaillé sur simple demande.`
     : `Nous revenons vers vous au sujet du devis ${opts.quoteId} (${amount}), valable jusqu'au ${fmtDateLong(opts.validUntil)}. N'hésitez pas à nous faire part de vos questions.`;
   return {
     subject: kind === 'send' ? `Devis ${opts.quoteId} — ${opts.orgName || 'Devis'}` : `Suivi du devis ${opts.quoteId}`,

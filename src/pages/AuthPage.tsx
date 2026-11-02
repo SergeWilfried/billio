@@ -61,9 +61,11 @@ export default function AuthPage({ onLogin }: AuthPageProps = {}) {
           options: { data: { country } },
         });
         if (error) throw error;
-        // With email confirmation on, an existing address comes back with no identities
-        if (data.user && data.user.identities?.length === 0) throw new Error('User already registered');
-        posthog.capture('signed_up', { method: 'email', country });
+        // With email confirmation on, an existing address comes back with no
+        // identities. Show the same notice either way so the form doesn't reveal
+        // which addresses have an account.
+        const existingAccount = data.user?.identities?.length === 0;
+        if (!existingAccount) posthog.capture('signed_up', { method: 'email', country });
         if (!data.session) {
           setConfirmEmailSentTo(email.trim());
           setLoading(false);
@@ -238,7 +240,7 @@ export default function AuthPage({ onLogin }: AuthPageProps = {}) {
 
               {confirmEmailSentTo && (
                 <div className="auth-success" role="status">
-                  <Icon name="mail" ariaHidden /> Compte créé. Nous avons envoyé un lien de confirmation à <b>{confirmEmailSentTo}</b> : ouvrez-le pour activer votre compte, puis connectez-vous.
+                  <Icon name="mail" ariaHidden /> Vérifiez votre boîte mail : un lien de confirmation a été envoyé à <b>{confirmEmailSentTo}</b> pour activer le compte. Si vous avez déjà un compte avec cette adresse, connectez-vous ou réinitialisez votre mot de passe.
                 </div>
               )}
 

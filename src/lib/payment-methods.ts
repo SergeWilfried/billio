@@ -18,6 +18,6 @@ export function paymentMethodLines(s: PaymentSettings): PaymentMethodLine[] {
   add(s.methodOrangeEnabled, 'Orange Money',     s.methodOrangePhone);
   add(s.methodWaveEnabled,   'Wave',             s.methodWavePhone);
   add(s.methodBankEnabled,   'Virement bancaire', s.methodBankIban);
-  if (s.methodCashEnabled) lines.push({ label: 'Espèces', value: 'à nos bureaux' });
+  if (s.methodCashEnabled) lines.push({ label: 'Espèces', value: 'acceptées' });
   return lines;
 }

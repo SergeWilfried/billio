@@ -11,7 +11,8 @@ import { createActivity } from '@/lib/api/activities';
 import { deleteInvoiceEntries, updateInvoiceIssuanceEntry, recordCreditNoteEntry, recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { settleInvoicePayment } from '@/lib/api/payments';
 import { invoiceBalance, daysOverdue, todayISO } from '@/lib/invoice-status';
-import { usePaymentMethods } from '@/lib/use-payment-methods';
+import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
+import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { invoiceMessage } from '@/lib/document-messages';
 import { contactValue } from '@/lib/share-links';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
@@ -67,7 +68,8 @@ export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { invoices, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
-  const paymentMethods = usePaymentMethods();
+  const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
+  const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [sendKind, setSendKind] = useState<'send' | 'reminder' | null>(null);
   // The list and the create panel link here with { openSend: true } to open the send dialog
   const location = useLocation();
@@ -82,6 +84,7 @@ export default function InvoicePage() {
   const [payAmount, setPayAmount] = useState(0);
   const [paySaving, setPaySaving] = useState(false);
   const [linesError, setLinesError] = useState(false);
+  const [linesLoading, setLinesLoading] = useState(true);
 
   // Edit panel state
   const [editOpen,   setEditOpen]   = useState(false);
@@ -113,10 +116,14 @@ export default function InvoicePage() {
 
   useEffect(() => {
     if (!id || !orgId) return;
+    let cancelled = false;
     setLinesError(false);
+    setLinesLoading(true);
     fetchLineItems(orgId, { invoiceId: id })
-      .then(setLines)
-      .catch(err => { console.error('[fetchLineItems]', err); setLines([]); setLinesError(true); });
+      .then(l => { if (!cancelled) setLines(l); })
+      .catch(err => { console.error('[fetchLineItems]', err); if (!cancelled) { setLines([]); setLinesError(true); } })
+      .finally(() => { if (!cancelled) setLinesLoading(false); });
+    return () => { cancelled = true; };
   }, [id, orgId]);
 
   useEffect(() => {
@@ -125,13 +132,14 @@ export default function InvoicePage() {
 
   const requestedInvoiceStatus = invoices.find(i => i.id === id)?.status;
   useEffect(() => {
-    if (!openSendRequested || !requestedInvoiceStatus) return;
-    if (requestedInvoiceStatus === 'pending' || requestedInvoiceStatus === 'overdue') {
+    // Wait for the payment methods: the prepared message lists them
+    if (!openSendRequested || !requestedInvoiceStatus || paymentMethodsStatus === 'loading') return;
+    if (paymentMethodsStatus === 'ready' && (requestedInvoiceStatus === 'pending' || requestedInvoiceStatus === 'overdue')) {
       setSendKind(requestedInvoiceStatus === 'overdue' ? 'reminder' : 'send');
     }
     // Clear the request so a refresh or back navigation doesn't reopen the dialog
     navigate(location.pathname, { replace: true, state: null });
-  }, [openSendRequested, requestedInvoiceStatus, navigate, location.pathname]);
+  }, [openSendRequested, requestedInvoiceStatus, paymentMethodsStatus, navigate, location.pathname]);
 
   if (loading) return <PageSkeleton title="Facture" variant="table-only" metrics={0} rows={4} />;
 
@@ -174,23 +182,31 @@ export default function InvoicePage() {
   // Sending happens from the user's own email/WhatsApp; log it once they pick a channel
   const handleSent = (channel: SendChannel) => {
     if (channel === 'copy' || !sendKind) return;
+    // Opening the email app or WhatsApp doesn't mean the message went out
     const via = channel === 'email' ? 'par email' : 'par WhatsApp';
     const parts = sendKind === 'reminder'
-      ? [{ text: 'Relance ' + via + ' pour ' }, { text: `#${invoice.id}`, bold: true as const }]
-      : [{ text: 'Facture ' }, { text: `#${invoice.id}`, bold: true as const }, { text: ` envoyée ${via} à ` }, { text: client.name, bold: true as const }];
+      ? [{ text: `Relance préparée ${via} pour ` }, { text: `#${invoice.id}`, bold: true as const }]
+      : [{ text: 'Facture ' }, { text: `#${invoice.id}`, bold: true as const }, { text: ` préparée ${via} pour ` }, { text: client.name, bold: true as const }];
     const entry: Activity = { kind: 'sent', parts, time: "À l'instant" };
     setActivity(prev => [entry, ...prev]);
-    createActivity(orgId, { kind: 'sent', parts }).catch(err => console.error('[createActivity] failed:', err));
+    createActivity(orgId, { kind: 'sent', parts }).catch(err => {
+      console.error('[createActivity] failed:', err);
+      setActivity(prev => prev.filter(a => a !== entry));
+      showToast('L\'envoi n\'a pas pu être enregistré dans l\'historique.', true);
+    });
     setSendKind(null);
   };
 
   // A new draft with the same client, subject and lines, dated today
   const handleDuplicate = async () => {
     if (busyAction) return;
+    if (linesLoading) return;
     if (linesError) { showToast('Les lignes de la facture n\'ont pas pu être chargées — rechargez la page avant de dupliquer.', true); return; }
     setBusyAction('duplicate');
     try {
-      const termDays = Math.max(0, Math.round((Date.parse(invoice.due) - Date.parse(invoice.issued)) / 86_400_000)) || 14;
+      // Same payment term as the source (0 = due on issue); 14 days if its dates are unreadable
+      const sourceTerm = Math.round((Date.parse(invoice.due) - Date.parse(invoice.issued)) / 86_400_000);
+      const termDays = Number.isFinite(sourceTerm) ? Math.max(0, sourceTerm) : 14;
       const issued = todayISO();
       const due = new Date(Date.parse(issued + 'T00:00:00Z') + termDays * 86_400_000).toISOString().slice(0, 10);
       const id = await nextInvoiceId(orgId);
@@ -216,14 +232,21 @@ export default function InvoicePage() {
   // Draft → pending: the invoice becomes payable and gets its sales journal entry
   const handleIssue = async () => {
     if (busyAction) return;
-    if (linesError || lines.length === 0) { showToast('Ajoutez au moins une ligne avant d\'émettre la facture.', true); return; }
+    if (linesLoading) return;
+    if (linesError) { showToast('Les lignes de la facture n\'ont pas pu être chargées — rechargez la page avant d\'émettre la facture.', true); return; }
+    const linesProblem = lineItemsError(lines);
+    if (linesProblem) { showToast(`${linesProblem} Modifiez la facture avant de l'émettre.`, true); return; }
     setBusyAction('issue');
     try {
       await updateInvoice(orgId, invoice.id, { status: 'pending', amount: total });
       setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'pending' as const, amount: total } : i));
-      recordInvoiceIssuanceEntry(orgId, { invoiceId: invoice.id, htAmount: discountedSub, tvaAmount: tax, date: invoice.issued, clientName: client.name })
-        .catch(err => console.error('[recordInvoiceIssuanceEntry] failed:', err));
-      showToast(`Facture #${invoice.id} émise`);
+      try {
+        await recordInvoiceIssuanceEntry(orgId, { invoiceId: invoice.id, htAmount: discountedSub, tvaAmount: tax, date: invoice.issued, clientName: client.name });
+        showToast(`Facture #${invoice.id} émise`);
+      } catch (err) {
+        console.error('[recordInvoiceIssuanceEntry] failed:', err);
+        showToast(`Facture #${invoice.id} émise, mais l'écriture comptable de vente n'a pas pu être enregistrée. Signalez-le à votre comptable.`, true);
+      }
       setSendKind('send');
     } catch (err) {
       console.error('[handleIssue] failed:', err);
@@ -233,7 +256,9 @@ export default function InvoicePage() {
     }
   };
   const handleDownloadPDF = async () => {
+    if (linesLoading) return;
     if (linesError) { showToast('Les lignes de la facture n\'ont pas pu être chargées — rechargez la page avant de télécharger le PDF.', true); return; }
+    if (!paymentMethodsReady) { showToast(paymentMethodsNotReadyMessage(paymentMethodsStatus), true); return; }
     try {
       const blob = await renderInvoicePdf({
         invoice,
@@ -352,12 +377,13 @@ export default function InvoicePage() {
 
   const handleSaveEdit = async () => {
     if (!eClient) { showToast('Veuillez sélectionner un client.', true); return; }
-    if (eSubtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
+    const editLinesProblem = lineItemsError(eLines);
+    if (editLinesProblem) { showToast(editLinesProblem, true); return; }
     setSaving(true);
     try {
       await updateInvoice(orgId, invoice.id, { subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount });
       await deleteLineItems(orgId, { invoiceId: invoice.id });
-      await saveLineItems(orgId, eLines, { invoiceId: invoice.id });
+      await saveLineItems(orgId, filledLines(eLines), { invoiceId: invoice.id });
       const editedClientName = (clientsMap[eClient] ?? { name: eClient }).name;
       updateInvoiceIssuanceEntry(orgId, {
         invoiceId:  invoice.id,
@@ -369,7 +395,7 @@ export default function InvoicePage() {
       setInvoices(prev => prev.map(i => i.id === invoice.id
         ? { ...i, subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount }
         : i));
-      setLines(eLines);
+      setLines(filledLines(eLines));
       setEditOpen(false);
       showToast('Facture mise à jour');
     } catch (err) {
@@ -433,7 +459,7 @@ export default function InvoicePage() {
           </div>
         </div>
         <div className="topbar-actions">
-          <button className="btn" onClick={handleDownloadPDF}>
+          <button className="btn" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
           {canEdit && (
@@ -442,12 +468,12 @@ export default function InvoicePage() {
             </button>
           )}
           {invoice.status === 'draft' && (
-            <button className="btn btn-primary" onClick={handleIssue} disabled={busyAction !== null}>
+            <button className="btn btn-primary" onClick={handleIssue} disabled={busyAction !== null || linesLoading}>
               <Icon name="send" ariaHidden /> {busyAction === 'issue' ? 'Émission…' : 'Émettre la facture'}
             </button>
           )}
           {(isOverdue || invoice.status === 'pending') && (
-            <button className="btn btn-primary" onClick={() => setSendKind(isOverdue ? 'reminder' : 'send')}>
+            <button className="btn btn-primary" onClick={() => setSendKind(isOverdue ? 'reminder' : 'send')} disabled={!paymentMethodsReady}>
               <Icon name="send" ariaHidden /> {isOverdue ? 'Envoyer une relance' : 'Envoyer au client'}
             </button>
           )}
@@ -574,7 +600,11 @@ export default function InvoicePage() {
               <div>
                 <div className="pp-block-label">Modes de paiement</div>
                 <div className="pp-pay-methods">
-                  {paymentMethods.length > 0 ? paymentMethods.map(m => (
+                  {paymentMethodsStatus === 'loading' ? (
+                    <div className="pp-pm" style={{ color: 'var(--color-text-tertiary)' }}><span>Chargement…</span></div>
+                  ) : paymentMethodsStatus === 'error' ? (
+                    <div className="pp-pm" style={{ color: 'var(--color-text-tertiary)' }}><span>Modes de paiement indisponibles — rechargez la page.</span></div>
+                  ) : paymentMethods.length > 0 ? paymentMethods.map(m => (
                     <div className="pp-pm" key={m.label}>
                       <Icon name={m.label === 'Virement bancaire' ? 'building-bank' : m.label === 'Espèces' ? 'cash' : 'device-mobile'} ariaHidden />
                       <span>{m.label} — <b>{m.value}</b></span>
@@ -615,20 +645,20 @@ export default function InvoicePage() {
                   <button className="btn btn-primary btn-block" onClick={() => { setPayRef(''); setPayMethod('cash'); setTvaRetenue(0); setServiceWithholding(0); setPayAmount(balance); setPayDialog(true); }}>
                     <Icon name="cash" ariaHidden /> Enregistrer un paiement
                   </button>
-                  <button className="btn btn-block" onClick={() => setSendKind(isOverdue ? 'reminder' : 'send')}>
+                  <button className="btn btn-block" onClick={() => setSendKind(isOverdue ? 'reminder' : 'send')} disabled={!paymentMethodsReady}>
                     <Icon name="send" ariaHidden /> {isOverdue ? 'Envoyer une relance' : 'Envoyer au client'}
                   </button>
                 </>)}
                 {invoice.status === 'draft' && (
-                  <button className="btn btn-primary btn-block" onClick={handleIssue} disabled={busyAction !== null}>
+                  <button className="btn btn-primary btn-block" onClick={handleIssue} disabled={busyAction !== null || linesLoading}>
                     <Icon name="send" ariaHidden /> {busyAction === 'issue' ? 'Émission…' : 'Émettre la facture'}
                   </button>
                 )}
-                <button className="btn btn-block" onClick={handleDownloadPDF}>
+                <button className="btn btn-block" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
                 <div className="rail-divider" />
-                <button className="btn btn-block" onClick={handleDuplicate} disabled={busyAction !== null}>
+                <button className="btn btn-block" onClick={handleDuplicate} disabled={busyAction !== null || linesLoading}>
                   <Icon name="copy" ariaHidden /> {busyAction === 'duplicate' ? 'Duplication…' : 'Dupliquer'}
                 </button>
                 {invoice.status === 'draft' ? (
@@ -669,10 +699,10 @@ export default function InvoicePage() {
       </div>
     </div>
 
-    {sendKind && (() => {
+    {sendKind && paymentMethodsReady && (() => {
       const msg = invoiceMessage(sendKind, {
         invoiceId: invoice.id, clientName: client.name, orgName: orgSettings.name,
-        amountDue: amountDue || total, due: invoice.due, methods: paymentMethods,
+        amountDue, due: invoice.due, methods: paymentMethods,
         overdueDays: daysOverdue(invoice.due),
       });
       return (

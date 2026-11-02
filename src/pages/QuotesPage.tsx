@@ -11,12 +11,13 @@ import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { createQuote, removeQuote, nextQuoteId } from '@/lib/api/quotes';
 import { quoteMessage } from '@/lib/document-messages';
+import { createActivity } from '@/lib/api/activities';
 import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { contactValue } from '@/lib/share-links';
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
 import { saveLineItems, deleteLineItems, fetchLineItems } from '@/lib/api/line-items';
 import { fmt, fmtDate, newLineItem, clientInitials } from '@/data';
-import type { LineItem, QuoteStatus } from '@/lib/schemas';
+import type { Activity, LineItem, QuoteStatus } from '@/lib/schemas';
 
 type FilterKey = 'all' | QuoteStatus;
 
@@ -50,7 +51,7 @@ const TVA = 0.18;
 
 /** Rendered by SalesPage, which passes the Factures | Devis tab switcher. */
 export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
-  const { showToast, quotes, setQuotes, setInvoices, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const { showToast, quotes, setQuotes, setInvoices, setActivity, clientsMap, products, orgSettings, orgId, loading } = useApp();
   const [sendQuote, setSendQuote] = useState<{ id: string; kind: 'send' | 'reminder' } | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -646,7 +647,22 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
             phone={contactValue(cl?.phone)}
             subject={msg.subject}
             message={msg.message}
-            onSent={channel => { if (channel !== 'copy') setSendQuote(null); }}
+            onSent={channel => {
+              if (channel === 'copy') return;
+              // Opening the email app or WhatsApp doesn't mean the message went out
+              const via = channel === 'email' ? 'par email' : 'par WhatsApp';
+              const parts = sendQuote.kind === 'reminder'
+                ? [{ text: `Relance préparée ${via} pour le devis ` }, { text: q.id, bold: true as const }]
+                : [{ text: 'Devis ' }, { text: q.id, bold: true as const }, { text: ` préparé ${via} pour ` }, { text: clientName, bold: true as const }];
+              const entry: Activity = { kind: 'sent', parts, time: "À l'instant" };
+              setActivity(prev => [entry, ...prev]);
+              createActivity(orgId, { kind: 'sent', parts }).catch(err => {
+                console.error('[createActivity] failed:', err);
+                setActivity(prev => prev.filter(a => a !== entry));
+                showToast('L\'envoi n\'a pas pu être enregistré dans l\'historique.', true);
+              });
+              setSendQuote(null);
+            }}
             onClose={() => setSendQuote(null)}
           />
         );

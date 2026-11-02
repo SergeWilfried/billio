@@ -11,6 +11,8 @@ describe('invoiceMessage', () => {
     expect(m.message).toMatch(/150\s000 F CFA/);
     expect(m.message).toContain('15 novembre 2026');
     expect(m.message).toContain('Studio X');
+    // Email/WhatsApp hand-offs carry text only: never claim an attachment
+    expect(m.message).not.toContain('ci-joint');
     expect(m.message).not.toContain('Modes de paiement');
   });
 
@@ -30,6 +32,7 @@ describe('quoteMessage', () => {
   it('builds send and follow-up messages', () => {
     const opts = { quoteId: 'QUO-0002', clientName: 'Faso Energy', orgName: '', amount: 50000, validUntil: '2026-12-01' };
     expect(quoteMessage('send', opts).subject).toBe('Devis QUO-0002 — Devis');
+    expect(quoteMessage('send', opts).message).not.toContain('ci-joint');
     expect(quoteMessage('reminder', opts).message).toContain('valable jusqu\'au 1 décembre 2026');
   });
 });

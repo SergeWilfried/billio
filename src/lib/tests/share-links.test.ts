@@ -21,6 +21,8 @@ describe('whatsappUrl', () => {
   it('opens the contact picker without a usable number', () => {
     expect(whatsappUrl('—', 'Hi')).toBe('https://wa.me/?text=Hi');
     expect(whatsappUrl(undefined, 'a b')).toBe('https://wa.me/?text=a%20b');
+    // An incomplete local number must not become a link to someone else's number
+    expect(whatsappUrl('70 12 345', 'Hi')).toBe('https://wa.me/?text=Hi');
   });
 });
 

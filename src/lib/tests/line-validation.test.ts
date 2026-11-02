@@ -8,6 +8,11 @@ describe('filledLines', () => {
   it('drops untouched blank rows', () => {
     expect(filledLines([line('', 1, 0), line('Conseil', 1, 1000)]).map(l => l.desc)).toEqual(['Conseil']);
   });
+
+  it('keeps blank rows whose quantity was changed, so validation reports them', () => {
+    expect(filledLines([line('', 3, 0)])).toHaveLength(1);
+    expect(lineItemsError([line('Conseil', 1, 1000), line('', 3, 0)])).toBe('Chaque ligne doit avoir une description.');
+  });
 });
 
 describe('lineItemsError', () => {

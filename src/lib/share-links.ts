@@ -8,14 +8,15 @@ export function mailtoUrl(email: string, subject: string, body: string): string 
 }
 
 /**
- * wa.me link. Numbers without a country code get the default one (226 =
- * Burkina Faso); without a usable number WhatsApp opens its contact picker.
+ * wa.me link. A complete 8-digit local number gets the default country code
+ * (226 = Burkina Faso); longer numbers are taken to include their country code.
+ * Anything shorter isn't a usable number, so WhatsApp opens its contact picker.
  */
 export function whatsappUrl(phone: string | undefined, text: string, defaultCountryCode = '226'): string {
   let digits = (phone ?? '').replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
-  else if (digits.length > 0 && digits.length <= 8) digits = defaultCountryCode + digits;
-  const base = digits.length >= 8 ? `https://wa.me/${digits}` : 'https://wa.me/';
+  else if (digits.length === 8) digits = defaultCountryCode + digits;
+  const base = digits.length > 8 ? `https://wa.me/${digits}` : 'https://wa.me/';
   return `${base}?text=${encodeURIComponent(text)}`;
 }
 
