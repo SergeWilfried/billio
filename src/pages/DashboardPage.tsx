@@ -43,7 +43,7 @@ interface QATile {
 const ROLE_ACTIONS: Record<Role, QATile[]> = {
   admin: [
     { icon: 'file-plus', label: 'Nouvelle facture', sub: 'Envoyer rapidement', primary: true, path: '/invoices' },
-    { icon: 'user-plus', label: 'Ajouter un client', sub: 'Carnet d\'adresses', path: '/clients' },
+    { icon: 'user-plus', label: 'Ajouter un client', sub: 'Carnet d\'adresses', path: '/contacts' },
     { icon: 'chart-bar', label: 'Rapports', sub: 'Analyse des performances', path: '/reports' },
     { icon: 'credit-card', label: 'Paiements', sub: 'Suivi des encaissements', path: '/payments' },
   ],
@@ -56,8 +56,8 @@ const ROLE_ACTIONS: Record<Role, QATile[]> = {
   member: [
     { icon: 'file-plus', label: 'Nouvelle facture', sub: 'Envoyer rapidement', primary: true, path: '/invoices' },
     { icon: 'file-text', label: 'Nouveau devis', sub: 'Transformer en facture', path: '/invoices?tab=quotes' },
-    { icon: 'users', label: 'Mes clients', sub: 'Carnet d\'adresses', path: '/clients' },
-    { icon: 'bell', label: 'Rappels', sub: 'Suivi automatique', path: '/reminders' },
+    { icon: 'users', label: 'Mes clients', sub: 'Carnet d\'adresses', path: '/contacts' },
+    { icon: 'bell', label: 'Relances', sub: 'Factures à relancer', path: '/invoices' },
   ],
 };
 

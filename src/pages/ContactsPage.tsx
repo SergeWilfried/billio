@@ -773,7 +773,7 @@ export default function ContactsPage() {
                 </div>
               </div>
 
-              <div className="client-table" role="tabpanel" id={tabPanelId('contacts')} aria-labelledby={tabId('contacts', tab)}>
+              <div className="client-table" {...(ACCOUNTING_ENABLED ? { role: 'tabpanel', id: tabPanelId('contacts'), 'aria-labelledby': tabId('contacts', tab) } : {})}>
                 <div className="table-head client-grid-cols">
                   <div className="th">Client</div>
                   <div className="th">Localisation</div>
