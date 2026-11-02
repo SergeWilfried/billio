@@ -11,6 +11,7 @@ import { createInvoice, nextInvoiceId, removeInvoice } from '@/lib/api/invoices'
 import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { saveLineItems } from '@/lib/api/line-items';
 import { createActivity } from '@/lib/api/activities';
+import { filledLines, lineItemsError } from '@/lib/line-validation';
 import {
   STATUS_LABEL, fmt, fmtCompact, fmtDate, fmtDue, nextId, newLineItem, clientInitials,
 } from '@/data';
@@ -93,7 +94,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     const today = new Date().toISOString().slice(0, 10);
     const due = new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
     setFClient(''); setFDate(today); setFDue(due); setFSubject(''); setFNotes(''); setFDiscount(0);
-    setLineItems([newLineItem('', 1, 250_000), newLineItem('', 3, 75_000)]);
+    setLineItems([newLineItem()]);
     setShowPicker(false); setPickerQuery('');
     setPanelOpen(true);
   };
@@ -116,7 +117,9 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
   const submitInvoice = async (status: 'draft' | 'pending') => {
     if (submittingRef.current) return;
     if (!fClient)      { showToast('Veuillez sélectionner un client.', true); return; }
-    if (subtotal <= 0) { showToast('Ajoutez au moins une ligne de facturation.', true); return; }
+    const linesErr = lineItemsError(lineItems);
+    if (linesErr)      { showToast(linesErr, true); return; }
+    if (fDue < fDate)  { showToast('La date d\'échéance doit être postérieure à la date d\'émission.', true); return; }
     submittingRef.current = true;
     setSubmitting(true);
 
@@ -132,7 +135,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
       invoiceCreated = true;
       // Don't leave an invoice without lines behind if saving them fails
       try {
-        await saveLineItems(orgId, lineItems, { invoiceId: id });
+        await saveLineItems(orgId, filledLines(lineItems), { invoiceId: id });
       } catch (lineErr) {
         await removeInvoice(orgId, id).catch(e => console.error('[rollback] removeInvoice failed:', e));
         invoiceCreated = false;

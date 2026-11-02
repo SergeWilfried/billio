@@ -11,6 +11,7 @@ import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { createQuote, removeQuote, nextQuoteId } from '@/lib/api/quotes';
 import { quoteMessage } from '@/lib/document-messages';
+import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { contactValue } from '@/lib/share-links';
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
 import { saveLineItems, deleteLineItems, fetchLineItems } from '@/lib/api/line-items';
@@ -147,7 +148,9 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
   async function submitQuote(status: 'draft' | 'sent') {
     if (submittingRef.current) return;
     if (!fClient) { showToast('Sélectionnez un client', true); return; }
-    if (subtotal <= 0) { showToast('Ajoutez au moins un article', true); return; }
+    const linesErr = lineItemsError(lines);
+    if (linesErr) { showToast(linesErr, true); return; }
+    if (fValid < fDate) { showToast('La date de validité doit être postérieure à la date d\'émission.', true); return; }
     submittingRef.current = true;
     let id = '';
     let quoteCreated = false;
@@ -156,7 +159,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
       const payload = { id, subject: fSubject.trim() || 'Devis sans titre', client: fClient, issued: fDate, valid: fValid, amount: total, status };
       const created = await createQuote(orgId, payload);
       quoteCreated = true;
-      await saveLineItems(orgId, lines, { quoteId: id });
+      await saveLineItems(orgId, filledLines(lines), { quoteId: id });
       setQuotes(prev => prev.some(q => q.id === id) ? prev : [created, ...prev]);
       posthog.capture('quote_created', { item_count: lines.length, total_amount: total, status });
       closePanel();
