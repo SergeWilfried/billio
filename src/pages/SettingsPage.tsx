@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import posthog from 'posthog-js';
 import Icon from '@/components/Icon';
 import { useApp } from '@/context/AppContext';
@@ -1189,8 +1189,27 @@ function MemberDialog({ orgId, member, onClose, onUpdated, onRemoved }: {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const name = memberName(member);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Modal focus: start on the selected role, keep Tab inside, give focus back on close
   useEffect(() => {
-    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); };
+    const opener = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLElement>('input:checked, button:not([disabled])')?.focus();
+    return () => opener?.focus();
+  }, []);
+
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) { onClose(); return; }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled])',
+      )).filter(el => !(el instanceof HTMLInputElement && el.type === 'radio' && !el.checked));
+      if (focusable.length === 0) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
   }, [onClose, busy]);
@@ -1224,7 +1243,7 @@ function MemberDialog({ orgId, member, onClose, onUpdated, onRemoved }: {
 
   return (
     <div className="inv-overlay" onClick={() => { if (!busy) onClose(); }}>
-      <div className="inv-modal" role="dialog" aria-modal="true" aria-label={`Gérer ${name}`} onClick={e => e.stopPropagation()}>
+      <div ref={dialogRef} className="inv-modal" role="dialog" aria-modal="true" aria-label={`Gérer ${name}`} onClick={e => e.stopPropagation()}>
         <div className="inv-modal-head">
           <div className="inv-modal-title"><Icon name="user" size={16} ariaHidden /> {name}</div>
           <button className="btn btn-icon" onClick={onClose} disabled={busy} aria-label="Fermer">

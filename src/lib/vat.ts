@@ -21,3 +21,15 @@ export function splitTtc(ttc: number, applies: boolean): { ht: number; tva: numb
   const ht = Math.round(ttc / (1 + VAT_RATE));
   return { ht, tva: ttc - ht };
 }
+
+/**
+ * Whether a saved document included VAT, read from its stored total rather
+ * than the organisation's current regime (which may have changed since it was
+ * issued). Falls back to `fallback` when the total can't tell, e.g. an empty
+ * document.
+ */
+export function documentHasVat(storedTotal: number, ht: number, fallback: boolean): boolean {
+  const withVat = ht + vatOn(ht, true);
+  if (!(storedTotal > 0) || withVat === ht) return fallback;
+  return Math.abs(storedTotal - withVat) < Math.abs(storedTotal - ht);
+}

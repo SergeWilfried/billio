@@ -8,7 +8,7 @@ import { tabPanelId, tabId } from '@/lib/tab-ids';
 import { useApp } from '@/context/AppContext';
 import { settleInvoicePayment } from '@/lib/api/payments';
 import { fetchCreditNotes } from '@/lib/api/credit-notes';
-import { invoiceBalance } from '@/lib/invoice-status';
+import { invoiceBalance, todayISO } from '@/lib/invoice-status';
 import { csvBlob } from '@/lib/csv';
 import { confirmDiscard } from '@/lib/confirm-discard';
 import { downloadBlob } from '@/lib/download';
@@ -109,7 +109,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
     ]);
     downloadBlob(
       csvBlob(['Date', 'Facture', 'Client', 'Méthode', 'Référence', 'Montant (F CFA)', 'Statut'], rows),
-      `releve-paiements-${new Date().toISOString().slice(0, 10)}.csv`,
+      `releve-paiements-${todayISO()}.csv`,
     );
   }
 

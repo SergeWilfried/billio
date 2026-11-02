@@ -102,9 +102,12 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
   const tax             = vatOn(discountedSub, canInvoiceTVA);
   const total           = discountedSub + tax;
 
+  // Dates the panel opened with, so only a change counts as unsaved input
+  const panelDefaults = useRef({ date: '', due: '' });
   const openPanel = () => {
     const today = new Date().toISOString().slice(0, 10);
     const due = new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
+    panelDefaults.current = { date: today, due };
     setFClient(''); setFDate(today); setFDue(due); setFSubject(''); setFNotes(''); setFDiscount(0);
     setLineItems([newLineItem()]);
     setShowPicker(false); setPickerQuery('');
@@ -113,7 +116,8 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
   const closePanel = () => { setPanelOpen(false); setShowPicker(false); };
   // Scrim, ✕ and Annuler ask first when something was typed
   const requestClosePanel = () => {
-    const dirty = fClient !== '' || fSubject.trim() !== '' || fNotes.trim() !== '' || fDiscount !== 0 || filledLines(lineItems).length > 0;
+    const dirty = fClient !== '' || fSubject.trim() !== '' || fNotes.trim() !== '' || fDiscount !== 0 || filledLines(lineItems).length > 0
+      || fDate !== panelDefaults.current.date || fDue !== panelDefaults.current.due;
     if (confirmDiscard(dirty)) closePanel();
   };
 
@@ -135,6 +139,10 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     setDownloadingId(id);
     try {
       const lines = await fetchLineItems(orgId, { invoiceId: id });
+      if (lines.length === 0) {
+        showToast('Cette facture n\'a aucune ligne : ouvrez-la pour vérifier avant de télécharger le PDF.', true);
+        return;
+      }
       const client = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
       const blob = await renderInvoicePdf({
         invoice, lines, client, biz: orgSettings,

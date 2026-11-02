@@ -4,6 +4,8 @@
 --   * the caller must be an owner or admin of the organisation;
 --   * the owner can't be changed or removed, and nobody can change or remove
 --     themselves (so an organisation can't lose its last admin this way).
+-- Removing a member also cancels any pending invitation for their email, so
+-- an old invite link can't bring them back.
 
 create or replace function public.update_org_member_role(p_org_id uuid, p_user_id uuid, p_role text)
 returns void
@@ -37,6 +39,10 @@ begin
   end if;
 
   update org_members set role = p_role where org_id = p_org_id and user_id = p_user_id;
+  -- Removed by someone else in the meantime
+  if not found then
+    raise exception 'member not found' using errcode = 'P0002';
+  end if;
 end;
 $$;
 
@@ -68,6 +74,14 @@ begin
   end if;
 
   delete from org_members where org_id = p_org_id and user_id = p_user_id;
+  if not found then
+    raise exception 'member not found' using errcode = 'P0002';
+  end if;
+
+  delete from pending_invitations
+  where org_id = p_org_id
+    and status = 'pending'
+    and lower(email) = (select lower(email) from auth.users where id = p_user_id);
 end;
 $$;
 

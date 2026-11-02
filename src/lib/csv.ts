@@ -4,7 +4,10 @@
 export type CsvCell = string | number | null | undefined;
 
 function cell(v: CsvCell): string {
-  const s = v == null ? '' : String(v);
+  let s = v == null ? '' : String(v);
+  // Text starting with = + - @ (or a tab/CR) would run as a formula in Excel;
+  // a leading apostrophe makes it plain text. Numbers keep their sign.
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[";\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

@@ -20,6 +20,7 @@ import type { SupplierBill, PaymentMethod } from '@/lib/accounting-data';
 import { useSupplierBills } from '@/lib/accounting-hooks';
 import { ACCOUNTING_ENABLED } from '@/lib/features';
 import { csvBlob } from '@/lib/csv';
+import { todayISO } from '@/lib/invoice-status';
 import { downloadBlob } from '@/lib/download';
 import { VAT_LABEL, VAT_RATE } from '@/lib/vat';
 
@@ -411,7 +412,7 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
     const slug = supplier.name.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'fournisseur';
     downloadBlob(
       csvBlob(['Date', 'Pièce', 'Échéance', 'HT (F CFA)', 'TVA (F CFA)', 'TTC (F CFA)', 'Statut'], rows),
-      `releve-${slug}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `releve-${slug}-${todayISO()}.csv`,
     );
   }
 
@@ -1134,7 +1135,8 @@ export default function ContactsPage() {
       {/* ── Supplier drawers ─────────────────────────────────────────────── */}
       {selectedSupplier && (
         <SupplierDetailDrawer
-          supplier={selectedSupplier}
+          // The list's copy: marking a bill paid updates it, the captured one doesn't
+          supplier={supplierContacts.find(s => s.name === selectedSupplier.name) ?? selectedSupplier}
           onMarkPaid={markPaid}
           onNewBill={name => { setBillInitialSupplier(name); setSelectedSupplier(null); setShowBillForm(true); }}
           onClose={() => setSelectedSupplier(null)}

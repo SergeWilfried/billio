@@ -67,11 +67,24 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const pillRef = useRef<HTMLButtonElement>(null);
 
+  // Menu keyboard support: focus the first item on open, arrows move, Escape returns to the pill
   useEffect(() => {
     if (!menuOpen) return;
+    const items = () => Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    items()[0]?.focus();
     const onDown = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
-    const onKey  = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    const onKey  = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setMenuOpen(false); pillRef.current?.focus(); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const list = items();
+      if (list.length === 0) return;
+      e.preventDefault();
+      const i = list.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === 'ArrowDown' ? (i + 1) % list.length : (i - 1 + list.length) % list.length;
+      list[next].focus();
+    };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
@@ -166,6 +179,7 @@ export default function Sidebar({ onLogout }: { onLogout: () => void }) {
             </div>
           )}
           <button
+            ref={pillRef}
             type="button"
             className="user-pill"
             onClick={() => setMenuOpen(o => !o)}
