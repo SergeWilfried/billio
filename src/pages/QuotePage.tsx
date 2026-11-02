@@ -10,6 +10,7 @@ import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-i
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
 import { InvoicePDFDocument } from '@/components/InvoicePDF';
 import { downloadBlob } from '@/lib/download';
+import { usePaymentMethods } from '@/lib/use-payment-methods';
 import { fmt, fmtDateLong, newLineItem } from '@/data';
 import type { LineItem } from '@/lib/schemas';
 
@@ -33,6 +34,7 @@ export default function QuotePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { quotes, setQuotes, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const paymentMethods = usePaymentMethods();
   const [lines, setLines] = useState<LineItem[]>([]);
   const [converting, setConverting] = useState(false);
   const convertingRef = useRef(false);
@@ -187,6 +189,7 @@ export default function QuotePage() {
           title="Facture Proforma"
           clientLabel="Adressé à"
           paymentTerms={orgSettings.paymentTerms || 'Net 14 jours'}
+          paymentMethods={paymentMethods}
           deliveryTerms={orgSettings.deliveryTerms || 'À convenir'}
         />
       ).toBlob();

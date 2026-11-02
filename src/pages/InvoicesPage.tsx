@@ -107,18 +107,10 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
       ...li, [field]: field === 'desc' || field === 'unit' ? val : (parseFloat(val) || 0),
     }));
 
-  const sendReminder = async (e: React.MouseEvent, id: string) => {
+  // Sending happens from the invoice page's send dialog (email / WhatsApp)
+  const openSend = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const actEntry: Activity = { kind: 'sent', parts: [{ text: 'Relance envoyée pour ' }, { text: `#${id}`, bold: true }], time: "À l'instant" };
-    setActivity((prev: Activity[]) => [actEntry, ...prev]);
-    try {
-      await createActivity(orgId, { kind: actEntry.kind, parts: actEntry.parts });
-      showToast(`Relance envoyée pour #${id}`);
-    } catch (err) {
-      console.error('[sendReminder] error:', err);
-      setActivity((prev: Activity[]) => prev.filter(a => a !== actEntry));
-      showToast('Erreur lors de l\'envoi de la relance. Veuillez réessayer.', true);
-    }
+    navigate(`/invoices/${id}`, { state: { openSend: true } });
   };
 
   const submitInvoice = async (status: 'draft' | 'pending') => {
@@ -154,7 +146,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
       setInvoices(prev => [newInv, ...prev]);
 
       const actPayload = status === 'pending'
-        ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' envoyée à ' }, { text: cName, bold: true as const }] }
+        ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' émise pour ' }, { text: cName, bold: true as const }] }
         : { kind: 'viewed' as const, parts: [{ text: 'Brouillon ' }, { text: `#${id}`, bold: true as const }, { text: ' enregistré pour ' }, { text: cName, bold: true as const }] };
       const actEntry: Activity = { ...actPayload, time: "À l'instant" };
       setActivity((prev: Activity[]) => [actEntry, ...prev]);
@@ -162,7 +154,9 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
       createActivity(orgId, actPayload).catch(err => console.error('[createActivity] failed:', err));
 
       closePanel();
-      showToast(status === 'pending' ? `Facture #${id} envoyée à ${cName}` : `Brouillon #${id} enregistré`);
+      showToast(status === 'pending' ? `Facture #${id} émise` : `Brouillon #${id} enregistré`);
+      // Land on the new invoice with the send dialog open
+      if (status === 'pending') navigate(`/invoices/${id}`, { state: { openSend: true } });
 
       if (status === 'pending') {
         recordInvoiceIssuanceEntry(orgId, {
@@ -332,7 +326,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
                       </button>
                     )}
                     {(inv.status === 'overdue' || inv.status === 'pending') && (
-                      <button className="icon-btn" aria-label="Envoyer une relance" onClick={e => sendReminder(e, inv.id)}>
+                      <button className="icon-btn" aria-label={inv.status === 'overdue' ? 'Envoyer une relance' : 'Envoyer au client'} onClick={e => openSend(e, inv.id)}>
                         <Icon name="send" size={15} ariaHidden />
                       </button>
                     )}
@@ -498,7 +492,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
             {submitting ? 'Enregistrement…' : 'Enregistrer brouillon'}
           </button>
           <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting} onClick={() => submitInvoice('pending')}>
-            <Icon name="send" ariaHidden /> {submitting ? 'Envoi en cours…' : 'Envoyer la facture'}
+            <Icon name="send" ariaHidden /> {submitting ? 'Émission…' : 'Émettre la facture'}
           </button>
         </div>
       </div>
