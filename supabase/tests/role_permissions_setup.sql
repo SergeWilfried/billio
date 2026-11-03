@@ -65,6 +65,10 @@ create policy "members can manage own credit notes" on public.credit_notes for a
   using (org_id in (select org_id from org_members where user_id = auth.uid()));
 create policy "accounts: read standard" on public.accounts for select using (org_id is null or org_id in (select my_org_ids()));
 create policy "accounts: members insert custom" on public.accounts for insert with check (org_id is not null and org_id in (select my_org_ids()));
+create policy "accounts: admin update custom" on public.accounts for update using (org_id is not null and org_id in (select my_admin_org_ids()));
+create policy "accounts: admin delete custom" on public.accounts for delete using (org_id is not null and org_id in (select my_admin_org_ids()));
+create policy "fiscal_periods: admin close" on public.fiscal_periods for update using (org_id in (select my_admin_org_ids()));
+create policy "fiscal_periods: admin delete" on public.fiscal_periods for delete using (org_id in (select my_admin_org_ids()));
 create policy "fiscal_periods: members read" on public.fiscal_periods for select using (org_id in (select my_org_ids()));
 create policy "fiscal_periods: members insert" on public.fiscal_periods for insert with check (org_id in (select my_org_ids()));
 create policy "entry_lines: members read" on public.entry_lines for select using (org_id in (select my_org_ids()));
