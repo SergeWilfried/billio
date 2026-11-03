@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -164,6 +165,7 @@ function JournalLines({ lines }: { lines: SupplierBill['acctLines'] }) {
 }
 
 function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkPaid: (id: string) => void; onClose: () => void }) {
+  const { writable } = usePermissions();
   const av = supplierAvColor(bill.supplier);
   return (
     <DrawerPanel open onClose={onClose} title={
@@ -233,7 +235,7 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
         );
       })()}
 
-      {bill.status !== 'paid' && (
+      {writable && bill.status !== 'paid' && (
         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { onMarkPaid(bill.id); onClose(); }}>
           <Icon name="check" />Marquer comme payé · <span style={{ opacity: 0.8, fontSize: 12 }}>{PAYMENT_METHOD_LABELS[bill.paymentMethod]}</span>
         </button>
@@ -511,6 +513,7 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
+  const { writable, deletable } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   // Suppliers (and their bills) belong to the accounting module
   const [tab, setTab] = useState<Tab>(() =>
@@ -745,10 +748,10 @@ export default function ContactsPage() {
           </div>
           <div className="topbar-actions">
             <button className="btn"><Icon name="download" size={15} />Exporter</button>
-            {tab === 'clients'
+            {writable && (tab === 'clients'
               ? <button className="btn btn-primary" onClick={() => setClientPanel({ kind: 'new' })}><Icon name="user-plus" size={15} />Nouveau client</button>
               : <button className="btn btn-primary" onClick={() => setShowBillForm(true)}><Icon name="plus" size={15} />Nouvelle facture</button>
-            }
+            )}
           </div>
         </div>
 
@@ -1046,11 +1049,11 @@ export default function ContactsPage() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}><Icon name="edit" size={15} /> Modifier</button>
+                  {writable && <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}><Icon name="edit" size={15} /> Modifier</button>}
                   <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}><Icon name="plus" size={15} /> Nouvelle facture</button>
                 </div>
               )}
-              <button className="btn" style={{ width: '100%', justifyContent: 'center', color: '#A32D2D' }} onClick={() => handleDeleteClient(detailClient)}><Icon name="trash" size={15} /> Supprimer ce client</button>
+              {deletable && <button className="btn" style={{ width: '100%', justifyContent: 'center', color: '#A32D2D' }} onClick={() => handleDeleteClient(detailClient)}><Icon name="trash" size={15} /> Supprimer ce client</button>}
             </div>
           </>
         )}

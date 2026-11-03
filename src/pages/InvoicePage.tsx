@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { canWrite, canDelete } from '@/lib/permissions';
 import posthog from 'posthog-js';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Icon from '@/components/Icon';
@@ -68,7 +69,8 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const { invoices, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, orgId, loading, userRole } = useApp();
+  const writable = canWrite(userRole);
   const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
   const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [sendKind, setSendKind] = useState<'send' | 'reminder' | null>(null);
@@ -352,7 +354,7 @@ export default function InvoicePage() {
     cheque: 'Chèque',
   };
 
-  const canEdit = invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue';
+  const canEdit = writable && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
 
   const openEdit = () => {
     setEClient(invoice.client);
@@ -467,7 +469,7 @@ export default function InvoicePage() {
               <Icon name="edit" ariaHidden /> Modifier
             </button>
           )}
-          {invoice.status === 'draft' && (
+          {writable && invoice.status === 'draft' && (
             <button className="btn btn-primary" onClick={handleIssue} disabled={busyAction !== null || linesLoading}>
               <Icon name="send" ariaHidden /> {busyAction === 'issue' ? 'Émission…' : 'Émettre la facture'}
             </button>
@@ -641,7 +643,7 @@ export default function InvoicePage() {
                 </div>
               )}
               <div className="rail-actions">
-                {(isOverdue || invoice.status === 'pending') && (<>
+                {writable && (isOverdue || invoice.status === 'pending') && (<>
                   <button className="btn btn-primary btn-block" onClick={() => { setPayRef(''); setPayMethod('cash'); setTvaRetenue(0); setServiceWithholding(0); setPayAmount(balance); setPayDialog(true); }}>
                     <Icon name="cash" ariaHidden /> Enregistrer un paiement
                   </button>
@@ -649,7 +651,7 @@ export default function InvoicePage() {
                     <Icon name="send" ariaHidden /> {isOverdue ? 'Envoyer une relance' : 'Envoyer au client'}
                   </button>
                 </>)}
-                {invoice.status === 'draft' && (
+                {writable && invoice.status === 'draft' && (
                   <button className="btn btn-primary btn-block" onClick={handleIssue} disabled={busyAction !== null || linesLoading}>
                     <Icon name="send" ariaHidden /> {busyAction === 'issue' ? 'Émission…' : 'Émettre la facture'}
                   </button>
@@ -657,11 +659,12 @@ export default function InvoicePage() {
                 <button className="btn btn-block" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
+                {writable && (<>
                 <div className="rail-divider" />
                 <button className="btn btn-block" onClick={handleDuplicate} disabled={busyAction !== null || linesLoading}>
                   <Icon name="copy" ariaHidden /> {busyAction === 'duplicate' ? 'Duplication…' : 'Dupliquer'}
                 </button>
-                {invoice.status === 'draft' ? (
+                {invoice.status === 'draft' ? (canDelete(userRole) &&
                   <button className="btn btn-block btn-ghost btn-danger" onClick={handleDelete}>
                     <Icon name="trash" ariaHidden /> Supprimer la facture
                   </button>
@@ -670,6 +673,7 @@ export default function InvoicePage() {
                     <Icon name="file-minus" ariaHidden /> Émettre un avoir
                   </button>
                 )}
+                </>)}
               </div>
             </div>
 

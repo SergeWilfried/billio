@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -37,6 +38,7 @@ function daysDue(dueDate: string): number {
 }
 
 function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkPaid: (id: string) => void; onClose: () => void }) {
+  const { writable } = usePermissions();
   const av = supplierAvColor(bill.supplier);
   const days = daysDue(bill.dueDate);
   return (
@@ -98,7 +100,7 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
         ))}
       </div>
 
-      {bill.status !== 'paid' && (
+      {writable && bill.status !== 'paid' && (
         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { onMarkPaid(bill.id); onClose(); }}>
           <Icon name="check" />Marquer comme payé
         </button>
@@ -220,6 +222,7 @@ function NewBillDrawer({ onSave, onClose }: { onSave: (f: BillForm, htAmount: nu
 }
 
 export default function SuppliersPage() {
+  const { writable } = usePermissions();
   const { data: bills, loading, markPaid, createBill } = useSupplierBills();
   const [activeStatus, setActiveStatus] = useState('all');
   const [selected, setSelected] = useState<SupplierBill | null>(null);
@@ -273,7 +276,7 @@ export default function SuppliersPage() {
         </div>
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle facture</button>
+          {writable && <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle facture</button>}
         </div>
       </div>
 

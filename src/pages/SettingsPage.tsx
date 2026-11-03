@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { canManageOrg } from '@/lib/permissions';
+import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
 import Icon from '@/components/Icon';
 import { useApp } from '@/context/AppContext';
@@ -1110,8 +1112,8 @@ function InviteModal({ orgId, userId, onClose, onDone }: InviteModalProps) {
               </select>
               <div className="s-hint" style={{ marginTop: 6 }}>
                 {role === 'admin'      && 'Peut gérer les factures, les clients et inviter des membres.'}
-                {role === 'member'     && 'Peut créer et envoyer des factures.'}
-                {role === 'accountant' && 'Accès en lecture aux rapports et aux paiements.'}
+                {role === 'member'     && 'Peut créer et envoyer des factures, sans suppression.'}
+                {role === 'accountant' && 'Peut saisir les paiements et la comptabilité, sans suppression.'}
                 {role === 'observer'   && 'Accès en lecture seule à tout le workspace.'}
               </div>
             </div>
@@ -1173,7 +1175,8 @@ function InviteLinkRow({ invite, index, onRevoke }: InviteLinkRowProps) {
 const MEMBER_ROLES = [
   { value: 'admin',      label: 'Administrateur', hint: 'Accès complet, y compris l\'équipe et la facturation Billio.' },
   { value: 'accountant', label: 'Comptable',      hint: 'Factures, paiements et comptabilité.' },
-  { value: 'member',     label: 'Membre',         hint: 'Factures, devis et clients.' },
+  { value: 'member',     label: 'Membre',         hint: 'Factures, devis et clients. Pas de suppression.' },
+  { value: 'observer',   label: 'Observateur',    hint: 'Consultation seule, sans modification.' },
 ];
 
 function MemberDialog({ orgId, member, onClose, onUpdated, onRemoved }: {
@@ -1298,7 +1301,7 @@ function MemberDialog({ orgId, member, onClose, onUpdated, onRemoved }: {
 function TeamSection() {
   const { orgId, userId, userRole, showToast } = useApp();
   // Owners are 'admin' in the app; the database re-checks on every change
-  const canManage = userRole === 'admin';
+  const canManage = canManageOrg(userRole);
   const [managing, setManaging] = useState<TeamMember | null>(null);
 
   const [members,     setMembers]     = useState<TeamMember[]>([]);
@@ -1606,8 +1609,11 @@ function PlanSection() {
 }
 
 /* ─── Main component ────────────────────────────────────────────── */
+const ORG_TABS: SettingsTab[] = ['business', 'invoicing', 'payments', 'providers'];
+
 export default function SettingsPage() {
   const { showToast } = useApp();
+  const { managesOrg } = usePermissions();
   const [tab, setTab] = useState<SettingsTab>('profile');
   const onSave = () => showToast('Paramètres enregistrés');
 
@@ -1642,10 +1648,21 @@ export default function SettingsPage() {
           {/* Content */}
           <div className="s-col">
             {tab === 'profile'       && <ProfileSection />}
-            {tab === 'business'      && <BusinessSection />}
-            {tab === 'invoicing'     && <InvoicingSection />}
-            {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
-            {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
+            {ORG_TABS.includes(tab) && !managesOrg && (
+              <div className="s-card">
+                <div className="s-card-body" style={{ color: 'var(--color-text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Icon name="lock" size={16} ariaHidden />
+                  Seuls les administrateurs peuvent modifier ces paramètres.
+                </div>
+              </div>
+            )}
+            {/* Read-only for non-admins: the database only lets owners and admins change the organisation */}
+            <fieldset disabled={!managesOrg} style={{ border: 0, margin: 0, padding: 0, minWidth: 0, display: 'contents' }}>
+              {tab === 'business'      && <BusinessSection />}
+              {tab === 'invoicing'     && <InvoicingSection />}
+              {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
+              {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
+            </fieldset>
             {tab === 'team'          && <TeamSection />}
             {tab === 'plan'          && <PlanSection />}
             {(tab === 'reminders' || tab === 'notifications') && (
