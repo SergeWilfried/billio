@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -221,6 +222,7 @@ function NewAccountModal({ classes, onSave, onClose }: { classes: Record<number,
 }
 
 export default function ChartOfAccountsPage() {
+  const { writable } = usePermissions();
   const { data, loading, addAccount } = useChartOfAccounts();
   const [activeClass, setActiveClass] = useState<string>('all');
   const [query, setQuery] = useState('');
@@ -295,7 +297,7 @@ export default function ChartOfAccountsPage() {
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
           <button className="btn"><Icon name="download" />Importer</button>
-          <button className="btn btn-primary" onClick={() => setShowNewAccount(true)}><Icon name="plus" />Nouveau compte</button>
+          {writable && <button className="btn btn-primary" onClick={() => setShowNewAccount(true)}><Icon name="plus" />Nouveau compte</button>}
         </div>
       </div>
 

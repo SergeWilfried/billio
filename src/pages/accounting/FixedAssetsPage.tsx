@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -157,6 +158,7 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
 }
 
 export default function FixedAssetsPage() {
+  const { writable } = usePermissions();
   const { data: assets, loading, createAsset } = useFixedAssets();
   const [selected, setSelected] = useState<FixedAsset | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -194,7 +196,7 @@ export default function FixedAssetsPage() {
         </div>
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle immobilisation</button>
+          {writable && <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle immobilisation</button>}
         </div>
       </div>
 

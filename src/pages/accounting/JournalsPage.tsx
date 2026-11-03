@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -36,6 +37,7 @@ function EntryDrawer({
   const j = journals[entry.journal];
   const total = entryTotal(entry);
   const balanced = isBalanced(entry);
+  const { postable } = usePermissions();
   return (
     <DrawerPanel open onClose={onClose} title={entry.label} subtitle={`${entry.id} · ${entry.date}`}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
@@ -66,7 +68,7 @@ function EntryDrawer({
         {balanced ? `Écriture équilibrée · ${fmt(total)} F CFA` : 'Écriture déséquilibrée'}
       </div>
 
-      {!entry.posted && (
+      {postable && !entry.posted && (
         <button
           className="btn btn-primary"
           style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}
@@ -286,6 +288,7 @@ function Composer({
 }
 
 export default function JournalsPage() {
+  const { writable } = usePermissions();
   const { data, loading, postEntry, saveEntry } = useJournalsData(true);
   const [activeJournal, setActiveJournal] = useState('all');
   const [selected, setSelected] = useState<JournalEntry | null>(null);
@@ -324,7 +327,7 @@ export default function JournalsPage() {
         <div className="topbar-actions">
           <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
           <button className="btn"><Icon name="download" />Exporter</button>
-          <button className="btn btn-primary" onClick={() => setShowComposer(true)}><Icon name="plus" />Nouvelle écriture</button>
+          {writable && <button className="btn btn-primary" onClick={() => setShowComposer(true)}><Icon name="plus" />Nouvelle écriture</button>}
         </div>
       </div>
 
