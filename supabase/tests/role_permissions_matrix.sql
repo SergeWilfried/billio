@@ -34,6 +34,10 @@ begin
     expected := expected || jsonb_build_object(t, to_jsonb(standard));
   end loop;
   expected := expected
+    -- accounting: owner/admin also update and delete (live admin policies)
+    || jsonb_build_object('accounts', to_jsonb(array['YYYY','YYYY','YYnn','YYnn','Ynnn','nnnn']))
+    || jsonb_build_object('fiscal_periods', to_jsonb(array['YYYY','YYYY','YYnn','YYnn','Ynnn','nnnn']))
+    || jsonb_build_object('entry_lines', to_jsonb(standard))
     || jsonb_build_object('line_items', to_jsonb(array['YYYY','YYYY','YYYY','YYYY','Ynnn','nnnn']))
     || jsonb_build_object('activities', to_jsonb(array['YYnn','YYnn','YYnn','YYnn','Ynnn','nnnn']));
 
@@ -58,11 +62,12 @@ begin
     got := pg_temp.try(uids[i], format('update public.journal_entries set name = %L where id = %L', 'edited', row_id))
         || pg_temp.try(uids[i], format('update public.journal_entries set posted = true where id = %L', row_id));
     insert into public.journal_entries (org_id, name, posted) values (org, 'posted', true) returning id into row_id;
-    got := got || pg_temp.try(uids[i], format('update public.journal_entries set posted = false where id = %L', row_id));
-    want := (array['YYY','YYY','YYY','Ynn','nnn','nnn'])[i];
+    got := got || pg_temp.try(uids[i], format('update public.journal_entries set posted = false where id = %L', row_id))
+        || pg_temp.try(uids[i], format('insert into public.journal_entries (org_id, name, posted) values (%L, %L, true)', org, 'new-posted'));
+    want := (array['YYYn','YYYn','YYYn','Ynnn','nnnn','nnnn'])[i];
     if got <> want then
       failures := failures + 1;
-      raise warning 'journal_entries as %: got % want % (edit draft/post/un-post)', users[i], got, want;
+      raise warning 'journal_entries as %: got % want % (edit draft/post/un-post/insert posted)', users[i], got, want;
     end if;
   end loop;
 
