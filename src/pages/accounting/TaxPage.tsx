@@ -8,6 +8,7 @@ import { useTaxData } from '@/lib/accounting-hooks';
 import { useApp } from '@/context/AppContext';
 import { calculateTVA, calculateIS, isRegimeCaducite, isFirstFiscalYear } from '@/lib/tax-bf';
 import type { Regime } from '@/lib/tax-bf';
+import { exerciseYear, monthLabel } from '@/lib/period';
 
 // ─── Regime metadata ─────────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ export default function TaxPage() {
 
   const { regime, meta } = orgRegimeToMeta(orgSettings.taxRegime);
   const creationDate = orgSettings.businessCreationDate || undefined;
-  const EXERCISE_YEAR = 2026;
+  const EXERCISE_YEAR = exerciseYear();
   const firstYear    = isFirstFiscalYear(creationDate, EXERCISE_YEAR);
   const { canInvoiceTVA, declarations } = meta;
 
@@ -289,12 +290,12 @@ export default function TaxPage() {
             )}
           </div>
           <div className="page-sub">
-            Obligations fiscales · Juin 2026
+            Obligations fiscales · {monthLabel()}
             {declarations && <> · Déclarations <strong>{declarations === 'monthly' ? 'mensuelles' : 'trimestrielles'}</strong></>}
           </div>
         </div>
         <div className="topbar-actions">
-          <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
+          <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
           <button className="btn"><Icon name="download" />Exporter déclaration</button>
         </div>
       </div>

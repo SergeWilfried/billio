@@ -3,6 +3,7 @@ import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { fmt } from '@/lib/accounting-data';
 import { usePeriodClosing, useBalanceFns } from '@/lib/accounting-hooks';
+import { currentMonth, exerciseYear, monthEndLabel, monthLabel } from '@/lib/period';
 
 const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
 
@@ -62,8 +63,8 @@ function ProgressRing({ pct }: { pct: number }) {
   );
 }
 
-// The page is scoped to June 2026 (month 6)
-const TARGET_MONTH = 6;
+// The month being closed: the current one
+const TARGET_MONTH = currentMonth();
 
 export default function PeriodClosingPage() {
   const { data, loading, closePeriod } = usePeriodClosing();
@@ -124,12 +125,12 @@ export default function PeriodClosingPage() {
             <Icon name="lock" size={13} /> Accounting
           </div>
           <div className="page-title">Clôture de période</div>
-          <div className="page-sub">Clôture · exercice 2026 · arrêté au 30 juin</div>
+          <div className="page-sub">Clôture · exercice {exerciseYear()} · arrêté au {monthEndLabel()}</div>
         </div>
         <div className="topbar-actions">
           <span className="period-pill">
             <span className="dot" style={closed ? { background: '#2E7D32' } : {}} />
-            {closed ? 'Exercice 2026 · juin clôturé' : 'Exercice 2026 · ouvert'}
+            {closed ? `Exercice ${exerciseYear()} · ${monthLabel().toLowerCase()} clôturé` : `Exercice ${exerciseYear()} · ouvert`}
           </span>
           <button
             className="btn"
@@ -151,7 +152,7 @@ export default function PeriodClosingPage() {
         <div style={{ ...CARD, marginBottom: 16 }}>
           <div style={{ padding: '16px 20px 13px', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Périodes · exercice 2026</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Périodes · exercice {exerciseYear()}</div>
               <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>Verrouillez une période pour figer ses écritures</div>
             </div>
           </div>
@@ -169,7 +170,7 @@ export default function PeriodClosingPage() {
           {/* Checklist */}
           <div style={CARD}>
             <div style={{ padding: '16px 20px 13px', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Liste de contrôle — juin 2026</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Liste de contrôle — {monthLabel().toLowerCase()}</div>
               <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>Complétez chaque étape avant de clôturer la période</div>
             </div>
             <div style={{ padding: '8px 20px 18px' }}>
@@ -259,7 +260,7 @@ export default function PeriodClosingPage() {
                   <div style={{ display: 'flex', gap: 11, padding: '13px 15px', background: '#E7F3E2', border: '0.5px solid #A5D6A7', borderRadius: 'var(--border-radius-md)', marginTop: 14 }}>
                     <div style={{ color: '#2E7D32', flexShrink: 0, marginTop: 1 }}><Icon name="circle-check" size={17} /></div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#1B5E20' }}>
-                      Juin 2026 clôturé · écritures figées · à-nouveaux reportés
+                      {monthLabel()} clôturé · écritures figées · à-nouveaux reportés
                     </div>
                   </div>
                 )}

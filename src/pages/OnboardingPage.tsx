@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useApp } from '@/context/AppContext';
 import { nextClientCode } from '@/lib/api/clients';
 import './OnboardingPage.css';
+import { fmtDateLong } from '@/data';
 
 /* ── types ── */
 interface TeamInvite { id: string; email: string; role: string }
@@ -732,7 +733,7 @@ export default function OnboardingPage() {
                     </div>
                     <div>
                       <div className="ob-mini-label">Conditions</div>
-                      <div className="ob-mini-val">{terms}<span className="dim"><br />Échéance 20 juin 2026</span></div>
+                      <div className="ob-mini-val">{terms}<span className="dim"><br />Échéance {fmtDateLong(new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10))}</span></div>
                     </div>
                   </div>
                   <div className="ob-paper-items">

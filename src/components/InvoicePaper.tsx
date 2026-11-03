@@ -1,5 +1,6 @@
 import { fmt } from '@/data';
 import { getFiscalIdLabel } from '@/lib/ohada';
+import { VAT_RATE } from '@/lib/vat';
 
 export type PaperLayout   = 'classic' | 'band' | 'minimal' | 'sidebar' | 'receipt';
 export type PaperDensity  = 'compact' | 'cozy' | 'spacious';
@@ -51,14 +52,16 @@ const MOCK_BIZ: BizInfo = {
 };
 
 const CLI   = { name: 'TechKonsult', city: 'Ouagadougou, Burkina Faso', ifu: '00067890 C', rccm: 'BF-OUA-2020-B-5678', taxRegime: 'RSI', fiscalDivision: 'DCI Ouaga III' };
-const INV   = { id: 'INV-0041', issued: '7 juin 2026', due: '21 juin 2026', subject: 'Refonte web — phase 2' };
+// Sample invoice for template previews, dated today with a 14-day term
+const longDate = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+const INV   = { id: 'INV-0041', issued: longDate(new Date()), due: longDate(new Date(Date.now() + 14 * 86_400_000)), subject: 'Refonte web — phase 2' };
 const LINES = [
   { desc: 'UI/UX design — phase 2', note: 'Wireframes, hi-fi screens', qty: 1, price: 300_000 },
   { desc: 'Développement front-end', note: 'Build responsive, composants', qty: 8, price: 35_000 },
   { desc: 'AQ & livraison', note: 'Tests, déploiement', qty: 1, price: 80_000 },
 ];
 const SUB   = LINES.reduce((s, l) => s + l.qty * l.price, 0);
-const TAX   = Math.round(SUB * 0.18);
+const TAX   = Math.round(SUB * VAT_RATE);
 const TOTAL = SUB + TAX;
 
 function bizInitials(name: string) {

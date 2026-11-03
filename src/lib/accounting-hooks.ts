@@ -36,9 +36,11 @@ import {
 import type {
   AccountClass, Account, Journal, JournalEntry, FixedAsset, SupplierBill,
 } from '@/lib/accounting-data';
+import { exerciseYear } from '@/lib/period';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
-const EXERCISE_YEAR = 2026;
+// OHADA exercises follow the calendar year
+const EXERCISE_YEAR = exerciseYear();
 
 // ─── Shared helper ───────────────────────────────────────────────────────────
 
