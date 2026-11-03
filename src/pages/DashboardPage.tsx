@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { QAIllustration } from '@/components/QAIllustrations';
@@ -10,6 +10,9 @@ import { fmt, fmtCompact, fmtDate, fmtDue, clientInitials } from '@/data';
 import type { ActivityPart } from '@/data';
 import { ACCOUNTING_ENABLED } from '@/lib/features';
 import { dashboardMetrics } from '@/lib/dashboard-metrics';
+import { fetchCreditNotes } from '@/lib/api/credit-notes';
+import { todayISO } from '@/lib/invoice-status';
+import type { CreditNote } from '@/lib/schemas';
 
 function ActivityLine({ parts }: { parts: ActivityPart[] }) {
   return (
@@ -63,7 +66,7 @@ const ROLE_ACTIONS: Record<Role, QATile[]> = {
 };
 
 export default function DashboardPage() {
-  const { invoices, payments, activity, clientsMap, loading, userRole } = useApp();
+  const { invoices, payments, activity, clientsMap, loading, userRole, orgId } = useApp();
   const navigate = useNavigate();
   const role = userRole as Role;
   // Accountants get the billing shortcuts while the accounting pages are switched off
@@ -71,7 +74,13 @@ export default function DashboardPage() {
 
   const [showAllActivity, setShowAllActivity] = useState(false);
 
-  const metrics = useMemo(() => dashboardMetrics(invoices, payments), [invoices, payments]);
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  useEffect(() => {
+    if (orgId) fetchCreditNotes(orgId).then(setCreditNotes).catch(err => console.error('[fetchCreditNotes]', err));
+  }, [orgId]);
+  // Keyed on the date too, so a dashboard left open past midnight recomputes
+  const today = todayISO();
+  const metrics = useMemo(() => dashboardMetrics(invoices, payments, creditNotes, today), [invoices, payments, creditNotes, today]);
 
   if (loading) return <PageSkeleton title="Tableau de bord" variant="dashboard" />;
 
@@ -104,6 +113,8 @@ export default function DashboardPage() {
             <div className="metric-change">
               {metrics.monthOverMonthPct === null
                 ? <span className="neutral">{fmtCompact(metrics.invoicedThisMonth)} F CFA ce mois-ci</span>
+                : metrics.monthOverMonthPct === 0
+                ? <span className="neutral">Stable vs mois dernier</span>
                 : <span className={metrics.monthOverMonthPct >= 0 ? 'up' : 'dn'}>
                     <Icon name={metrics.monthOverMonthPct >= 0 ? 'trending-up' : 'trending-down'} size={14} ariaHidden />
                     {metrics.monthOverMonthPct >= 0 ? '+' : '−'}{Math.abs(metrics.monthOverMonthPct)} % vs mois dernier
@@ -140,7 +151,7 @@ export default function DashboardPage() {
             </div>
             <div className="metric-change">
               <span className="neutral">
-                {metrics.settledCount === 0 ? 'Aucune facture soldée' : `Sur ${metrics.settledCount} facture${metrics.settledCount > 1 ? 's' : ''} soldée${metrics.settledCount > 1 ? 's' : ''}`}
+                {metrics.settledCount === 0 ? 'Pas encore de paiement à mesurer' : `Sur ${metrics.settledCount} facture${metrics.settledCount > 1 ? 's' : ''} soldée${metrics.settledCount > 1 ? 's' : ''}`}
               </span>
             </div>
           </div>

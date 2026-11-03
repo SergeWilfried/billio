@@ -1,7 +1,7 @@
 // Dashboard figures computed from the organisation's own invoices and
 // payments (no hard-coded trends).
 
-import type { Invoice, Payment } from '@/lib/schemas';
+import type { CreditNote, Invoice, Payment } from '@/lib/schemas';
 import { invoiceBalance, todayISO } from '@/lib/invoice-status';
 
 export interface DashboardMetrics {
@@ -22,7 +22,12 @@ export interface DashboardMetrics {
 const DAY = 86_400_000;
 const monthKey = (iso: string) => iso.slice(0, 7);
 
-export function dashboardMetrics(invoices: Invoice[], payments: Payment[], today: string = todayISO()): DashboardMetrics {
+export function dashboardMetrics(
+  invoices: Invoice[],
+  payments: Payment[],
+  creditNotes: Pick<CreditNote, 'invoiceId' | 'amount'>[] = [],
+  today: string = todayISO(),
+): DashboardMetrics {
   const issued = invoices.filter(i => i.status !== 'draft');
   const totalInvoiced = issued.reduce((s, i) => s + i.amount, 0);
 
@@ -37,7 +42,7 @@ export function dashboardMetrics(invoices: Invoice[], payments: Payment[], today
     : null;
 
   const open = invoices.filter(i => i.status === 'pending' || i.status === 'overdue');
-  const outstanding = open.reduce((s, i) => s + invoiceBalance(i, payments).balance, 0);
+  const outstanding = open.reduce((s, i) => s + invoiceBalance(i, payments, creditNotes).balance, 0);
   const overdueCount = invoices.filter(i => i.status === 'overdue').length;
 
   const collected = payments.filter(p => p.status === 'completed').reduce((s, p) => s + p.amount, 0);

@@ -63,10 +63,11 @@ function ProgressRing({ pct }: { pct: number }) {
   );
 }
 
-// The month being closed: the current one
-const TARGET_MONTH = currentMonth();
 
 export default function PeriodClosingPage() {
+  // The month being closed: the current one, read each render so a tab left
+  // open past month-end doesn't close the previous month
+  const TARGET_MONTH = currentMonth();
   const { data, loading, closePeriod } = usePeriodClosing();
   const [checks, setChecks] = useState(INITIAL_CHECKS.map(c => ({ ...c })));
   const [closing, setClosing] = useState(false);

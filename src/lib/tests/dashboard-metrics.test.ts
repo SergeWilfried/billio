@@ -15,7 +15,7 @@ describe('dashboardMetrics', () => {
     inv('D', '2026-11-02', 999_999, 'draft'),
   ];
   const payments = [pay('A', '2026-10-15', 100_000), pay('B', '2026-11-02', 40_000)];
-  const m = dashboardMetrics(invoices, payments, '2026-11-03');
+  const m = dashboardMetrics(invoices, payments, [], '2026-11-03');
 
   it('ignores drafts and compares this month with last month', () => {
     expect(m.totalInvoiced).toBe(300_000);
@@ -29,13 +29,18 @@ describe('dashboardMetrics', () => {
     expect(m.overdueCount).toBe(1);
   });
 
+  it('subtracts credit notes from what is still owed', () => {
+    const credited = dashboardMetrics(invoices, payments, [{ invoiceId: 'C', amount: 20_000 }], '2026-11-03');
+    expect(credited.outstanding).toBe(140_000);
+  });
+
   it('averages days from issue to settlement', () => {
     expect(m.avgDaysToPay).toBe(10);
     expect(m.settledCount).toBe(1);
   });
 
   it('has no trend or delay without history', () => {
-    const empty = dashboardMetrics([inv('B', '2026-11-01', 1, 'pending')], [], '2026-11-03');
+    const empty = dashboardMetrics([inv('B', '2026-11-01', 1, 'pending')], [], [], '2026-11-03');
     expect(empty.monthOverMonthPct).toBeNull();
     expect(empty.avgDaysToPay).toBeNull();
   });
