@@ -66,6 +66,19 @@ begin
     end if;
   end loop;
 
+  -- update_org_member_role: owner/admin manage others, never themselves or the owner
+  got := pg_temp.try(uids[2], format('select public.update_org_member_role(%L, %L, %L)', org, uids[4], 'observer'))  -- admin demotes member
+      || pg_temp.try(uids[2], format('select public.update_org_member_role(%L, %L, %L)', org, uids[4], 'member'))    -- and restores them
+      || pg_temp.try(uids[4], format('select public.update_org_member_role(%L, %L, %L)', org, uids[3], 'observer'))  -- member can't manage
+      || pg_temp.try(uids[2], format('select public.update_org_member_role(%L, %L, %L)', org, uids[2], 'member'))    -- nor change themselves
+      || pg_temp.try(uids[2], format('select public.update_org_member_role(%L, %L, %L)', org, uids[1], 'member'))    -- nor the owner
+      || pg_temp.try(uids[1], format('select public.update_org_member_role(%L, %L, null)', org, uids[2]))           -- NULL role rejected
+      || pg_temp.try(uids[6], format('select public.update_org_member_role(%L, %L, %L)', org, uids[4], 'observer')); -- other org
+  if got <> 'YYnnnnn' then
+    failures := failures + 1;
+    raise warning 'update_org_member_role: got % want YYnnnnn', got;
+  end if;
+
   if failures > 0 then
     raise exception '% permission cell(s) differ from the expected matrix', failures;
   end if;

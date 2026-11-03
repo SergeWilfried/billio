@@ -1629,7 +1629,7 @@ export default function SettingsPage() {
           <div className="page-title">Paramètres</div>
           <div className="page-sub">Gérez vos préférences de workspace et de facturation</div>
         </div>
-        <button className="btn btn-primary" onClick={onSave}>
+        <button className="btn btn-primary" onClick={onSave} disabled={ORG_TABS.includes(tab) && !managesOrg}>
           <Icon name="check" size={15} /> Enregistrer
         </button>
       </div>
