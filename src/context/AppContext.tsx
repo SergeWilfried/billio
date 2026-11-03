@@ -296,7 +296,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user) {
-        if (bootedUserRef.current === session.user.id) return;
+        if (bootedUserRef.current === session.user.id) {
+          // Same user (supabase-js re-emits SIGNED_IN on refocus): pick up a role changed meanwhile
+          void supabase.from('org_members').select('role').eq('user_id', session.user.id).limit(1).maybeSingle()
+            .then(({ data, error }) => { if (!error && data) setUserRole(toUserRole(data.role as string)); });
+          return;
+        }
         bootedUserRef.current = session.user.id;
         boot(session.user);
       }
@@ -323,6 +328,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setOrgId('');
         setUserLabel('');
         setUserInitials('??');
+        setUserRole('observer');
         setOrgSettings(EMPTY_ORG);
         setNeedsOnboarding(false);
         setInvoices([]);

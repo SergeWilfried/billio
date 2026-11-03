@@ -149,7 +149,7 @@ declare
   v_caller_role text;
   v_target_role text;
 begin
-  if p_role not in ('admin', 'accountant', 'member', 'observer') then
+  if p_role is null or p_role not in ('admin', 'accountant', 'member', 'observer') then
     raise exception 'invalid role %', p_role using errcode = '22023';
   end if;
 

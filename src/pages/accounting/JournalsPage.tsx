@@ -37,6 +37,7 @@ function EntryDrawer({
   const j = journals[entry.journal];
   const total = entryTotal(entry);
   const balanced = isBalanced(entry);
+  const { postable } = usePermissions();
   return (
     <DrawerPanel open onClose={onClose} title={entry.label} subtitle={`${entry.id} · ${entry.date}`}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
@@ -67,7 +68,7 @@ function EntryDrawer({
         {balanced ? `Écriture équilibrée · ${fmt(total)} F CFA` : 'Écriture déséquilibrée'}
       </div>
 
-      {!entry.posted && (
+      {postable && !entry.posted && (
         <button
           className="btn btn-primary"
           style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}

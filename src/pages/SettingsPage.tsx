@@ -1138,7 +1138,8 @@ function InviteModal({ orgId, userId, onClose, onDone }: InviteModalProps) {
 interface InviteLinkRowProps {
   invite:    PendingInvite;
   index:     number;
-  onRevoke:  (id: string) => void;
+  /** Omitted for users who can't manage the team: no revoke button */
+  onRevoke?: (id: string) => void;
 }
 
 function InviteLinkRow({ invite, index, onRevoke }: InviteLinkRowProps) {
@@ -1164,9 +1165,11 @@ function InviteLinkRow({ invite, index, onRevoke }: InviteLinkRowProps) {
       <button className={`btn btn-sm${copied ? ' btn-copied' : ''}`} onClick={copy}>
         {copied ? <><Icon name="check" size={13} /> Copié</> : <><Icon name="link" size={13} /> Copier</>}
       </button>
-      <button className="icon-btn" title="Révoquer l'invitation" onClick={() => onRevoke(invite.id)}>
-        <Icon name="trash" size={15} />
-      </button>
+      {onRevoke && (
+        <button className="icon-btn" title="Révoquer l'invitation" onClick={() => onRevoke(invite.id)}>
+          <Icon name="trash" size={15} />
+        </button>
+      )}
     </div>
   );
 }
@@ -1360,9 +1363,11 @@ function TeamSection() {
             <div className="s-card-title">Membres de l'équipe</div>
             <div className="s-card-desc">Personnes ayant accès à ce workspace Billio.</div>
           </div>
-          <button className="btn btn-sm btn-primary" onClick={() => setShowInvite(true)}>
-            <Icon name="user-plus" size={14} /> Inviter
-          </button>
+          {canManage && (
+            <button className="btn btn-sm btn-primary" onClick={() => setShowInvite(true)}>
+              <Icon name="user-plus" size={14} /> Inviter
+            </button>
+          )}
         </div>
         <div className="s-card-body">
           {loading && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13, padding: '8px 0' }}>Chargement…</div>}
@@ -1410,11 +1415,11 @@ function TeamSection() {
                 <div className="inv-empty">
                   <Icon name="user-plus" size={22} />
                   <div className="inv-empty-title">Aucune invitation en attente</div>
-                  <div className="inv-empty-sub">Cliquez sur <b>Inviter</b> pour générer un lien de rejoindre.</div>
+                  {canManage && <div className="inv-empty-sub">Cliquez sur <b>Inviter</b> pour générer un lien de rejoindre.</div>}
                 </div>
               )
               : pending.map((p, i) => (
-                <InviteLinkRow key={p.id} invite={p} index={i} onRevoke={revokeInvite} />
+                <InviteLinkRow key={p.id} invite={p} index={i} onRevoke={canManage ? revokeInvite : undefined} />
               ))
           }
         </div>

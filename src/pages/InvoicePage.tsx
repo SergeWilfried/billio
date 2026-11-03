@@ -474,7 +474,7 @@ export default function InvoicePage() {
               <Icon name="send" ariaHidden /> {busyAction === 'issue' ? 'Émission…' : 'Émettre la facture'}
             </button>
           )}
-          {(isOverdue || invoice.status === 'pending') && (
+          {writable && (isOverdue || invoice.status === 'pending') && (
             <button className="btn btn-primary" onClick={() => setSendKind(isOverdue ? 'reminder' : 'send')} disabled={!paymentMethodsReady}>
               <Icon name="send" ariaHidden /> {isOverdue ? 'Envoyer une relance' : 'Envoyer au client'}
             </button>

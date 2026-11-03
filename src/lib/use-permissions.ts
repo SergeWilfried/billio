@@ -1,5 +1,5 @@
 import { useApp } from '@/context/AppContext';
-import { canDelete, canManageOrg, canWrite } from '@/lib/permissions';
+import { canDelete, canManageOrg, canPost, canWrite } from '@/lib/permissions';
 
 /** The current user's permissions (see src/lib/permissions.ts). */
 export function usePermissions() {
@@ -7,6 +7,7 @@ export function usePermissions() {
   return {
     writable:  canWrite(userRole),
     deletable: canDelete(userRole),
+    postable:  canPost(userRole),
     managesOrg: canManageOrg(userRole),
   };
 }

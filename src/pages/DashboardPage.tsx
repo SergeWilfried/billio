@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { UserRole } from '@/lib/permissions';
+import { canWrite, type UserRole } from '@/lib/permissions';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { QAIllustration } from '@/components/QAIllustrations';
@@ -104,9 +104,11 @@ export default function DashboardPage() {
           <div className="page-sub">Aperçu de {monthLabel}</div>
         </div>
         <div className="topbar-actions">
-          <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
-            <Icon name="plus" ariaHidden /> Nouvelle facture
-          </button>
+          {canWrite(role) && (
+            <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
+              <Icon name="plus" ariaHidden /> Nouvelle facture
+            </button>
+          )}
         </div>
       </div>
 

@@ -18,5 +18,8 @@ export const canWrite = (role: UserRole) => role !== 'observer';
 /** Delete documents, clients, products. */
 export const canDelete = (role: UserRole) => role === 'admin';
 
+/** Post journal entries (owner, admin, accountant: my_posting_org_ids). */
+export const canPost = (role: UserRole) => role === 'admin' || role === 'accountant';
+
 /** Change the organisation's settings and manage the team. */
 export const canManageOrg = (role: UserRole) => role === 'admin';
