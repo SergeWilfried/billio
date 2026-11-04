@@ -10,10 +10,10 @@
   /* Form field edges: >= 3:1 on white (WCAG 1.4.11) */
   --color-border-input: #848FA0;
   --color-text-primary: #18222F;
-  /* Text greys, checked on white and on the #F3F5F8 page background:
-     primary 16:1, secondary 7.0:1 / 6.4:1, tertiary 4.6:1 / 4.2:1 */
+  /* Text greys, checked on white / #F3F5F8 page / #EAEEF3 table head:
+     primary 16:1, secondary 7.0 / 6.4 / 6.0:1, tertiary 5.3 / 4.9 / 4.6:1 */
   --color-text-secondary: #4E5A6B;
-  --color-text-tertiary: #6B7788;
+  --color-text-tertiary: #606C7E;
   --brand: #185FA5;
   --brand-dark: #0C447C;
   --brand-tint: #E6F1FB;
@@ -1000,7 +1000,7 @@ select.form-input {
   --acc-ink: #fff;
   --pad: 46px;
   --tsec: #5E6B7A;
-  --tter: #6B7788;
+  --tter: #606C7E;
   overflow: hidden;
 }
 .tp-paper[data-density="compact"]  { --pad: 34px; font-size: 12px; }
