@@ -3,6 +3,8 @@ import { calculateServiceWithholding } from '@/lib/tax-bf';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Invoice, LineItem, ServiceWithholdingScenario } from '@/lib/schemas';
 import type { BizInfo } from '@/components/InvoicePaper';
+import type { PaymentMethodLine } from '@/lib/payment-methods';
+import { VAT_LABEL, chargesVat, documentHasVat, vatOn } from '@/lib/vat';
 
 // toLocaleString is unreliable in the react-pdf renderer environment
 const pdfFmt = (n: number): string =>
@@ -89,7 +91,7 @@ const s = StyleSheet.create({
   blockLabel: {
     fontSize: 7,
     fontFamily: 'Helvetica-Bold',
-    color: '#888',
+    color: '#666',
     letterSpacing: 0.5,
     marginBottom: 5,
     textTransform: 'uppercase',
@@ -110,7 +112,7 @@ const s = StyleSheet.create({
   },
   metaKey: {
     fontSize: 8,
-    color: '#888',
+    color: '#666',
     width: 72,
   },
   metaVal: {
@@ -230,7 +232,7 @@ const s = StyleSheet.create({
     paddingBottom: 6,
   },
   fixedHeaderBiz: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#555' },
-  fixedHeaderRef: { fontSize: 7, color: '#888' },
+  fixedHeaderRef: { fontSize: 7, color: '#666' },
   footer: {
     position: 'absolute',
     bottom: 20,
@@ -243,12 +245,12 @@ const s = StyleSheet.create({
     borderTopColor: '#e5e7eb',
     paddingTop: 6,
   },
-  footerLeft:   { fontSize: 7, color: '#aaa' },
-  footerCenter: { fontSize: 7, color: '#aaa' },
-  footerRight:  { fontSize: 7, color: '#aaa' },
+  footerLeft:   { fontSize: 7, color: '#767676' },
+  footerCenter: { fontSize: 7, color: '#767676' },
+  footerRight:  { fontSize: 7, color: '#767676' },
 });
 
-interface Props {
+export interface InvoicePDFProps {
   invoice: Invoice;
   lines: LineItem[];
   client: ClientInfo;
@@ -258,14 +260,19 @@ interface Props {
   clientLabel?: string;
   paymentTerms?: string;
   deliveryTerms?: string;
+  /** From the organisation's payment settings; see paymentMethodLines(). */
+  paymentMethods?: PaymentMethodLine[];
 }
 
-export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = '#185FA5', title = 'Facture', clientLabel = 'Facturé à', paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir' }: Props) {
+export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = '#185FA5', title = 'Facture', clientLabel = 'Facturé à', paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [] }: InvoicePDFProps) {
   const subtotal      = lines.reduce((sum, li) => sum + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
   const discountAmt   = Math.round(subtotal * (discountPct / 100));
   const discountedSub = subtotal - discountAmt;
-  const tax           = Math.round(discountedSub * 0.18);
+  // VAT as issued: the stored total says whether it was charged, so a later
+  // change of tax regime doesn't rewrite old invoices
+  const showVat       = documentHasVat(invoice.amount, discountedSub, chargesVat(biz.taxRegime));
+  const tax           = vatOn(discountedSub, showVat);
   const total         = discountedSub + tax;
   const isPaid = invoice.status === 'paid';
 
@@ -367,7 +374,7 @@ export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = 
           </View>
           {lines.length === 0 ? (
             <View style={s.tableRow}>
-              <Text style={[s.tdDesc, { color: '#aaa' }]}>Aucune ligne</Text>
+              <Text style={[s.tdDesc, { color: '#767676' }]}>Aucune ligne</Text>
             </View>
           ) : lines.map(li => (
             <View key={li.id} style={s.tableRow}>
@@ -389,19 +396,21 @@ export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = 
             {discountPct > 0 && (
               <View style={s.totRow}>
                 <Text style={s.totLabel}>Remise ({discountPct}%)</Text>
-                <Text style={[s.totVal, { color: '#888' }]}>{'-'}{pdfFmt(discountAmt)} F CFA</Text>
+                <Text style={[s.totVal, { color: '#666' }]}>{'-'}{pdfFmt(discountAmt)} F CFA</Text>
               </View>
             )}
-            <View style={s.totRow}>
-              <Text style={s.totLabel}>TVA (18 %)</Text>
-              <Text style={s.totVal}>{pdfFmt(tax)} F CFA</Text>
-            </View>
+            {showVat && (
+              <View style={s.totRow}>
+                <Text style={s.totLabel}>{VAT_LABEL}</Text>
+                <Text style={s.totVal}>{pdfFmt(tax)} F CFA</Text>
+              </View>
+            )}
             {svcWithholding !== null && !isPaid && (
               <View style={s.totRow}>
                 <Text style={s.totLabel}>
                   {'Retenue à la source ('}{RATE_LABEL[client.withholdingScenario!]}{') — Art.207/212'}
                 </Text>
-                <Text style={[s.totVal, { color: '#B26A09' }]}>{'−'}{pdfFmt(svcWithholding)} F CFA</Text>
+                <Text style={[s.totVal, { color: '#8A5207' }]}>{'−'}{pdfFmt(svcWithholding)} F CFA</Text>
               </View>
             )}
             {isPaid ? (
@@ -423,15 +432,14 @@ export function InvoicePDFDocument({ invoice, lines, client, biz, accentColor = 
         <View style={s.paySection}>
           <View style={s.payCol}>
             <Text style={s.blockLabel}>Modes de paiement</Text>
-            <Text style={s.payMethod}>Mobile Money {'—'} MTN 70 12 34 56 {'·'} Orange 76 98 76 54</Text>
-            <Text style={s.payMethod}>Wave {'—'} billio.app/pay/{invoice.id.toLowerCase()}</Text>
-            <Text style={s.payMethod}>Ecobank {'—'} BF76 0001 2345 6789</Text>
+            {paymentMethods.length > 0
+              ? paymentMethods.map(m => <Text key={m.label} style={s.payMethod}>{m.label} {'—'} {m.value}</Text>)
+              : <Text style={s.payMethod}>Contactez-nous pour les modalit{'é'}s de paiement.</Text>}
           </View>
           <View style={s.payCol}>
             <Text style={s.blockLabel}>Notes</Text>
             <Text style={s.notesText}>
-              Merci pour votre confiance. Paiement {'à'} r{'é'}gler sous 14 jours.
-              Tout retard entra{'î'}ne une p{'é'}nalit{'é'} de 2 % par mois.
+              Merci pour votre confiance. Conditions de paiement : {paymentTerms}.
             </Text>
           </View>
         </View>

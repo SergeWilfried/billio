@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -10,6 +11,7 @@ import type { JournalEntry, Journal, Account } from '@/lib/accounting-data';
 import { fmt, fmtCompact, acctOf } from '@/lib/accounting-data';
 import { useJournalsData } from '@/lib/accounting-hooks';
 import { JournalsEmptyIllustration } from '@/components/accounting/EmptyIllustrations';
+import { exerciseYear } from '@/lib/period';
 
 function entryTotal(e: JournalEntry) {
   return e.lines.reduce((s, l) => s + l.d, 0);
@@ -35,6 +37,7 @@ function EntryDrawer({
   const j = journals[entry.journal];
   const total = entryTotal(entry);
   const balanced = isBalanced(entry);
+  const { postable } = usePermissions();
   return (
     <DrawerPanel open onClose={onClose} title={entry.label} subtitle={`${entry.id} · ${entry.date}`}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
@@ -65,7 +68,7 @@ function EntryDrawer({
         {balanced ? `Écriture équilibrée · ${fmt(total)} F CFA` : 'Écriture déséquilibrée'}
       </div>
 
-      {!entry.posted && (
+      {postable && !entry.posted && (
         <button
           className="btn btn-primary"
           style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}
@@ -244,7 +247,7 @@ function Composer({
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '11px 14px', borderRadius: 'var(--border-radius-md)', fontSize: 12.5, fontWeight: 600,
               ...(balanceStatus === 'ok'
-                ? { background: '#E7F3E2', color: '#2E7D32', border: '0.5px solid #A5D6A7' }
+                ? { background: '#E7F3E2', color: '#276C2B', border: '0.5px solid #A5D6A7' }
                 : balanceStatus === 'err'
                 ? { background: '#FEF2F2', color: '#A32D2D', border: '0.5px solid #FCCDD4' }
                 : { background: 'var(--color-background-secondary)', color: 'var(--color-text-secondary)', border: '0.5px solid var(--color-border-tertiary)' }),
@@ -285,6 +288,7 @@ function Composer({
 }
 
 export default function JournalsPage() {
+  const { writable } = usePermissions();
   const { data, loading, postEntry, saveEntry } = useJournalsData(true);
   const [activeJournal, setActiveJournal] = useState('all');
   const [selected, setSelected] = useState<JournalEntry | null>(null);
@@ -321,18 +325,18 @@ export default function JournalsPage() {
           <div className="page-sub">Saisie et consultation des écritures</div>
         </div>
         <div className="topbar-actions">
-          <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
+          <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
           <button className="btn"><Icon name="download" />Exporter</button>
-          <button className="btn btn-primary" onClick={() => setShowComposer(true)}><Icon name="plus" />Nouvelle écriture</button>
+          {writable && <button className="btn btn-primary" onClick={() => setShowComposer(true)}><Icon name="plus" />Nouvelle écriture</button>}
         </div>
       </div>
 
       <div className="content">
         <KPIStrip items={[
           { icon: 'notebook', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Écritures', value: entries.length, sub: `${postedCount} comptabilisées` },
-          { icon: 'trending-up', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: 'Mouvement total', value: fmtCompact(totalMvt), unit: 'F CFA', sub: 'Débit total comptabilisé' },
-          { icon: 'edit', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Brouillons', value: draftCount, sub: 'En attente de comptabilisation' },
-          { icon: allBalanced ? 'circle-check' : 'alert-triangle', iconBg: allBalanced ? '#E7F3E2' : '#FCEBEB', iconColor: allBalanced ? '#2E7D32' : '#A32D2D', label: 'Contrôle', value: allBalanced ? 'OK' : 'Erreur', sub: 'Équilibre des écritures' },
+          { icon: 'trending-up', iconBg: '#E7F3E2', iconColor: '#276C2B', label: 'Mouvement total', value: fmtCompact(totalMvt), unit: 'F CFA', sub: 'Débit total comptabilisé' },
+          { icon: 'edit', iconBg: '#FAEEDA', iconColor: '#8A5207', label: 'Brouillons', value: draftCount, sub: 'En attente de comptabilisation' },
+          { icon: allBalanced ? 'circle-check' : 'alert-triangle', iconBg: allBalanced ? '#E7F3E2' : '#FCEBEB', iconColor: allBalanced ? '#276C2B' : '#A32D2D', label: 'Contrôle', value: allBalanced ? 'OK' : 'Erreur', sub: 'Équilibre des écritures' },
         ]} />
 
         <div className="acc-toolbar">

@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
+import { canWrite } from '@/lib/permissions';
 import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
-import { pdf } from '@react-pdf/renderer';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { updateQuote } from '@/lib/api/quotes';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
-import { InvoicePDFDocument } from '@/components/InvoicePDF';
+import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
+import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import { fmt, fmtDateLong, newLineItem } from '@/data';
 import type { LineItem } from '@/lib/schemas';
+import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
 
 const STATUS_LABEL: Record<string, string> = {
   draft:    'Brouillon',
@@ -32,7 +34,9 @@ const BillioLogoSvg = () => (
 export default function QuotePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { quotes, setQuotes, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const { quotes, setQuotes, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading, userRole } = useApp();
+  const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
+  const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [lines, setLines] = useState<LineItem[]>([]);
   const [converting, setConverting] = useState(false);
   const convertingRef = useRef(false);
@@ -85,17 +89,17 @@ export default function QuotePage() {
 
   const client       = clientsMap[quote.client] ?? { name: quote.client, city: '—', av: 'av-a' };
   const subtotal     = lines.reduce((s, li) => s + li.qty * li.price, 0);
-  const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
-  const tax          = canInvoiceTVA ? Math.round(subtotal * 0.18) : 0;
+  const canInvoiceTVA = chargesVat(orgSettings.taxRegime);
+  const tax          = vatOn(subtotal, canInvoiceTVA);
   const total        = subtotal + tax;
 
   const quoteUrl    = window.location.href;
   const isTerminal  = ['invoiced', 'declined', 'expired'].includes(quote.status);
-  const canConvert  = !isTerminal;
-  const canEdit     = !isTerminal;
+  const canConvert  = !isTerminal && canWrite(userRole);
+  const canEdit     = !isTerminal && canWrite(userRole);
 
   const eSubtotal = eLines.reduce((s, l) => s + l.qty * l.price, 0);
-  const eTax      = canInvoiceTVA ? Math.round(eSubtotal * 0.18) : 0;
+  const eTax      = vatOn(eSubtotal, canInvoiceTVA);
   const eTotal    = eSubtotal + eTax;
 
   const filteredProducts = products.filter(p => !pickerQuery || p.name.toLowerCase().includes(pickerQuery.toLowerCase()));
@@ -172,24 +176,24 @@ export default function QuotePage() {
   };
 
   const handleDownloadPDF = async () => {
+    if (!paymentMethodsReady) { showToast(paymentMethodsNotReadyMessage(paymentMethodsStatus), true); return; }
     const pdfLines   = editOpen ? eLines : lines;
     const pdfSubject = editOpen ? (eSubject.trim() || 'Devis sans titre') : quote.subject;
     const pdfIssued  = editOpen ? eDate : quote.issued;
     const pdfValid   = editOpen ? eValid : quote.valid;
     const pdfAmount  = editOpen ? eTotal : total;
     try {
-      const blob = await pdf(
-        <InvoicePDFDocument
-          invoice={{ id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 }}
-          lines={pdfLines}
-          client={client}
-          biz={orgSettings}
-          title="Facture Proforma"
-          clientLabel="Adressé à"
-          paymentTerms={orgSettings.paymentTerms || 'Net 14 jours'}
-          deliveryTerms={orgSettings.deliveryTerms || 'À convenir'}
-        />
-      ).toBlob();
+      const blob = await renderInvoicePdf({
+        invoice: { id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 },
+        lines: pdfLines,
+        client,
+        biz: orgSettings,
+        title: 'Facture Proforma',
+        clientLabel: 'Adressé à',
+        paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
+        paymentMethods,
+        deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
+      });
       downloadBlob(blob, `devis-${quote.id.toLowerCase()}.pdf`);
       posthog.capture('quote_pdf_downloaded', { quote_id: quote.id });
     } catch (err) {
@@ -233,7 +237,7 @@ export default function QuotePage() {
           </div>
         </div>
         <div className="topbar-actions">
-          <button className="btn" onClick={handleDownloadPDF}>
+          <button className="btn" onClick={handleDownloadPDF} disabled={!paymentMethodsReady}>
             <Icon name="printer" ariaHidden /> Télécharger PDF
           </button>
           {canEdit && (
@@ -344,7 +348,7 @@ export default function QuotePage() {
               <div className="pp-totals-inner">
                 <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
                 {canInvoiceTVA && (
-                  <div className="tot-row"><span>TVA (18 %)</span><span className="tv">{fmt(tax)} F CFA</span></div>
+                  <div className="tot-row"><span>{VAT_LABEL}</span><span className="tv">{fmt(tax)} F CFA</span></div>
                 )}
                 <div className="tot-row grand"><span>Total estimé</span><span className="tv">{fmt(total)} F CFA</span></div>
               </div>
@@ -395,7 +399,7 @@ export default function QuotePage() {
 
                 <div className="rail-divider" />
 
-                <button className="btn btn-block" onClick={handleDownloadPDF}>
+                <button className="btn btn-block" onClick={handleDownloadPDF} disabled={!paymentMethodsReady}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
               </div>
@@ -531,7 +535,7 @@ export default function QuotePage() {
 
         <div className="total-block">
           <div className="total-row"><span>Sous-total HT</span><span>{fmt(eSubtotal)} F CFA</span></div>
-          {canInvoiceTVA && <div className="total-row"><span>TVA (18 %)</span><span>{fmt(eTax)} F CFA</span></div>}
+          {canInvoiceTVA && <div className="total-row"><span>{VAT_LABEL}</span><span>{fmt(eTax)} F CFA</span></div>}
           <div className="total-row final"><span>Total estimé</span><span>{fmt(eTotal)} F CFA</span></div>
         </div>
       </div>

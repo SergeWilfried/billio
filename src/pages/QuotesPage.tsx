@@ -1,18 +1,26 @@
 import { useState, useMemo, useRef, useEffect, type ReactNode } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import ConfirmModal from '@/components/ConfirmModal';
+import SendDocumentDialog from '@/components/SendDocumentDialog';
 import { EmptyState } from '@/components/EmptyState';
 import { tabPanelId, tabId } from '@/lib/tab-ids';
 import { QuotesEmptyIllustration } from '@/components/PageEmptyIllustrations';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { createQuote, removeQuote, nextQuoteId } from '@/lib/api/quotes';
+import { quoteMessage } from '@/lib/document-messages';
+import { createActivity } from '@/lib/api/activities';
+import { filledLines, lineItemsError } from '@/lib/line-validation';
+import { confirmDiscard } from '@/lib/confirm-discard';
+import { contactValue } from '@/lib/share-links';
 import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
-import { saveLineItems, deleteLineItems } from '@/lib/api/line-items';
-import { fmt, fmtDate, newLineItem, clientInitials } from '@/data';
-import type { LineItem, QuoteStatus } from '@/lib/schemas';
+import { saveLineItems, deleteLineItems, fetchLineItems } from '@/lib/api/line-items';
+import { fmt, fmtCompact, fmtDate, newLineItem, clientInitials } from '@/data';
+import type { Activity, LineItem, QuoteStatus } from '@/lib/schemas';
+import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
 
 type FilterKey = 'all' | QuoteStatus;
 
@@ -36,20 +44,16 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 
-function fmtCompact(n: number) {
-  const a = Math.abs(n);
-  if (a >= 1e6) return (n / 1e6).toFixed(a % 1e6 === 0 ? 0 : 1) + 'M';
-  return Math.round(n).toLocaleString('fr-FR');
-}
 
-const TVA = 0.18;
 
 /** Rendered by SalesPage, which passes the Factures | Devis tab switcher. */
 export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
-  const { showToast, quotes, setQuotes, setInvoices, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const { writable, deletable } = usePermissions();
+  const { showToast, quotes, setQuotes, setInvoices, setActivity, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const [sendQuote, setSendQuote] = useState<{ id: string; kind: 'send' | 'reminder' } | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  if (loading) return <PageSkeleton title="Facturation" subtitle="Gérez vos devis" metrics={0} rows={6} />;
   const [filter, setFilter] = useState<FilterKey>('all');
   const [panelOpen, setPanelOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -93,9 +97,9 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     setPickerQuery('');
   }
 
-  const canInvoiceTVA = orgSettings.taxRegime === 'RNI';
+  const canInvoiceTVA = chargesVat(orgSettings.taxRegime);
   const subtotal = lines.reduce((s, li) => s + li.qty * li.price, 0);
-  const tax      = canInvoiceTVA ? Math.round(subtotal * TVA) : 0;
+  const tax      = vatOn(subtotal, canInvoiceTVA);
   const total    = subtotal + tax;
 
   // Metrics
@@ -126,6 +130,10 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     setPanelOpen(true);
   }
   function closePanel() { setPanelOpen(false); setShowPicker(false); }
+  function requestClosePanel() {
+    const dirty = fClient !== '' || fSubject.trim() !== '' || filledLines(lines).length > 0;
+    if (confirmDiscard(dirty)) closePanel();
+  }
 
   function addLine() {
     setLines(prev => [...prev, newLineItem()]);
@@ -143,9 +151,10 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
   async function submitQuote(status: 'draft' | 'sent') {
     if (submittingRef.current) return;
     if (!fClient) { showToast('Sélectionnez un client', true); return; }
-    if (subtotal <= 0) { showToast('Ajoutez au moins un article', true); return; }
+    const linesErr = lineItemsError(lines);
+    if (linesErr) { showToast(linesErr, true); return; }
+    if (fValid < fDate) { showToast('La date de validité doit être postérieure à la date d\'émission.', true); return; }
     submittingRef.current = true;
-    const cName = clientsMap[fClient]?.name ?? fClient;
     let id = '';
     let quoteCreated = false;
     try {
@@ -153,11 +162,13 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
       const payload = { id, subject: fSubject.trim() || 'Devis sans titre', client: fClient, issued: fDate, valid: fValid, amount: total, status };
       const created = await createQuote(orgId, payload);
       quoteCreated = true;
-      await saveLineItems(orgId, lines, { quoteId: id });
+      await saveLineItems(orgId, filledLines(lines), { quoteId: id });
       setQuotes(prev => prev.some(q => q.id === id) ? prev : [created, ...prev]);
       posthog.capture('quote_created', { item_count: lines.length, total_amount: total, status });
       closePanel();
-      showToast(status === 'sent' ? `Devis ${id} envoyé à ${cName}` : `Brouillon ${id} enregistré`);
+      showToast(status === 'sent' ? `Devis ${id} enregistré` : `Brouillon ${id} enregistré`);
+      // The quote is marked sent; hand the message to the user's email / WhatsApp
+      if (status === 'sent') setSendQuote({ id, kind: 'send' });
     } catch (err) {
       console.error('[submitQuote] failed:', err);
       if (quoteCreated) {
@@ -198,7 +209,37 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
 
   function sendReminder(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    showToast(`Relance envoyée pour ${id}`);
+    setSendQuote({ id, kind: 'reminder' });
+  }
+
+  // A new draft with the same client, subject and lines, dated today
+  async function duplicateQuote(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const quote = quotes.find(q => q.id === id);
+    if (!quote || duplicating) return;
+    setDuplicating(id);
+    try {
+      const lines = await fetchLineItems(orgId, { quoteId: id });
+      const validDays = Math.max(1, Math.round((Date.parse(quote.valid) - Date.parse(quote.issued)) / 86_400_000)) || 14;
+      const issued = new Date().toISOString().slice(0, 10);
+      const valid = new Date(Date.now() + validDays * 86_400_000).toISOString().slice(0, 10);
+      const newId = await nextQuoteId(orgId);
+      const created = await createQuote(orgId, { id: newId, subject: quote.subject, client: quote.client, issued, valid, amount: quote.amount, status: 'draft' });
+      try {
+        await saveLineItems(orgId, lines, { quoteId: newId });
+      } catch (err) {
+        await removeQuote(orgId, newId).catch(e2 => console.error('[rollback] removeQuote failed:', e2));
+        throw err;
+      }
+      setQuotes(prev => prev.some(q => q.id === newId) ? prev : [created, ...prev]);
+      showToast(`Brouillon ${newId} créé à partir de ${id}`);
+      navigate(`/quotes/${newId}`);
+    } catch (err) {
+      console.error('[duplicateQuote] failed:', err);
+      showToast('Impossible de dupliquer le devis. Veuillez réessayer.', true);
+    } finally {
+      setDuplicating(null);
+    }
   }
 
   function handleDelete(id: string, e: React.MouseEvent) {
@@ -222,6 +263,8 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     }
   }
 
+  if (loading) return <PageSkeleton title="Facturation" subtitle="Gérez vos devis" metrics={0} rows={6} />;
+
   return (
     <>
       <div className="main">
@@ -232,10 +275,12 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
             <div className="page-sub">Estimations envoyées avant facturation</div>
           </div>
           <div className="topbar-actions">
-            <button className="btn btn-primary" onClick={openPanel}>
-              <Icon name="plus" size={16} />
-              Nouveau devis
-            </button>
+            {writable && (
+              <button className="btn btn-primary" onClick={openPanel}>
+                <Icon name="plus" size={16} />
+                Nouveau devis
+              </button>
+            )}
           </div>
         </div>
 
@@ -369,7 +414,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
 
                     {/* Actions */}
                     <div className="row-actions">
-                      {!['invoiced', 'declined', 'expired'].includes(q.status) && (
+                      {writable && !['invoiced', 'declined', 'expired'].includes(q.status) && (
                         <button
                           className="btn-convert"
                           onClick={e => convertToInvoice(q.id, e)}
@@ -378,7 +423,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
                           Facturer
                         </button>
                       )}
-                      {q.status === 'sent' && (
+                      {writable && q.status === 'sent' && (
                         <button
                           className="icon-btn"
                           title="Envoyer une relance"
@@ -387,19 +432,21 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
                           <Icon name="send" size={14} />
                         </button>
                       )}
-                      {q.status === 'draft' && (
-                        <button className="icon-btn" title="Modifier" onClick={e => e.stopPropagation()}>
+                      {writable && q.status === 'draft' && (
+                        <button className="icon-btn" title="Modifier" onClick={e => { e.stopPropagation(); navigate(`/quotes/${q.id}`); }}>
                           <Icon name="edit" size={14} />
                         </button>
                       )}
-                      {!['accepted', 'sent', 'draft'].includes(q.status) && (
-                        <button className="icon-btn" title="Dupliquer" onClick={e => e.stopPropagation()}>
+                      {writable && !['accepted', 'sent', 'draft'].includes(q.status) && (
+                        <button className="icon-btn" title="Dupliquer" disabled={duplicating !== null} onClick={e => duplicateQuote(q.id, e)}>
                           <Icon name="copy" size={14} />
                         </button>
                       )}
-                      <button className="icon-btn" title="Supprimer" onClick={e => handleDelete(q.id, e)}>
-                        <Icon name="trash" size={14} />
-                      </button>
+                      {deletable && (
+                        <button className="icon-btn" title="Supprimer" onClick={e => handleDelete(q.id, e)}>
+                          <Icon name="trash" size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -410,7 +457,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
       </div>
 
       {/* Scrim */}
-      <div className={'scrim' + (panelOpen ? ' open' : '')} onClick={closePanel} />
+      <div className={'scrim' + (panelOpen ? ' open' : '')} onClick={requestClosePanel} />
 
       {/* New quote panel */}
       <div className={'new-inv-panel' + (panelOpen ? ' open' : '')}>
@@ -419,7 +466,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
             <div className="panel-slide-title">Nouveau devis</div>
             <div className="panel-slide-sub">Nouveau devis</div>
           </div>
-          <button className="icon-btn" onClick={closePanel} aria-label="Fermer">
+          <button className="icon-btn" onClick={requestClosePanel} aria-label="Fermer">
             <Icon name="x" size={18} />
           </button>
         </div>
@@ -554,7 +601,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
             </div>
             {canInvoiceTVA && (
               <div className="total-row">
-                <span>TVA (18%)</span>
+                <span>{VAT_LABEL}</span>
                 <span>{fmt(tax)} F CFA</span>
               </div>
             )}
@@ -579,7 +626,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
             onClick={() => submitQuote('sent')}
           >
             <Icon name="send" size={15} />
-            Envoyer le devis
+            Enregistrer et envoyer
           </button>
         </div>
       </div>
@@ -592,6 +639,40 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
           onClose={() => setDeleteId(null)}
         />
       )}
+      {sendQuote && (() => {
+        const q = quotes.find(x => x.id === sendQuote.id);
+        if (!q) return null;
+        const cl = clientsMap[q.client];
+        const clientName = cl?.name ?? q.client;
+        const msg = quoteMessage(sendQuote.kind, { quoteId: q.id, clientName, orgName: orgSettings.name, amount: q.amount, validUntil: q.valid });
+        return (
+          <SendDocumentDialog
+            title={sendQuote.kind === 'reminder' ? `Relancer ${clientName}` : `Envoyer le devis ${q.id}`}
+            recipientName={clientName}
+            email={contactValue(cl?.email)}
+            phone={contactValue(cl?.phone)}
+            subject={msg.subject}
+            message={msg.message}
+            onSent={channel => {
+              if (channel === 'copy') return;
+              // Opening the email app or WhatsApp doesn't mean the message went out
+              const via = channel === 'email' ? 'par email' : 'par WhatsApp';
+              const parts = sendQuote.kind === 'reminder'
+                ? [{ text: `Relance préparée ${via} pour le devis ` }, { text: q.id, bold: true as const }]
+                : [{ text: 'Devis ' }, { text: q.id, bold: true as const }, { text: ` préparé ${via} pour ` }, { text: clientName, bold: true as const }];
+              const entry: Activity = { kind: 'sent', parts, time: "À l'instant" };
+              setActivity(prev => [entry, ...prev]);
+              createActivity(orgId, { kind: 'sent', parts }).catch(err => {
+                console.error('[createActivity] failed:', err);
+                setActivity(prev => prev.filter(a => a !== entry));
+                showToast('L\'envoi n\'a pas pu être enregistré dans l\'historique.', true);
+              });
+              setSendQuote(null);
+            }}
+            onClose={() => setSendQuote(null)}
+          />
+        );
+      })()}
     </>
   );
 }

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useApp } from '@/context/AppContext';
 import { nextClientCode } from '@/lib/api/clients';
 import './OnboardingPage.css';
+import { fmtDateLong } from '@/data';
 
 /* ── types ── */
 interface TeamInvite { id: string; email: string; role: string }
@@ -12,6 +13,14 @@ interface ClientDraft { name: string; email: string; av: string }
 
 const AV = ['av-a', 'av-b', 'av-c', 'av-d', 'av-e', 'av-f'] as const;
 const TERMS_OPTIONS = ['À réception', 'Net 7 jours', 'Net 14 jours', 'Net 30 jours'];
+const TERMS_DAYS: Record<string, number> = { 'À réception': 0, 'Net 7 jours': 7, 'Net 14 jours': 14, 'Net 30 jours': 30 };
+
+/** Preview due date (YYYY-MM-DD) for the chosen payment terms, from today. */
+function previewDue(terms: string): string {
+  const d = new Date();
+  d.setDate(d.getDate() + (TERMS_DAYS[terms] ?? 14));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 const STEPS = [
   { label: 'Informations entreprise', skippable: false },
   { label: 'Paramètres factures',     skippable: false },
@@ -114,11 +123,11 @@ export default function OnboardingPage() {
   const [maxReached, setMaxReached] = useState(0);
 
   /* ── step 1: business ── */
-  const [bizName,  setBizName]  = useState('Studio Wend SARL');
+  const [bizName,  setBizName]  = useState('');
   const [taxId,    setTaxId]    = useState('');
   const [rccm,     setRccm]     = useState('');
-  const [address,  setAddress]  = useState('Av. Kwame Nkrumah, Immeuble Baobab');
-  const [city,     setCity]     = useState('Ouagadougou');
+  const [address,  setAddress]  = useState('');
+  const [city,     setCity]     = useState('');
   const [country,  setCountry]  = useState('Burkina Faso');
   const [currency, setCurrency] = useState('F CFA');
   const [logoType, setLogoType] = useState<'none' | 'mono' | 'img'>('none');
@@ -127,8 +136,8 @@ export default function OnboardingPage() {
 
   /* ── step 2: invoice defaults ── */
   const [prefix,    setPrefix]    = useState('INV-');
-  const [nextNum,   setNextNum]   = useState('0042');
-  const [terms,     setTerms]     = useState('Net 14 days');
+  const [nextNum,   setNextNum]   = useState('0001');
+  const [terms,     setTerms]     = useState('Net 14 jours');
   const [taxRate,   setTaxRate]   = useState(18);
   const [payMethod, setPayMethod] = useState('Mobile Money (MTN / Orange / Wave)');
   const [footer,    setFooter]    = useState('Merci pour votre confiance. Paiement à régler sous 14 jours.');
@@ -456,7 +465,7 @@ export default function OnboardingPage() {
                   <div className="ob-row-3">
                     <div className="ob-field">
                       <label className="ob-field-label">Ville</label>
-                      <input className="ob-input" type="text" value={city} onChange={e => setCity(e.target.value)} />
+                      <input className="ob-input" type="text" value={city} placeholder="ex. Ouagadougou" onChange={e => setCity(e.target.value)} />
                     </div>
                     <div className="ob-field">
                       <label className="ob-field-label">Pays</label>
@@ -712,7 +721,7 @@ export default function OnboardingPage() {
                           : logoInitials}
                       </div>
                       <div style={{ minWidth: 0 }}>
-                        <div className="ob-paper-bizname">{bizName || 'Your business'}</div>
+                        <div className="ob-paper-bizname">{bizName || 'Votre entreprise'}</div>
                         <div className="ob-paper-bizmeta">
                           {[address, [city, country].filter(Boolean).join(', ')].filter(Boolean).join('\n').split('\n').map((line, i) => (
                             <span key={i}>{line}<br /></span>
@@ -732,7 +741,7 @@ export default function OnboardingPage() {
                     </div>
                     <div>
                       <div className="ob-mini-label">Conditions</div>
-                      <div className="ob-mini-val">{terms}<span className="dim"><br />Échéance 20 juin 2026</span></div>
+                      <div className="ob-mini-val">{terms}<span className="dim"><br />Échéance {fmtDateLong(previewDue(terms))}</span></div>
                     </div>
                   </div>
                   <div className="ob-paper-items">
@@ -780,7 +789,7 @@ export default function OnboardingPage() {
                     <div className="ob-roster-row">
                       <div className="ob-entry-av av-a">{logoInitials}</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="ob-roster-name">{bizName || 'You'}</div>
+                        <div className="ob-roster-name">{bizName || 'Vous'}</div>
                         <div className="ob-roster-sub">Propriétaire</div>
                       </div>
                       <div className="ob-entry-role owner">Propriétaire</div>

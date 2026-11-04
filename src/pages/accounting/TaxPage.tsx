@@ -8,6 +8,7 @@ import { useTaxData } from '@/lib/accounting-hooks';
 import { useApp } from '@/context/AppContext';
 import { calculateTVA, calculateIS, isRegimeCaducite, isFirstFiscalYear } from '@/lib/tax-bf';
 import type { Regime } from '@/lib/tax-bf';
+import { exerciseYear, monthLabel } from '@/lib/period';
 
 // ─── Regime metadata ─────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ function orgRegimeToMeta(raw: string): { regime: Regime; meta: RegimeMeta } {
     };
     case 'RSI': return {
       regime: 'RSI',
-      meta: { label: 'RSI', canInvoiceTVA: false, declarations: 'quarterly', isColor: '#B26A09', isBg: '#FAEEDA' },
+      meta: { label: 'RSI', canInvoiceTVA: false, declarations: 'quarterly', isColor: '#8A5207', isBg: '#FAEEDA' },
     };
     case 'CME': return {
       regime: 'CME-declaratif',
@@ -36,7 +37,7 @@ function orgRegimeToMeta(raw: string): { regime: Regime; meta: RegimeMeta } {
     };
     case 'CSE': return {
       regime: 'CSE',
-      meta: { label: 'CSE', canInvoiceTVA: false, declarations: null, isColor: '#2E7D32', isBg: '#E7F3E2' },
+      meta: { label: 'CSE', canInvoiceTVA: false, declarations: null, isColor: '#276C2B', isBg: '#E7F3E2' },
     };
     default: return {
       regime: 'RND',
@@ -130,12 +131,15 @@ export default function TaxPage() {
 
   if (loading) return <PageSkeleton title="Fiscalité" variant="accounting" rows={6} />;
 
-  const entries  = data?.entries  ?? [];
+  const allEntries = data?.entries ?? [];
   const journals = data?.journals ?? {};
 
   const { regime, meta } = orgRegimeToMeta(orgSettings.taxRegime);
   const creationDate = orgSettings.businessCreationDate || undefined;
-  const EXERCISE_YEAR = 2026;
+  const EXERCISE_YEAR = exerciseYear();
+  // Totals cover this exercise only; earlier years' entries stay out of them
+  const entriesOf = (y: number) => allEntries.filter(e => e.date.startsWith(`${y}-`));
+  const entries   = entriesOf(EXERCISE_YEAR);
   const firstYear    = isFirstFiscalYear(creationDate, EXERCISE_YEAR);
   const { canInvoiceTVA, declarations } = meta;
 
@@ -167,13 +171,14 @@ export default function TaxPage() {
   const periodExpenses = sumPostedDebitPrefix(entries, '6');
   const taxableProfit  = periodRevenue - periodExpenses;
 
-  const isEstimate = calculateIS({
-    taxableProfit,
+  const isEstimateFor = (profit: number, y: number) => calculateIS({
+    taxableProfit: profit,
     regime:        regime === 'RNI' ? 'RNI' : 'RSI',
     creationDate,
     isAdherentCGA: false,
-    taxYear:       EXERCISE_YEAR,
+    taxYear:       y,
   });
+  const isEstimate = isEstimateFor(taxableProfit, EXERCISE_YEAR);
 
   // ── Caducité watch ────────────────────────────────────────────────────────
   const ytdCA         = periodRevenue; // rough proxy: period revenue credits
@@ -195,10 +200,10 @@ export default function TaxPage() {
   };
 
   // Per-month TVA net (collected − deductible) derived from journal entries
-  const monthlyNetTVA = Array.from({ length: 12 }, (_, i) => {
-    const prefix = `${EXERCISE_YEAR}-${String(i + 1).padStart(2, '0')}`;
-    const c = taxLines.filter(l => l.type === 'collected'  && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
-    const d = taxLines.filter(l => l.type === 'deductible' && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+  const netTVAFor = (lines: typeof taxLines, y: number) => Array.from({ length: 12 }, (_, i) => {
+    const prefix = `${y}-${String(i + 1).padStart(2, '0')}`;
+    const c = lines.filter(l => l.type === 'collected'  && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+    const d = lines.filter(l => l.type === 'deductible' && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
     return c - d;
   });
 
@@ -206,50 +211,65 @@ export default function TaxPage() {
   const dl = (label: string, date: string, amount: number, category: string): Deadline =>
     ({ label, date, amount, status: dlStatus(date), category });
 
-  const deadlines: Deadline[] = [
+  // Deadlines of exercise Y (some fall due early in Y + 1)
+  const deadlinesFor = (Y: number, monthlyNetTVA: number[], isEst: number): Deadline[] => [
     // ── Annual fixed (early year) ──────────────────────────────────────────
-    dl(`TVM — Taxe sur la Valeur Marginale ${EXERCISE_YEAR}`,   isoDate(EXERCISE_YEAR, 3, 31), 0, 'Annuelle'),
+    dl(`TVM — Taxe sur la Valeur Marginale ${Y}`,   isoDate(Y, 3, 31), 0, 'Annuelle'),
     ...(regime === 'CME-declaratif' ? [
-      dl(`CME — Déclaration annuelle ${EXERCISE_YEAR}`,         isoDate(EXERCISE_YEAR, 3, 31), 0, 'Annuelle'),
+      dl(`CME — Déclaration annuelle ${Y}`,         isoDate(Y, 3, 31), 0, 'Annuelle'),
     ] : []),
 
     // ── 1ᵉʳ acompte IS (25 %) — juin ──────────────────────────────────────
     ...(isMonthly || isQuarterly ? [
-      dl(`1ᵉʳ acompte provisionnel IS (25 %) — juin ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 6, 15), Math.round(isEstimate * 0.25), 'Acomptes IS'),
+      dl(`1ᵉʳ acompte provisionnel IS (25 %) — juin ${Y}`, isoDate(Y, 6, 15), Math.round(isEst * 0.25), 'Acomptes IS'),
     ] : []),
 
     // ── Monthly TVA CA3 — one entry per month (RNI only) ──────────────────
     ...(canInvoiceTVA && isMonthly ? Array.from({ length: 12 }, (_, i) => {
       const ref      = i + 1;
-      const dueYear  = ref === 12 ? EXERCISE_YEAR + 1 : EXERCISE_YEAR;
+      const dueYear  = ref === 12 ? Y + 1 : Y;
       const dueMonth = ref === 12 ? 1 : ref + 1;
-      return dl(`TVA CA3 — ${MONTH_FR[i]} ${EXERCISE_YEAR}`, isoDate(dueYear, dueMonth, 15), Math.max(0, monthlyNetTVA[i]), 'Mensuelle TVA');
+      return dl(`TVA CA3 — ${MONTH_FR[i]} ${Y}`, isoDate(dueYear, dueMonth, 15), Math.max(0, monthlyNetTVA[i]), 'Mensuelle TVA');
     }) : []),
 
     // ── IUTS + TPA monthly (RNI) ───────────────────────────────────────────
     ...(isMonthly ? Array.from({ length: 12 }, (_, i) => {
       const ref      = i + 1;
-      const dueYear  = ref === 12 ? EXERCISE_YEAR + 1 : EXERCISE_YEAR;
+      const dueYear  = ref === 12 ? Y + 1 : Y;
       const dueMonth = ref === 12 ? 1 : ref + 1;
-      return dl(`IUTS + TPA — ${MONTH_FR[i]} ${EXERCISE_YEAR}`, isoDate(dueYear, dueMonth, 15), 0, 'Mensuelle');
+      return dl(`IUTS + TPA — ${MONTH_FR[i]} ${Y}`, isoDate(dueYear, dueMonth, 15), 0, 'Mensuelle');
     }) : []),
 
     // ── IUTS + TPA quarterly (RSI) ─────────────────────────────────────────
     ...(!isMonthly && isQuarterly ? [
-      dl(`IUTS + TPA — T1 ${EXERCISE_YEAR} (jan–mar)`, isoDate(EXERCISE_YEAR,      4, 15), 0, 'Trimestrielle'),
-      dl(`IUTS + TPA — T2 ${EXERCISE_YEAR} (avr–jun)`, isoDate(EXERCISE_YEAR,      7, 15), 0, 'Trimestrielle'),
-      dl(`IUTS + TPA — T3 ${EXERCISE_YEAR} (jul–sep)`, isoDate(EXERCISE_YEAR,     10, 15), 0, 'Trimestrielle'),
-      dl(`IUTS + TPA — T4 ${EXERCISE_YEAR} (oct–déc)`, isoDate(EXERCISE_YEAR + 1,  1, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T1 ${Y} (jan–mar)`, isoDate(Y,      4, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T2 ${Y} (avr–jun)`, isoDate(Y,      7, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T3 ${Y} (jul–sep)`, isoDate(Y,     10, 15), 0, 'Trimestrielle'),
+      dl(`IUTS + TPA — T4 ${Y} (oct–déc)`, isoDate(Y + 1,  1, 15), 0, 'Trimestrielle'),
     ] : []),
 
     // ── Annual fixed (later in year) ───────────────────────────────────────
-    dl(`Droit de licence des Étrangers ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 10, 20), 0, 'Annuelle'),
-    dl(`Taxe sur Actions ${EXERCISE_YEAR}`,               isoDate(EXERCISE_YEAR, 10, 20), 0, 'Annuelle'),
-    dl(`Autres Droits de Licence ${EXERCISE_YEAR}`,       isoDate(EXERCISE_YEAR, 10, 30), 0, 'Annuelle'),
-    dl(`2ᵉ acompte provisionnel IS (25 %) — nov. ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 11, 15), Math.round(isEstimate * 0.25), 'Acomptes IS'),
-    dl(`Patente ${EXERCISE_YEAR}`,                        isoDate(EXERCISE_YEAR, 12, 15), 0, 'Annuelle'),
-    dl(`3ᵉ acompte provisionnel IS (25 %) — déc. ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR, 12, 15), Math.round(isEstimate * 0.25), 'Acomptes IS'),
-    dl(`IS / IBICA — Déclaration annuelle ${EXERCISE_YEAR}`, isoDate(EXERCISE_YEAR + 1, 2, 28), isEstimate, 'Annuelle IS'),
+    dl(`Droit de licence des Étrangers ${Y}`, isoDate(Y, 10, 20), 0, 'Annuelle'),
+    dl(`Taxe sur Actions ${Y}`,               isoDate(Y, 10, 20), 0, 'Annuelle'),
+    dl(`Autres Droits de Licence ${Y}`,       isoDate(Y, 10, 30), 0, 'Annuelle'),
+    dl(`2ᵉ acompte provisionnel IS (25 %) — nov. ${Y}`, isoDate(Y, 11, 15), Math.round(isEst * 0.25), 'Acomptes IS'),
+    dl(`Patente ${Y}`,                        isoDate(Y, 12, 15), 0, 'Annuelle'),
+    dl(`3ᵉ acompte provisionnel IS (25 %) — déc. ${Y}`, isoDate(Y, 12, 15), Math.round(isEst * 0.25), 'Acomptes IS'),
+    dl(`IS / IBICA — Déclaration annuelle ${Y}`, isoDate(Y + 1, 2, 28), isEst, 'Annuelle IS'),
+  ];
+
+  // Last exercise's December/T4 returns and annual IS are still due early this year
+  const prevYear     = EXERCISE_YEAR - 1;
+  const prevEntries  = entriesOf(prevYear);
+  const prevDeadlines = deadlinesFor(
+    prevYear,
+    netTVAFor(buildTaxLines(prevEntries), prevYear),
+    isEstimateFor(sumPostedCreditPrefix(prevEntries, '7') - sumPostedDebitPrefix(prevEntries, '6'), prevYear),
+  ).filter(d => d.date >= isoDate(EXERCISE_YEAR, 1, 1));
+
+  const deadlines: Deadline[] = [
+    ...prevDeadlines,
+    ...deadlinesFor(EXERCISE_YEAR, netTVAFor(taxLines, EXERCISE_YEAR), isEstimate),
   ].sort((a, b) => a.date < b.date ? -1 : 1);
 
   // ── Risk KPI ──────────────────────────────────────────────────────────────
@@ -261,11 +281,11 @@ export default function TaxPage() {
         unit: overdueCount === 1 ? 'déclaration' : 'déclarations',
         sub: 'Risque pénalité 25 % – 200 %' }
     : pendingItems.length > 0
-    ? { icon: 'clock' as const, iconBg: '#FAEEDA', iconColor: '#B26A09',
+    ? { icon: 'clock' as const, iconBg: '#FAEEDA', iconColor: '#8A5207',
         label: 'Prochaine échéance', value: pendingItems[0].date,
         unit: '',
         sub: pendingItems[0].label.length > 32 ? pendingItems[0].label.slice(0, 31) + '…' : pendingItems[0].label }
-    : { icon: 'check' as const, iconBg: '#E7F3E2', iconColor: '#2E7D32',
+    : { icon: 'check' as const, iconBg: '#E7F3E2', iconColor: '#276C2B',
         label: 'Situation fiscale', value: 'À jour', unit: '',
         sub: deadlines.find(d => d.status === 'upcoming')?.date
           ? `Prochain : ${deadlines.find(d => d.status === 'upcoming')!.date}` : 'Aucune échéance imminente' };
@@ -289,12 +309,12 @@ export default function TaxPage() {
             )}
           </div>
           <div className="page-sub">
-            Obligations fiscales · Juin 2026
+            Obligations fiscales · {monthLabel()}
             {declarations && <> · Déclarations <strong>{declarations === 'monthly' ? 'mensuelles' : 'trimestrielles'}</strong></>}
           </div>
         </div>
         <div className="topbar-actions">
-          <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
+          <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
           <button className="btn"><Icon name="download" />Exporter déclaration</button>
         </div>
       </div>
@@ -304,11 +324,11 @@ export default function TaxPage() {
         {/* KPI strip — adapts to regime */}
         <KPIStrip items={[
           ...(canInvoiceTVA ? [
-            { icon: 'receipt', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: '443 — TVA collectée', value: fmtCompact(collected), unit: 'F CFA', sub: `${collectedLines.length} écriture${collectedLines.length !== 1 ? 's' : ''}` },
-            { icon: 'receipt', iconBg: '#FAEEDA', iconColor: '#B26A09', label: '445 — TVA déductible', value: fmtCompact(deductible), unit: 'F CFA', sub: `${deductibleLines.length} écriture${deductibleLines.length !== 1 ? 's' : ''}` },
+            { icon: 'receipt', iconBg: '#E7F3E2', iconColor: '#276C2B', label: '443 — TVA collectée', value: fmtCompact(collected), unit: 'F CFA', sub: `${collectedLines.length} écriture${collectedLines.length !== 1 ? 's' : ''}` },
+            { icon: 'receipt', iconBg: '#FAEEDA', iconColor: '#8A5207', label: '445 — TVA déductible', value: fmtCompact(deductible), unit: 'F CFA', sub: `${deductibleLines.length} écriture${deductibleLines.length !== 1 ? 's' : ''}` },
             { icon: 'percentage', iconBg: netDue >= 0 ? '#E9F0FA' : '#FCEBEB', iconColor: netDue >= 0 ? 'var(--brand)' : '#A32D2D', label: '4441 — TVA nette due', value: fmtCompact(Math.abs(netDue)), unit: 'F CFA', sub: netDue >= 0 ? 'À verser à l\'État' : 'Crédit de TVA' },
           ] as const : [
-            { icon: 'receipt', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'CA période HT (estimé)', value: fmtCompact(periodRevenue), unit: 'F CFA', sub: 'Crédits comptes 7xx' },
+            { icon: 'receipt', iconBg: '#FAEEDA', iconColor: '#8A5207', label: 'CA période HT (estimé)', value: fmtCompact(periodRevenue), unit: 'F CFA', sub: 'Crédits comptes 7xx' },
           ] as const),
           { icon: 'building-bank', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'IS estimé (27,5%)', value: fmtCompact(isEstimate), unit: 'F CFA', sub: taxableProfit >= 0 ? `Bénéfice estimé ${fmtCompact(taxableProfit)} F` : `Déficit — minimum forfaitaire` },
           { icon: 'users', iconBg: '#F3E8FF', iconColor: '#6B21A8', label: 'IUTS + TPA + SP dus', value: fmtCompact(iutsAmount + tpaAmount + spAmount), unit: 'F CFA', sub: `IUTS ${fmtCompact(iutsAmount)} · TPA ${fmtCompact(tpaAmount)}${spAmount > 0 ? ` · SP ${fmtCompact(spAmount)}` : ''}` },
@@ -325,7 +345,7 @@ export default function TaxPage() {
                   Formulaire CA3 · eSINTAX
                 </span>
                 {!tvaCheck && (
-                  <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#FAEEDA', color: '#B26A09' }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#FAEEDA', color: '#8A5207' }}>
                     Incohérence taux détectée
                   </span>
                 )}
@@ -347,11 +367,11 @@ export default function TaxPage() {
                   <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.label}</span>
                   <span className="mono" style={{ textAlign: 'right', color: 'var(--color-text-secondary)', fontSize: 11.5 }}>{(l.tvaRate * 100).toFixed(0)}%</span>
                   <span className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(l.htBase)}</span>
-                  <span className="mono" style={{ textAlign: 'right', fontWeight: 700, color: isCollected ? '#2E7D32' : '#B26A09' }}>
+                  <span className="mono" style={{ textAlign: 'right', fontWeight: 700, color: isCollected ? '#276C2B' : '#8A5207' }}>
                     {isCollected ? '+' : '−'}{fmt(l.tvaAmount)}
                   </span>
                   <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: isCollected ? '#E7F3E2' : '#FAEEDA', color: isCollected ? '#2E7D32' : '#B26A09' }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: isCollected ? '#E7F3E2' : '#FAEEDA', color: isCollected ? '#276C2B' : '#8A5207' }}>
                       {isCollected ? 'Collectée' : 'Déductible'}
                     </span>
                   </div>
@@ -364,15 +384,15 @@ export default function TaxPage() {
                 <span /><span />
                 <span>4449 — Ret. TVA versée par clients</span>
                 <span /><span />
-                <span className="mono" style={{ textAlign: 'right', color: '#2E7D32' }}>−{fmt(alreadyWithheld)}</span>
-                <span style={{ textAlign: 'right' }}><span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: '#E7F3E2', color: '#2E7D32' }}>Déjà versé</span></span>
+                <span className="mono" style={{ textAlign: 'right', color: '#276C2B' }}>−{fmt(alreadyWithheld)}</span>
+                <span style={{ textAlign: 'right' }}><span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: '#E7F3E2', color: '#276C2B' }}>Déjà versé</span></span>
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '80px 70px 1fr 100px 110px 60px 110px', gap: 12, padding: '11px 18px', borderTop: '1px solid var(--color-border-secondary)', background: 'var(--color-background-secondary)', fontWeight: 700, alignItems: 'center', fontSize: 12.5 }}>
               <span /><span />
               <span>TVA nette à verser (CA3)</span>
               <span /><span />
-              <span className="mono" style={{ textAlign: 'right', fontSize: 13, color: netDue >= 0 ? '#2E7D32' : '#A32D2D' }}>{netDue >= 0 ? '+' : ''}{fmt(netDue)}</span>
+              <span className="mono" style={{ textAlign: 'right', fontSize: 13, color: netDue >= 0 ? '#276C2B' : '#A32D2D' }}>{netDue >= 0 ? '+' : ''}{fmt(netDue)}</span>
               <span />
             </div>
           </div>
@@ -380,7 +400,7 @@ export default function TaxPage() {
           <div style={{ background: '#FAEEDA', border: '0.5px solid #F0C070', borderRadius: 'var(--border-radius-lg)', padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
             <Icon name="info-circle" size={18} />
             <div>
-              <span style={{ fontWeight: 700, color: '#B26A09' }}>Régime {meta.label} — TVA non applicable.</span>
+              <span style={{ fontWeight: 700, color: '#8A5207' }}>Régime {meta.label} — TVA non applicable.</span>
               {' '}Seuls les contribuables RNI (CA ≥ 50 M F CFA) sont habilités à facturer la TVA. Votre régime en est dispensé.
             </div>
           </div>
@@ -392,9 +412,9 @@ export default function TaxPage() {
             <Icon name="building-bank" size={15} />IS / IBICA — Estimation période (27,5%)
           </div>
           {[
-            { label: 'Produits (comptes 7xx)', value: periodRevenue,  sign: '+', color: '#2E7D32' },
+            { label: 'Produits (comptes 7xx)', value: periodRevenue,  sign: '+', color: '#276C2B' },
             { label: 'Charges (comptes 6xx)',  value: periodExpenses, sign: '−', color: '#A32D2D' },
-            { label: 'Résultat fiscal estimé', value: taxableProfit,  sign: taxableProfit >= 0 ? '+' : '−', color: taxableProfit >= 0 ? '#2E7D32' : '#A32D2D', bold: true },
+            { label: 'Résultat fiscal estimé', value: taxableProfit,  sign: taxableProfit >= 0 ? '+' : '−', color: taxableProfit >= 0 ? '#276C2B' : '#A32D2D', bold: true },
           ].map((row, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 18px', borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 12.5, fontWeight: row.bold ? 700 : 400 }}>
               <span style={{ flex: 1 }}>{row.label}</span>
@@ -410,11 +430,11 @@ export default function TaxPage() {
           {retServices > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 18px', borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 12.5 }}>
               <span style={{ flex: 1 }}>4091 — Retenues services subies (20–25%)</span>
-              <span className="mono" style={{ color: '#B26A09', fontWeight: 700 }}>−{fmt(retServices)} F</span>
-              <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#FAEEDA', color: '#B26A09' }}>Imputable IS</span>
+              <span className="mono" style={{ color: '#8A5207', fontWeight: 700 }}>−{fmt(retServices)} F</span>
+              <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#FAEEDA', color: '#8A5207' }}>Imputable IS</span>
             </div>
           )}
-          <div style={{ padding: '9px 18px', background: firstYear ? '#E7F3E2' : 'var(--color-background-secondary)', borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 11, color: firstYear ? '#2E7D32' : 'var(--color-text-tertiary)', fontWeight: firstYear ? 600 : 400 }}>
+          <div style={{ padding: '9px 18px', background: firstYear ? '#E7F3E2' : 'var(--color-background-secondary)', borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 11, color: firstYear ? '#276C2B' : 'var(--color-text-tertiary)', fontWeight: firstYear ? 600 : 400 }}>
             {firstYear
               ? '1ère année d\'exploitation — exonération du minimum forfaitaire IS applicable (Art.88-90 CGI).'
               : 'Estimation sur la base des écritures comptabilisées. Le résultat fiscal définitif inclut les réintégrations et déductions extra-comptables.'}
@@ -428,9 +448,9 @@ export default function TaxPage() {
           </div>
           {deadlines.map((d, i) => {
             const iconBg    = d.status === 'overdue' ? '#FCEBEB' : d.status === 'pending' ? '#FAEEDA' : 'var(--brand-tint)';
-            const iconColor = d.status === 'overdue' ? '#A32D2D' : d.status === 'pending' ? '#B26A09' : 'var(--brand)';
+            const iconColor = d.status === 'overdue' ? '#A32D2D' : d.status === 'pending' ? '#8A5207' : 'var(--brand)';
             const badgeBg   = d.status === 'overdue' ? '#FCEBEB' : d.status === 'pending' ? '#FAEEDA' : 'var(--color-background-secondary)';
-            const badgeColor = d.status === 'overdue' ? '#A32D2D' : d.status === 'pending' ? '#B26A09' : 'var(--color-text-tertiary)';
+            const badgeColor = d.status === 'overdue' ? '#A32D2D' : d.status === 'pending' ? '#8A5207' : 'var(--color-text-tertiary)';
             const badgeLabel = d.status === 'overdue' ? 'En retard' : d.status === 'pending' ? 'À déclarer' : 'À venir';
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 18px', borderTop: i > 0 ? '0.5px solid var(--color-border-tertiary)' : 'none' }}>

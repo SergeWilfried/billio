@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { canManageOrg } from '@/lib/permissions';
+import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
 import Icon from '@/components/Icon';
 import { useApp } from '@/context/AppContext';
@@ -1110,8 +1112,8 @@ function InviteModal({ orgId, userId, onClose, onDone }: InviteModalProps) {
               </select>
               <div className="s-hint" style={{ marginTop: 6 }}>
                 {role === 'admin'      && 'Peut gérer les factures, les clients et inviter des membres.'}
-                {role === 'member'     && 'Peut créer et envoyer des factures.'}
-                {role === 'accountant' && 'Accès en lecture aux rapports et aux paiements.'}
+                {role === 'member'     && 'Peut créer et envoyer des factures, sans suppression.'}
+                {role === 'accountant' && 'Peut saisir les paiements et la comptabilité, sans suppression.'}
                 {role === 'observer'   && 'Accès en lecture seule à tout le workspace.'}
               </div>
             </div>
@@ -1136,7 +1138,8 @@ function InviteModal({ orgId, userId, onClose, onDone }: InviteModalProps) {
 interface InviteLinkRowProps {
   invite:    PendingInvite;
   index:     number;
-  onRevoke:  (id: string) => void;
+  /** Omitted for users who can't manage the team: no revoke button */
+  onRevoke?: (id: string) => void;
 }
 
 function InviteLinkRow({ invite, index, onRevoke }: InviteLinkRowProps) {
@@ -1162,16 +1165,147 @@ function InviteLinkRow({ invite, index, onRevoke }: InviteLinkRowProps) {
       <button className={`btn btn-sm${copied ? ' btn-copied' : ''}`} onClick={copy}>
         {copied ? <><Icon name="check" size={13} /> Copié</> : <><Icon name="link" size={13} /> Copier</>}
       </button>
-      <button className="icon-btn" title="Révoquer l'invitation" onClick={() => onRevoke(invite.id)}>
-        <Icon name="trash" size={15} />
-      </button>
+      {onRevoke && (
+        <button className="icon-btn" title="Révoquer l'invitation" onClick={() => onRevoke(invite.id)}>
+          <Icon name="trash" size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ─── Member dialog (change role / remove) ─────────────────────── */
+const MEMBER_ROLES = [
+  { value: 'admin',      label: 'Administrateur', hint: 'Accès complet, y compris l\'équipe et la facturation Billio.' },
+  { value: 'accountant', label: 'Comptable',      hint: 'Factures, paiements et comptabilité.' },
+  { value: 'member',     label: 'Membre',         hint: 'Factures, devis et clients. Pas de suppression.' },
+  { value: 'observer',   label: 'Observateur',    hint: 'Consultation seule, sans modification.' },
+];
+
+function MemberDialog({ orgId, member, onClose, onUpdated, onRemoved }: {
+  orgId:     string;
+  member:    TeamMember;
+  onClose:   () => void;
+  onUpdated: (role: string) => void;
+  onRemoved: () => void;
+}) {
+  const { showToast } = useApp();
+  const [role, setRole]           = useState(member.role);
+  const [busy, setBusy]           = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const name = memberName(member);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Modal focus: start on the selected role, keep Tab inside, give focus back on close
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLElement>('input:checked, button:not([disabled])')?.focus();
+    return () => opener?.focus();
+  }, []);
+
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) { onClose(); return; }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled])',
+      )).filter(el => !(el instanceof HTMLInputElement && el.type === 'radio' && !el.checked));
+      if (focusable.length === 0) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', fn);
+    return () => window.removeEventListener('keydown', fn);
+  }, [onClose, busy]);
+
+  async function saveRole() {
+    if (role === member.role) { onClose(); return; }
+    setBusy(true);
+    const { error } = await supabase.rpc('update_org_member_role', { p_org_id: orgId, p_user_id: member.user_id, p_role: role });
+    setBusy(false);
+    if (error) {
+      console.error('[update_org_member_role]', error);
+      showToast('Impossible de modifier le rôle. Veuillez réessayer.', true);
+      return;
+    }
+    showToast(`${name} est maintenant ${(ROLE_LABELS[role] ?? role).toLowerCase()}`);
+    onUpdated(role);
+  }
+
+  async function remove() {
+    setBusy(true);
+    const { error } = await supabase.rpc('remove_org_member', { p_org_id: orgId, p_user_id: member.user_id });
+    setBusy(false);
+    if (error) {
+      console.error('[remove_org_member]', error);
+      showToast('Impossible de retirer ce membre. Veuillez réessayer.', true);
+      return;
+    }
+    showToast(`${name} a été retiré de l'équipe`);
+    onRemoved();
+  }
+
+  return (
+    <div className="inv-overlay" onClick={() => { if (!busy) onClose(); }}>
+      <div ref={dialogRef} className="inv-modal" role="dialog" aria-modal="true" aria-label={`Gérer ${name}`} onClick={e => e.stopPropagation()}>
+        <div className="inv-modal-head">
+          <div className="inv-modal-title"><Icon name="user" size={16} ariaHidden /> {name}</div>
+          <button className="btn btn-icon" onClick={onClose} disabled={busy} aria-label="Fermer">
+            <Icon name="x" size={16} ariaHidden />
+          </button>
+        </div>
+        <div className="inv-modal-body">
+          {confirmRemove ? (
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+              {name} ({member.email}) n'aura plus accès à ce workspace. Les factures et documents qu'il ou elle a créés restent en place.
+            </p>
+          ) : (
+            <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <legend className="form-label" style={{ marginBottom: 6 }}>Rôle</legend>
+              {MEMBER_ROLES.map(r => (
+                <label key={r.value} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
+                  <input type="radio" name="member-role" value={r.value} checked={role === r.value} onChange={() => setRole(r.value)} style={{ marginTop: 3 }} />
+                  <span>
+                    <b style={{ fontSize: 13 }}>{r.label}</b>
+                    <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-secondary)' }}>{r.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+        </div>
+        <div className="inv-modal-foot" style={{ justifyContent: 'space-between' }}>
+          {confirmRemove ? (
+            <>
+              <button className="btn" onClick={() => setConfirmRemove(false)} disabled={busy}>Annuler</button>
+              <button className="btn btn-danger" onClick={remove} disabled={busy}>
+                <Icon name="trash" size={14} ariaHidden /> {busy ? 'Retrait…' : 'Retirer de l\'équipe'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-danger" onClick={() => setConfirmRemove(true)} disabled={busy}>
+                <Icon name="trash" size={14} ariaHidden /> Retirer
+              </button>
+              <button className="btn btn-primary" onClick={saveRole} disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 /* ─── Team ──────────────────────────────────────────────────────── */
 function TeamSection() {
-  const { orgId, userId, showToast } = useApp();
+  const { orgId, userId, userRole, showToast } = useApp();
+  // Owners are 'admin' in the app; the database re-checks on every change
+  const canManage = canManageOrg(userRole);
+  const [managing, setManaging] = useState<TeamMember | null>(null);
 
   const [members,     setMembers]     = useState<TeamMember[]>([]);
   const [pending,     setPending]     = useState<PendingInvite[]>([]);
@@ -1205,6 +1339,15 @@ function TeamSection() {
 
   return (
     <>
+      {managing && orgId && (
+        <MemberDialog
+          orgId={orgId}
+          member={managing}
+          onClose={() => setManaging(null)}
+          onUpdated={role => { setMembers(prev => prev.map(m => m.user_id === managing.user_id ? { ...m, role } : m)); setManaging(null); }}
+          onRemoved={() => { setMembers(prev => prev.filter(m => m.user_id !== managing.user_id)); setManaging(null); }}
+        />
+      )}
       {showInvite && orgId && (
         <InviteModal
           orgId={orgId}
@@ -1220,9 +1363,11 @@ function TeamSection() {
             <div className="s-card-title">Membres de l'équipe</div>
             <div className="s-card-desc">Personnes ayant accès à ce workspace Billio.</div>
           </div>
-          <button className="btn btn-sm btn-primary" onClick={() => setShowInvite(true)}>
-            <Icon name="user-plus" size={14} /> Inviter
-          </button>
+          {canManage && (
+            <button className="btn btn-sm btn-primary" onClick={() => setShowInvite(true)}>
+              <Icon name="user-plus" size={14} /> Inviter
+            </button>
+          )}
         </div>
         <div className="s-card-body">
           {loading && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13, padding: '8px 0' }}>Chargement…</div>}
@@ -1241,9 +1386,11 @@ function TeamSection() {
                 <span className={'s-role-badge' + (m.role === 'owner' ? ' owner' : '')}>
                   {ROLE_LABELS[m.role] ?? m.role}
                 </span>
-                <button className="icon-btn" disabled={isMe || m.role === 'owner'}>
-                  <Icon name="dots" size={15} />
-                </button>
+                {canManage && !isMe && m.role !== 'owner' && (
+                  <button className="icon-btn" aria-label={`Gérer ${memberName(m)}`} title="Modifier le rôle ou retirer" onClick={() => setManaging(m)}>
+                    <Icon name="dots" size={15} ariaHidden />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1268,11 +1415,11 @@ function TeamSection() {
                 <div className="inv-empty">
                   <Icon name="user-plus" size={22} />
                   <div className="inv-empty-title">Aucune invitation en attente</div>
-                  <div className="inv-empty-sub">Cliquez sur <b>Inviter</b> pour générer un lien de rejoindre.</div>
+                  {canManage && <div className="inv-empty-sub">Cliquez sur <b>Inviter</b> pour générer un lien de rejoindre.</div>}
                 </div>
               )
               : pending.map((p, i) => (
-                <InviteLinkRow key={p.id} invite={p} index={i} onRevoke={revokeInvite} />
+                <InviteLinkRow key={p.id} invite={p} index={i} onRevoke={canManage ? revokeInvite : undefined} />
               ))
           }
         </div>
@@ -1467,8 +1614,11 @@ function PlanSection() {
 }
 
 /* ─── Main component ────────────────────────────────────────────── */
+const ORG_TABS: SettingsTab[] = ['business', 'invoicing', 'payments', 'providers'];
+
 export default function SettingsPage() {
   const { showToast } = useApp();
+  const { managesOrg } = usePermissions();
   const [tab, setTab] = useState<SettingsTab>('profile');
   const onSave = () => showToast('Paramètres enregistrés');
 
@@ -1479,7 +1629,7 @@ export default function SettingsPage() {
           <div className="page-title">Paramètres</div>
           <div className="page-sub">Gérez vos préférences de workspace et de facturation</div>
         </div>
-        <button className="btn btn-primary" onClick={onSave}>
+        <button className="btn btn-primary" onClick={onSave} disabled={ORG_TABS.includes(tab) && !managesOrg}>
           <Icon name="check" size={15} /> Enregistrer
         </button>
       </div>
@@ -1503,10 +1653,21 @@ export default function SettingsPage() {
           {/* Content */}
           <div className="s-col">
             {tab === 'profile'       && <ProfileSection />}
-            {tab === 'business'      && <BusinessSection />}
-            {tab === 'invoicing'     && <InvoicingSection />}
-            {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
-            {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
+            {ORG_TABS.includes(tab) && !managesOrg && (
+              <div className="s-card">
+                <div className="s-card-body" style={{ color: 'var(--color-text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Icon name="lock" size={16} ariaHidden />
+                  Seuls les administrateurs peuvent modifier ces paramètres.
+                </div>
+              </div>
+            )}
+            {/* Read-only for non-admins: the database only lets owners and admins change the organisation */}
+            <fieldset disabled={!managesOrg} style={{ border: 0, margin: 0, padding: 0, minWidth: 0, display: 'contents' }}>
+              {tab === 'business'      && <BusinessSection />}
+              {tab === 'invoicing'     && <InvoicingSection />}
+              {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
+              {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
+            </fieldset>
             {tab === 'team'          && <TeamSection />}
             {tab === 'plan'          && <PlanSection />}
             {(tab === 'reminders' || tab === 'notifications') && (

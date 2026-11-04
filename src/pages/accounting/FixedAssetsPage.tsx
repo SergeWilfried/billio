@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -8,6 +9,7 @@ import type { FixedAsset } from '@/lib/accounting-data';
 import { fmt, fmtCompact, amortSchedule, netValueOf } from '@/lib/accounting-data';
 import { useFixedAssets } from '@/lib/accounting-hooks';
 import { FixedAssetsEmptyIllustration } from '@/components/accounting/EmptyIllustrations';
+import { exerciseYear } from '@/lib/period';
 
 const ASSET_METHODS = ['Linéaire', 'Dégressif'];
 const ASSET_ICONS = ['building-warehouse', 'device-laptop', 'car', 'tool', 'server', 'printer'] as const;
@@ -103,7 +105,7 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
   const pct = grossValue > 0 ? (amortCumul / grossValue) * 100 : 0;
   const annualAmort = grossValue / asset.usefulLife;
   const schedule = amortSchedule(asset);
-  const currentYear = 2026;
+  const currentYear = exerciseYear();
 
   return (
     <DrawerPanel
@@ -156,6 +158,7 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
 }
 
 export default function FixedAssetsPage() {
+  const { writable } = usePermissions();
   const { data: assets, loading, createAsset } = useFixedAssets();
   const [selected, setSelected] = useState<FixedAsset | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -192,8 +195,8 @@ export default function FixedAssetsPage() {
           <div className="page-sub">Registre des actifs et plan d'amortissement</div>
         </div>
         <div className="topbar-actions">
-          <span className="period-pill"><span className="dot" />Exercice 2026 · ouvert</span>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle immobilisation</button>
+          <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
+          {writable && <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle immobilisation</button>}
         </div>
       </div>
 
@@ -202,7 +205,7 @@ export default function FixedAssetsPage() {
           { icon: 'building-warehouse', iconBg: '#ECE9FB', iconColor: '#5B45C7', label: 'Valeur brute totale', value: fmtCompact(totalGross), unit: 'F CFA', sub: `${fixedAssets.length} immobilisations` },
           { icon: 'trending-down', iconBg: '#FCEBEB', iconColor: '#A32D2D', label: 'Amort. cumulé', value: fmtCompact(totalAmort), unit: 'F CFA', sub: 'Dépréciation totale' },
           { icon: 'chart-bar', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Valeur nette (VNC)', value: fmtCompact(totalNet), unit: 'F CFA', sub: 'Valeur résiduelle' },
-          { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Dotation mensuelle', value: fmtCompact(monthlyAmort), unit: 'F CFA', sub: 'Amortissement du mois' },
+          { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#8A5207', label: 'Dotation mensuelle', value: fmtCompact(monthlyAmort), unit: 'F CFA', sub: 'Amortissement du mois' },
         ]} />
 
         <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>

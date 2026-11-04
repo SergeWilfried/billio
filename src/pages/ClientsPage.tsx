@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
 import Icon from '@/components/Icon';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -7,7 +8,7 @@ import { ClientsEmptyIllustration } from '@/components/PageEmptyIllustrations';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { createClient, updateClient, removeClient } from '@/lib/api/clients';
-import { fmt, clientInitials } from '@/data';
+import { fmt, fmtCompact, clientInitials } from '@/data';
 import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '@/lib/schemas';
 
 type FilterKey = 'all' | 'active' | 'lead' | 'balance';
@@ -43,13 +44,9 @@ const EMPTY_FORM: NewClientForm = {
   name: '', contact: '', email: '', country: '', phone: '', city: '', status: 'active', ifu: '', rccm: '', taxRegime: '', fiscalDivision: '',
 };
 
-function fmtCompact(n: number) {
-  const a = Math.abs(n);
-  if (a >= 1e6) return (n / 1e6).toFixed(a % 1e6 === 0 ? 0 : 1) + 'M';
-  return Math.round(n).toLocaleString('fr-FR');
-}
 
 export default function ClientsPage() {
+  const { writable, deletable } = usePermissions();
   const { clients, setClients, invoices, orgId, showToast, loading } = useApp();
 
   const [filter, setFilter]   = useState<FilterKey>('all');
@@ -164,10 +161,12 @@ export default function ClientsPage() {
             <div className="page-sub">Tous vos clients en un seul endroit</div>
           </div>
           <div className="topbar-actions">
-            <button className="btn btn-primary" onClick={() => setPanel({ kind: 'new' })}>
-              <Icon name="user-plus" size={16} />
-              Nouveau client
-            </button>
+            {writable && (
+              <button className="btn btn-primary" onClick={() => setPanel({ kind: 'new' })}>
+                <Icon name="user-plus" size={16} />
+                Nouveau client
+              </button>
+            )}
           </div>
         </div>
 
@@ -478,17 +477,21 @@ export default function ClientsPage() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}>
-                    <Icon name="edit" size={15} /> Modifier
-                  </button>
+                  {writable && (
+                    <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}>
+                      <Icon name="edit" size={15} /> Modifier
+                    </button>
+                  )}
                   <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
                     <Icon name="plus" size={15} /> Nouvelle facture
                   </button>
                 </div>
               )}
-              <button className="btn btn-ghost btn-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => handleDeleteClient(detailClient)}>
-                <Icon name="trash" size={15} /> Supprimer ce client
-              </button>
+              {deletable && (
+                <button className="btn btn-ghost btn-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => handleDeleteClient(detailClient)}>
+                  <Icon name="trash" size={15} /> Supprimer ce client
+                </button>
+              )}
             </div>
           </>
         )}

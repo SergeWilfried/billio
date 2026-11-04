@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { usePermissions } from '@/lib/use-permissions';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -19,6 +20,10 @@ import type { ClientStatus, ClientRecord, InvoiceStatus, NewClientForm } from '@
 import type { SupplierBill, PaymentMethod } from '@/lib/accounting-data';
 import { useSupplierBills } from '@/lib/accounting-hooks';
 import { ACCOUNTING_ENABLED } from '@/lib/features';
+import { csvBlob } from '@/lib/csv';
+import { todayISO } from '@/lib/invoice-status';
+import { downloadBlob } from '@/lib/download';
+import { VAT_LABEL, VAT_RATE } from '@/lib/vat';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -40,9 +45,9 @@ function supplierAvColor(name: string) {
 function supplierInitials(name: string) {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
-const TODAY = new Date('2026-06-12');
+// Whole calendar days between today and the due date (both at UTC midnight)
 function daysDue(dueDate: string) {
-  return Math.round((new Date(dueDate).getTime() - TODAY.getTime()) / 86400000);
+  return Math.round((Date.parse(dueDate + 'T00:00:00Z') - Date.parse(todayISO() + 'T00:00:00Z')) / 86400000);
 }
 function ageBucket(b: SupplierBill): 'cur' | 'd30' | 'd60' | 'd90' | null {
   if (b.status === 'paid') return null;
@@ -62,8 +67,8 @@ function fmtDate(iso: string) {
 // ─── Aging strip ──────────────────────────────────────────────────────────────
 
 const AGING_SEGS = [
-  { key: 'cur' as const, label: 'Not due',    color: '#2E7D32' },
-  { key: 'd30' as const, label: '1–30 days',  color: '#B26A09' },
+  { key: 'cur' as const, label: 'Not due',    color: '#276C2B' },
+  { key: 'd30' as const, label: '1–30 days',  color: '#8A5207' },
   { key: 'd60' as const, label: '31–60 days', color: '#C2570B' },
   { key: 'd90' as const, label: '60+ days',   color: '#A32D2D' },
 ];
@@ -140,7 +145,6 @@ const PAYMENT_METHOD_ICONS: Record<PaymentMethod, string> = {
   cash:   'cash',
   mobile: 'device-mobile',
 };
-const TVA_RATE = 0.18;
 
 function JournalLines({ lines }: { lines: SupplierBill['acctLines'] }) {
   return (
@@ -161,6 +165,7 @@ function JournalLines({ lines }: { lines: SupplierBill['acctLines'] }) {
 }
 
 function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkPaid: (id: string) => void; onClose: () => void }) {
+  const { writable } = usePermissions();
   const av = supplierAvColor(bill.supplier);
   return (
     <DrawerPanel open onClose={onClose} title={
@@ -199,7 +204,7 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
       <div style={{ border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', overflow: 'hidden', marginBottom: 20 }}>
         {[
           { label: 'Montant HT', value: bill.htAmount },
-          { label: 'TVA (18%)', value: bill.tvaAmount },
+          { label: VAT_LABEL, value: bill.tvaAmount },
           { label: 'Total TTC', value: bill.htAmount + bill.tvaAmount, bold: true, highlight: true },
         ].map(({ label, value, bold, highlight }) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '0.5px solid var(--color-border-tertiary)', background: highlight ? 'var(--brand-tint)' : 'transparent', fontWeight: bold ? 700 : 400, fontSize: 13 }}>
@@ -230,7 +235,7 @@ function BillDrawer({ bill, onMarkPaid, onClose }: { bill: SupplierBill; onMarkP
         );
       })()}
 
-      {bill.status !== 'paid' && (
+      {writable && bill.status !== 'paid' && (
         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { onMarkPaid(bill.id); onClose(); }}>
           <Icon name="check" />Marquer comme payé · <span style={{ opacity: 0.8, fontSize: 12 }}>{PAYMENT_METHOD_LABELS[bill.paymentMethod]}</span>
         </button>
@@ -254,8 +259,8 @@ function NewBillDrawer({ onSave, onClose, initialSupplier = '' }: { onSave: (f: 
   const [saving, setSaving] = useState(false);
   const set = (k: keyof BillForm, v: string) => setForm(p => ({ ...p, [k]: v }));
   const raw = parseFloat(form.htAmount) || 0;
-  const ht  = amountMode === 'ht' ? raw : Math.round(raw / (1 + TVA_RATE));
-  const tva = Math.round(ht * TVA_RATE);
+  const ht  = amountMode === 'ht' ? raw : Math.round(raw / (1 + VAT_RATE));
+  const tva = Math.round(ht * VAT_RATE);
   const ttc = ht + tva;
   const valid = form.supplier.trim() && form.piece.trim() && form.dueDate && raw > 0;
   const handleSave = async () => {
@@ -327,7 +332,7 @@ function NewBillDrawer({ onSave, onClose, initialSupplier = '' }: { onSave: (f: 
 
       {raw > 0 && (
         <div style={{ background: 'var(--color-background-secondary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-md)', padding: '11px 14px', marginBottom: 16 }}>
-          {[{ label: 'Montant HT', value: ht }, { label: 'TVA (18%)', value: tva }, { label: 'Total TTC', value: ttc }].map(({ label, value }, i) => (
+          {[{ label: 'Montant HT', value: ht }, { label: VAT_LABEL, value: tva }, { label: 'Total TTC', value: ttc }].map(({ label, value }, i) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderTop: i > 0 ? '0.5px solid var(--color-border-tertiary)' : 'none', fontWeight: i === 2 ? 700 : 400, fontSize: 12.5 }}>
               <span style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
               <span className="mono">{fmt(value)} F CFA</span>
@@ -399,8 +404,19 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
     const k = ageBucket(b);
     if (k) ageTot[k] = (ageTot[k] || 0) + b.htAmount + b.tvaAmount;
   });
-  const ageCols: Record<string, string> = { cur: '#2E7D32', d30: '#B26A09', d60: '#C2570B', d90: '#A32D2D' };
+  const ageCols: Record<string, string> = { cur: '#276C2B', d30: '#8A5207', d60: '#C2570B', d90: '#A32D2D' };
   const ageTotal = Object.values(ageTot).reduce((a, v) => a + v, 0) || 1;
+
+  // Relevé: every bill from this supplier, as a CSV for Excel
+  const BILL_STATUS: Record<SupplierBill['status'], string> = { open: 'À payer', overdue: 'En retard', paid: 'Payée' };
+  function exportStatement() {
+    const rows = supplier.bills.map(b => [b.date, b.piece, b.dueDate, b.htAmount, b.tvaAmount, b.htAmount + b.tvaAmount, BILL_STATUS[b.status]]);
+    const slug = supplier.name.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'fournisseur';
+    downloadBlob(
+      csvBlob(['Date', 'Pièce', 'Échéance', 'HT (F CFA)', 'TVA (F CFA)', 'TTC (F CFA)', 'Statut'], rows),
+      `releve-${slug}-${todayISO()}.csv`,
+    );
+  }
 
   return (
     <DrawerPanel open onClose={onClose} title={
@@ -483,7 +499,7 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
       </div>
 
       <div style={{ display: 'flex', gap: 9, marginTop: 20 }}>
-        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => {}}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={exportStatement} disabled={supplier.bills.length === 0}>
           <Icon name="download" size={15} />Relevé
         </button>
         <button className="btn btn-primary" style={{ flex: 1.4, justifyContent: 'center' }} onClick={() => { onClose(); onNewBill(supplier.name); }}>
@@ -497,6 +513,7 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
+  const { writable, deletable } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   // Suppliers (and their bills) belong to the accounting module
   const [tab, setTab] = useState<Tab>(() =>
@@ -693,7 +710,7 @@ export default function ContactsPage() {
 
   async function handleCreateBill(billForm: BillForm) {
     const ht = parseFloat(billForm.htAmount);
-    await createBill({ supplier: billForm.supplier, city: billForm.city, piece: billForm.piece, date: billForm.date, dueDate: billForm.dueDate, htAmount: ht, tvaAmount: Math.round(ht * TVA_RATE), status: 'open', paymentMethod: billForm.paymentMethod, ifu: billForm.ifu || undefined, rccm: billForm.rccm || undefined, taxRegime: billForm.taxRegime || undefined, fiscalDivision: billForm.fiscalDivision || undefined });
+    await createBill({ supplier: billForm.supplier, city: billForm.city, piece: billForm.piece, date: billForm.date, dueDate: billForm.dueDate, htAmount: ht, tvaAmount: Math.round(ht * VAT_RATE), status: 'open', paymentMethod: billForm.paymentMethod, ifu: billForm.ifu || undefined, rccm: billForm.rccm || undefined, taxRegime: billForm.taxRegime || undefined, fiscalDivision: billForm.fiscalDivision || undefined });
   }
 
   // ── Contextual KPIs ───────────────────────────────────────────────────────
@@ -701,12 +718,12 @@ export default function ContactsPage() {
     { icon: 'users',        iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)',  label: 'Clients',          value: clients.length,         sub: `${activeCount} actifs · ${leadCount} prospect${leadCount !== 1 ? 's' : ''}` },
     { icon: 'user-check',   iconBg: '#EAF3DE',           iconColor: '#3B6D11',       label: 'Actifs',           value: activeCount,             sub: 'relations de facturation' },
     { icon: 'report-money', iconBg: '#ECE9FB',            iconColor: '#5B45C7',       label: 'Total facturé',    value: fmtCompact(totalBilled), unit: 'F CFA', sub: 'revenu cumulé' },
-    { icon: 'clock-pause',  iconBg: '#FAEEDA',            iconColor: '#B26A09',       label: 'Solde impayé (411)', value: fmtCompact(outstanding), unit: 'F CFA', sub: `${withBalance} client${withBalance !== 1 ? 's' : ''} avec solde` },
+    { icon: 'clock-pause',  iconBg: '#FAEEDA',            iconColor: '#8A5207',       label: 'Solde impayé (411)', value: fmtCompact(outstanding), unit: 'F CFA', sub: `${withBalance} client${withBalance !== 1 ? 's' : ''} avec solde` },
   ] : [
     { icon: 'truck-delivery', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'À payer (401)',    value: fmtCompact(totalPayable), unit: 'F CFA', sub: `${supplierBills.filter(b => b.status !== 'paid').length} factures ouvertes` },
-    { icon: 'clock',          iconBg: '#FAEEDA',            iconColor: '#B26A09',      label: 'Échéance ≤ 7 j.', value: fmtCompact(dueSoon),      unit: 'F CFA', sub: 'à planifier' },
+    { icon: 'clock',          iconBg: '#FAEEDA',            iconColor: '#8A5207',      label: 'Échéance ≤ 7 j.', value: fmtCompact(dueSoon),      unit: 'F CFA', sub: 'à planifier' },
     { icon: 'alert-triangle', iconBg: '#FCEBEB',            iconColor: '#A32D2D',      label: 'En retard',       value: fmtCompact(overdueTTC),   unit: 'F CFA', sub: `${supplierBills.filter(b => b.status === 'overdue').length} facture${supplierBills.filter(b => b.status === 'overdue').length !== 1 ? 's' : ''} échues` },
-    { icon: 'briefcase',      iconBg: '#E7F3E2',            iconColor: '#2E7D32',      label: 'Fournisseurs',    value: suppCount,                sub: 'avec activité' },
+    { icon: 'briefcase',      iconBg: '#E7F3E2',            iconColor: '#276C2B',      label: 'Fournisseurs',    value: suppCount,                sub: 'avec activité' },
   ];
 
   const tabSwitcher = !ACCOUNTING_ENABLED ? <div className="section-title">Clients</div> : (
@@ -731,10 +748,10 @@ export default function ContactsPage() {
           </div>
           <div className="topbar-actions">
             <button className="btn"><Icon name="download" size={15} />Exporter</button>
-            {tab === 'clients'
+            {writable && (tab === 'clients'
               ? <button className="btn btn-primary" onClick={() => setClientPanel({ kind: 'new' })}><Icon name="user-plus" size={15} />Nouveau client</button>
               : <button className="btn btn-primary" onClick={() => setShowBillForm(true)}><Icon name="plus" size={15} />Nouvelle facture</button>
-            }
+            )}
           </div>
         </div>
 
@@ -1032,11 +1049,11 @@ export default function ContactsPage() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}><Icon name="edit" size={15} /> Modifier</button>
+                  {writable && <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => openDetailEdit(detailClient)}><Icon name="edit" size={15} /> Modifier</button>}
                   <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}><Icon name="plus" size={15} /> Nouvelle facture</button>
                 </div>
               )}
-              <button className="btn" style={{ width: '100%', justifyContent: 'center', color: '#A32D2D' }} onClick={() => handleDeleteClient(detailClient)}><Icon name="trash" size={15} /> Supprimer ce client</button>
+              {deletable && <button className="btn" style={{ width: '100%', justifyContent: 'center', color: '#A32D2D' }} onClick={() => handleDeleteClient(detailClient)}><Icon name="trash" size={15} /> Supprimer ce client</button>}
             </div>
           </>
         )}
@@ -1121,7 +1138,8 @@ export default function ContactsPage() {
       {/* ── Supplier drawers ─────────────────────────────────────────────── */}
       {selectedSupplier && (
         <SupplierDetailDrawer
-          supplier={selectedSupplier}
+          // The list's copy: marking a bill paid updates it, the captured one doesn't
+          supplier={supplierContacts.find(s => s.name === selectedSupplier.name) ?? selectedSupplier}
           onMarkPaid={markPaid}
           onNewBill={name => { setBillInitialSupplier(name); setSelectedSupplier(null); setShowBillForm(true); }}
           onClose={() => setSelectedSupplier(null)}

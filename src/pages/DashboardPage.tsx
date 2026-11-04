@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { canWrite, type UserRole } from '@/lib/permissions';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { QAIllustration } from '@/components/QAIllustrations';
@@ -9,6 +10,10 @@ import { useApp } from '@/context/AppContext';
 import { fmt, fmtCompact, fmtDate, fmtDue, clientInitials } from '@/data';
 import type { ActivityPart } from '@/data';
 import { ACCOUNTING_ENABLED } from '@/lib/features';
+import { dashboardMetrics } from '@/lib/dashboard-metrics';
+import { fetchCreditNotes } from '@/lib/api/credit-notes';
+import { todayISO } from '@/lib/invoice-status';
+import type { CreditNote } from '@/lib/schemas';
 
 function ActivityLine({ parts }: { parts: ActivityPart[] }) {
   return (
@@ -18,18 +23,20 @@ function ActivityLine({ parts }: { parts: ActivityPart[] }) {
   );
 }
 
-type Role = 'admin' | 'accountant' | 'member';
+type Role = UserRole;
 
 const ROLE_LABELS: Record<Role, string> = {
   admin: 'Admin',
   accountant: 'Comptable',
   member: 'Membre',
+  observer: 'Observateur',
 };
 
 const ROLE_NOTES: Record<Role, string> = {
   admin: 'Accès complet — gestion et supervision',
   accountant: 'Saisie comptable et déclarations fiscales',
   member: 'Facturation et suivi client',
+  observer: 'Accès en lecture seule',
 };
 
 interface QATile {
@@ -45,7 +52,7 @@ const ROLE_ACTIONS: Record<Role, QATile[]> = {
     { icon: 'file-plus', label: 'Nouvelle facture', sub: 'Envoyer rapidement', primary: true, path: '/invoices' },
     { icon: 'user-plus', label: 'Ajouter un client', sub: 'Carnet d\'adresses', path: '/contacts' },
     { icon: 'chart-bar', label: 'Rapports', sub: 'Analyse des performances', path: '/reports' },
-    { icon: 'credit-card', label: 'Paiements', sub: 'Suivi des encaissements', path: '/payments' },
+    { icon: 'credit-card', label: 'Paiements', sub: 'Suivi des encaissements', path: '/invoices?tab=payments' },
   ],
   accountant: [
     { icon: 'notebook', label: 'Saisir une écriture', sub: 'Journal comptable', primary: true, path: '/accounting/journals' },
@@ -59,25 +66,34 @@ const ROLE_ACTIONS: Record<Role, QATile[]> = {
     { icon: 'users', label: 'Mes clients', sub: 'Carnet d\'adresses', path: '/contacts' },
     { icon: 'bell', label: 'Relances', sub: 'Factures à relancer', path: '/invoices' },
   ],
+  observer: [
+    { icon: 'file-text', label: 'Factures', sub: 'Consulter la facturation', primary: true, path: '/invoices' },
+    { icon: 'users', label: 'Clients', sub: 'Carnet d\'adresses', path: '/contacts' },
+    { icon: 'chart-bar', label: 'Rapports', sub: 'Analyse des performances', path: '/reports' },
+    { icon: 'credit-card', label: 'Paiements', sub: 'Suivi des encaissements', path: '/invoices?tab=payments' },
+  ],
 };
 
 export default function DashboardPage() {
-  const { invoices, activity, clientsMap, loading, userRole } = useApp();
+  const { invoices, payments, activity, clientsMap, loading, userRole, orgId } = useApp();
   const navigate = useNavigate();
   const role = userRole as Role;
   // Accountants get the billing shortcuts while the accounting pages are switched off
   const actionsRole: Role = role === 'accountant' && !ACCOUNTING_ENABLED ? 'member' : role;
 
+  const [showAllActivity, setShowAllActivity] = useState(false);
+
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  useEffect(() => {
+    if (orgId) fetchCreditNotes(orgId).then(setCreditNotes).catch(err => console.error('[fetchCreditNotes]', err));
+  }, [orgId]);
+  // Keyed on the date too, so a dashboard left open past midnight recomputes
+  const today = todayISO();
+  const metrics = useMemo(() => dashboardMetrics(invoices, payments, creditNotes, today), [invoices, payments, creditNotes, today]);
+
   if (loading) return <PageSkeleton title="Tableau de bord" variant="dashboard" />;
 
-  const metrics = useMemo(() => {
-    const totalInvoiced  = invoices.filter(i => i.status !== 'draft').reduce((s, i) => s + i.amount, 0);
-    const collected      = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0);
-    const outstanding    = invoices.filter(i => i.status === 'overdue' || i.status === 'pending').reduce((s, i) => s + i.amount, 0);
-    const overdueCount   = invoices.filter(i => i.status === 'overdue').length;
-    const collectionRate = totalInvoiced ? Math.round((collected / totalInvoiced) * 100) : 0;
-    return { totalInvoiced, collected, outstanding, overdueCount, collectionRate };
-  }, [invoices]);
+  const monthLabel = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
 
   return (
@@ -85,14 +101,14 @@ export default function DashboardPage() {
       <div className="topbar">
         <div>
           <div className="page-title">Tableau de bord</div>
-          <div className="page-sub">Aperçu de juin 2026</div>
+          <div className="page-sub">Aperçu de {monthLabel}</div>
         </div>
         <div className="topbar-actions">
-          <button className="btn"><Icon name="search" ariaHidden /> Rechercher</button>
-          <button className="btn btn-icon" aria-label="Notifications"><Icon name="bell" ariaHidden /></button>
-          <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
-            <Icon name="plus" ariaHidden /> Nouvelle facture
-          </button>
+          {canWrite(role) && (
+            <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
+              <Icon name="plus" ariaHidden /> Nouvelle facture
+            </button>
+          )}
         </div>
       </div>
 
@@ -105,7 +121,16 @@ export default function DashboardPage() {
               <div className="metric-label">Total facturé</div>
             </div>
             <div className="metric-value tnum">{fmtCompact(metrics.totalInvoiced)}<span className="metric-unit">F CFA</span></div>
-            <div className="metric-change"><span className="up"><Icon name="trending-up" size={14} ariaHidden />+12 % MoM</span></div>
+            <div className="metric-change">
+              {metrics.monthOverMonthPct === null
+                ? <span className="neutral">{fmtCompact(metrics.invoicedThisMonth)} F CFA ce mois-ci</span>
+                : metrics.monthOverMonthPct === 0
+                ? <span className="neutral">Stable vs mois dernier</span>
+                : <span className={metrics.monthOverMonthPct >= 0 ? 'up' : 'dn'}>
+                    <Icon name={metrics.monthOverMonthPct >= 0 ? 'trending-up' : 'trending-down'} size={14} ariaHidden />
+                    {metrics.monthOverMonthPct >= 0 ? '+' : '−'}{Math.abs(metrics.monthOverMonthPct)} % vs mois dernier
+                  </span>}
+            </div>
           </div>
 
           <div className="metric-card">
@@ -131,8 +156,15 @@ export default function DashboardPage() {
               <div className="metric-ico violet"><Icon name="calendar-stats" size={15} ariaHidden /></div>
               <div className="metric-label">Délai moy. de paiement</div>
             </div>
-            <div className="metric-value tnum">8,4<span className="metric-unit">jours</span></div>
-            <div className="metric-change"><span className="up"><Icon name="trending-down" size={14} ariaHidden />−2,1 jours</span></div>
+            <div className="metric-value tnum">
+              {metrics.avgDaysToPay === null ? '—' : metrics.avgDaysToPay.toLocaleString('fr-FR')}
+              {metrics.avgDaysToPay !== null && <span className="metric-unit">jours</span>}
+            </div>
+            <div className="metric-change">
+              <span className="neutral">
+                {metrics.settledCount === 0 ? 'Pas encore de paiement à mesurer' : `Sur ${metrics.settledCount} facture${metrics.settledCount > 1 ? 's' : ''} soldée${metrics.settledCount > 1 ? 's' : ''}`}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -206,7 +238,11 @@ export default function DashboardPage() {
           <div className="panel">
             <div className="panel-head">
               <div className="panel-title">Activité récente</div>
-              <button className="panel-link">Tout voir</button>
+              {activity.length > 5 && (
+                <button className="panel-link" aria-expanded={showAllActivity} onClick={() => setShowAllActivity(v => !v)}>
+                  {showAllActivity ? 'Réduire' : `Tout voir (${activity.length})`}
+                </button>
+              )}
             </div>
             {activity.length === 0 ? (
               <EmptyState
@@ -214,7 +250,7 @@ export default function DashboardPage() {
                 title="Aucune activité récente"
                 description="Les actions sur vos factures, clients et paiements apparaîtront ici."
               />
-            ) : activity.slice(0, 5).map((item, i) => (
+            ) : (showAllActivity ? activity : activity.slice(0, 5)).map((item, i) => (
               <div key={i} className="activity-item">
                 <div className={`act-dot ${item.kind}`} />
                 <div>
@@ -232,7 +268,7 @@ export default function DashboardPage() {
                 <div className="panel-title">Actions rapides</div>
               </div>
               <div className="qa-role-note">
-                <Icon name={role === 'admin' ? 'shield-check' : role === 'accountant' ? 'book' : 'user'} size={13} ariaHidden />
+                <Icon name={role === 'admin' ? 'shield-check' : role === 'accountant' ? 'book' : role === 'observer' ? 'eye' : 'user'} size={13} ariaHidden />
                 {' '}<b>{ROLE_LABELS[role]}</b> — {ROLE_NOTES[actionsRole]}
               </div>
             </div>
