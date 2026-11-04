@@ -842,8 +842,8 @@ export default function InvoicePage() {
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', display: 'flex', flexDirection: 'column', gap: 3 }}>
               <div>Montant réglé : <b>{fmt(payAmount)} F CFA</b>{payAmount < balance && <> · reste ensuite {fmt(balance - payAmount)} F CFA</>}</div>
               {(tvaRetenue > 0 || serviceWithholding > 0) && (<>
-                {tvaRetenue > 0       && <div style={{ color: '#2E7D32' }}>TVA retenue (4449) : −{fmt(tvaRetenue)} F</div>}
-                {serviceWithholding > 0 && <div style={{ color: '#B26A09' }}>Ret. services (4091) : −{fmt(serviceWithholding)} F</div>}
+                {tvaRetenue > 0       && <div style={{ color: '#276C2B' }}>TVA retenue (4449) : −{fmt(tvaRetenue)} F</div>}
+                {serviceWithholding > 0 && <div style={{ color: '#8A5207' }}>Ret. services (4091) : −{fmt(serviceWithholding)} F</div>}
                 <div style={{ fontWeight: 700 }}>Vous recevrez : {fmt(payAmount - tvaRetenue - serviceWithholding)} F CFA</div>
               </>)}
             </div>
