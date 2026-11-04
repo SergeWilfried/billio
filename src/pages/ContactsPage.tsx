@@ -67,8 +67,8 @@ function fmtDate(iso: string) {
 // ─── Aging strip ──────────────────────────────────────────────────────────────
 
 const AGING_SEGS = [
-  { key: 'cur' as const, label: 'Not due',    color: '#2E7D32' },
-  { key: 'd30' as const, label: '1–30 days',  color: '#B26A09' },
+  { key: 'cur' as const, label: 'Not due',    color: '#276C2B' },
+  { key: 'd30' as const, label: '1–30 days',  color: '#8A5207' },
   { key: 'd60' as const, label: '31–60 days', color: '#C2570B' },
   { key: 'd90' as const, label: '60+ days',   color: '#A32D2D' },
 ];
@@ -404,7 +404,7 @@ function SupplierDetailDrawer({ supplier, onClose, onMarkPaid, onNewBill }: {
     const k = ageBucket(b);
     if (k) ageTot[k] = (ageTot[k] || 0) + b.htAmount + b.tvaAmount;
   });
-  const ageCols: Record<string, string> = { cur: '#2E7D32', d30: '#B26A09', d60: '#C2570B', d90: '#A32D2D' };
+  const ageCols: Record<string, string> = { cur: '#276C2B', d30: '#8A5207', d60: '#C2570B', d90: '#A32D2D' };
   const ageTotal = Object.values(ageTot).reduce((a, v) => a + v, 0) || 1;
 
   // Relevé: every bill from this supplier, as a CSV for Excel
@@ -718,12 +718,12 @@ export default function ContactsPage() {
     { icon: 'users',        iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)',  label: 'Clients',          value: clients.length,         sub: `${activeCount} actifs · ${leadCount} prospect${leadCount !== 1 ? 's' : ''}` },
     { icon: 'user-check',   iconBg: '#EAF3DE',           iconColor: '#3B6D11',       label: 'Actifs',           value: activeCount,             sub: 'relations de facturation' },
     { icon: 'report-money', iconBg: '#ECE9FB',            iconColor: '#5B45C7',       label: 'Total facturé',    value: fmtCompact(totalBilled), unit: 'F CFA', sub: 'revenu cumulé' },
-    { icon: 'clock-pause',  iconBg: '#FAEEDA',            iconColor: '#B26A09',       label: 'Solde impayé (411)', value: fmtCompact(outstanding), unit: 'F CFA', sub: `${withBalance} client${withBalance !== 1 ? 's' : ''} avec solde` },
+    { icon: 'clock-pause',  iconBg: '#FAEEDA',            iconColor: '#8A5207',       label: 'Solde impayé (411)', value: fmtCompact(outstanding), unit: 'F CFA', sub: `${withBalance} client${withBalance !== 1 ? 's' : ''} avec solde` },
   ] : [
     { icon: 'truck-delivery', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'À payer (401)',    value: fmtCompact(totalPayable), unit: 'F CFA', sub: `${supplierBills.filter(b => b.status !== 'paid').length} factures ouvertes` },
-    { icon: 'clock',          iconBg: '#FAEEDA',            iconColor: '#B26A09',      label: 'Échéance ≤ 7 j.', value: fmtCompact(dueSoon),      unit: 'F CFA', sub: 'à planifier' },
+    { icon: 'clock',          iconBg: '#FAEEDA',            iconColor: '#8A5207',      label: 'Échéance ≤ 7 j.', value: fmtCompact(dueSoon),      unit: 'F CFA', sub: 'à planifier' },
     { icon: 'alert-triangle', iconBg: '#FCEBEB',            iconColor: '#A32D2D',      label: 'En retard',       value: fmtCompact(overdueTTC),   unit: 'F CFA', sub: `${supplierBills.filter(b => b.status === 'overdue').length} facture${supplierBills.filter(b => b.status === 'overdue').length !== 1 ? 's' : ''} échues` },
-    { icon: 'briefcase',      iconBg: '#E7F3E2',            iconColor: '#2E7D32',      label: 'Fournisseurs',    value: suppCount,                sub: 'avec activité' },
+    { icon: 'briefcase',      iconBg: '#E7F3E2',            iconColor: '#276C2B',      label: 'Fournisseurs',    value: suppCount,                sub: 'avec activité' },
   ];
 
   const tabSwitcher = !ACCOUNTING_ENABLED ? <div className="section-title">Clients</div> : (

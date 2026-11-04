@@ -304,9 +304,9 @@ export default function ChartOfAccountsPage() {
       <div className="content">
         <KPIStrip items={[
           { icon: 'book', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Comptes', value: accounts.length, sub: `${usedClassCount} classes utilisées` },
-          { icon: 'building-bank', iconBg: '#E7F3E2', iconColor: '#2E7D32', label: 'Trésorerie (5x)', value: fmtCompact(cash), unit: 'F CFA', sub: 'Banque + caisse' },
+          { icon: 'building-bank', iconBg: '#E7F3E2', iconColor: '#276C2B', label: 'Trésorerie (5x)', value: fmtCompact(cash), unit: 'F CFA', sub: 'Banque + caisse' },
           { icon: 'receipt', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'Créances (411)', value: fmtCompact(recv), unit: 'F CFA', sub: 'Clients à encaisser' },
-          { icon: 'truck-delivery', iconBg: '#FCEFE0', iconColor: '#B26A09', label: 'Dettes (401)', value: fmtCompact(pay), unit: 'F CFA', sub: 'Fournisseurs à payer' },
+          { icon: 'truck-delivery', iconBg: '#FCEFE0', iconColor: '#8A5207', label: 'Dettes (401)', value: fmtCompact(pay), unit: 'F CFA', sub: 'Fournisseurs à payer' },
         ]} />
 
         <div className="acc-toolbar">

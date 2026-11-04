@@ -205,7 +205,7 @@ export default function FixedAssetsPage() {
           { icon: 'building-warehouse', iconBg: '#ECE9FB', iconColor: '#5B45C7', label: 'Valeur brute totale', value: fmtCompact(totalGross), unit: 'F CFA', sub: `${fixedAssets.length} immobilisations` },
           { icon: 'trending-down', iconBg: '#FCEBEB', iconColor: '#A32D2D', label: 'Amort. cumulé', value: fmtCompact(totalAmort), unit: 'F CFA', sub: 'Dépréciation totale' },
           { icon: 'chart-bar', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Valeur nette (VNC)', value: fmtCompact(totalNet), unit: 'F CFA', sub: 'Valeur résiduelle' },
-          { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#B26A09', label: 'Dotation mensuelle', value: fmtCompact(monthlyAmort), unit: 'F CFA', sub: 'Amortissement du mois' },
+          { icon: 'calendar', iconBg: '#FAEEDA', iconColor: '#8A5207', label: 'Dotation mensuelle', value: fmtCompact(monthlyAmort), unit: 'F CFA', sub: 'Amortissement du mois' },
         ]} />
 
         <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
