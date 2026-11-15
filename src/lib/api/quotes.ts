@@ -25,6 +25,12 @@ export function dbToQuote(row: Record<string, unknown>): Quote {
   };
 }
 
+/** The quote was invoiced, declined or expired meanwhile: the editor's changes were not saved. */
+export class QuoteLockedError extends Error {
+  readonly quoteId: string;
+  constructor(quoteId: string) { super(`quote ${quoteId} can no longer be edited`); this.name = 'QuoteLockedError'; this.quoteId = quoteId; }
+}
+
 export async function nextQuoteId(orgId: string): Promise<string> {
   if (MOCK) return 'QUO-' + String(Math.floor(Math.random() * 9000) + 1000);
   const { data, error } = await supabase.rpc('next_quote_number', { p_org_id: orgId });
@@ -77,7 +83,7 @@ export async function updateQuote(
   id: string,
   patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount' | 'discountPct'>> & { invoiceId?: string | null; notes?: Quote['notes'] | null },
   /** Only when the quote still links to this invoice (clearing a link that may have changed meanwhile) */
-  opts: { onlyIfInvoiceId?: string } = {},
+  opts: { onlyIfInvoiceId?: string; onlyEditable?: boolean } = {},
 ): Promise<void> {
   if (MOCK) return;
   const dbPatch: Record<string, unknown> = {};
@@ -92,6 +98,13 @@ export async function updateQuote(
   if (patch.notes !== undefined) dbPatch.notes = patch.notes;
   let query = supabase.from('quotes').update(dbPatch).eq('org_id', orgId).eq('id', id);
   if (opts.onlyIfInvoiceId) query = query.eq('invoice_id', opts.onlyIfInvoiceId);
+  if (opts.onlyEditable) {
+    // Invoiced, declined or expired meanwhile: nothing is written, and the caller stops
+    const { data, error } = await query.in('status', ['draft', 'sent', 'accepted']).select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) throw new QuoteLockedError(id);
+    return;
+  }
   const { error } = await query;
   if (error) throw error;
 }

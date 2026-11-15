@@ -31,9 +31,9 @@ import { useComplianceGuard } from '@/lib/use-compliance-guard';
 import { useDismiss } from '@/lib/use-dismiss';
 import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { filledLines } from '@/lib/line-validation';
-import { deleteLineItems, fetchLineItems } from '@/lib/api/line-items';
+import { fetchLineItems } from '@/lib/api/line-items';
 import { removeInvoice } from '@/lib/api/invoices';
-import { removeQuote, updateQuote } from '@/lib/api/quotes';
+import { QuoteLockedError, removeQuote, updateQuote } from '@/lib/api/quotes';
 import { saveQuoteDraft } from '@/lib/api/quote-drafts';
 import { createProduct } from '@/lib/api/products';
 import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
@@ -405,8 +405,14 @@ export default function InvoiceEditorPage({ doc = 'invoice' }: { doc?: 'invoice'
     return run;
   }
 
-  /** The draft was issued in another tab or by someone else: nothing was written; open it as issued. */
+  /** The draft was issued (or the quote invoiced, declined, expired) elsewhere: nothing was written; open it. */
   function onIssuedElsewhere(err: unknown): boolean {
+    if (err instanceof QuoteLockedError) {
+      showToast('Ce devis a été facturé, refusé ou a expiré entre-temps : vos modifications n’ont pas été enregistrées.', true);
+      leaveOk.current = true;
+      navigate(`/quotes/${err.quoteId}`, { replace: true });
+      return true;
+    }
     if (!(err instanceof DraftIssuedError)) return false;
     showToast('Cette facture a été émise entre-temps : vos modifications n’ont pas été enregistrées.', true);
     leaveOk.current = true;
@@ -531,6 +537,7 @@ export default function InvoiceEditorPage({ doc = 'invoice' }: { doc?: 'invoice'
       leaveOk.current = true;
       navigate(`/quotes/${q.id}`, { replace: true });
     } catch (err) {
+      if (onIssuedElsewhere(err)) return;
       console.error('[saveQuote]', err);
       showToast('Le devis n’a pas pu être enregistré. Réessayez.', true);
     } finally {
@@ -591,7 +598,7 @@ export default function InvoiceEditorPage({ doc = 'invoice' }: { doc?: 'invoice'
       if (!window.confirm(`Supprimer le devis ${saved.id} ?`)) return;
       busyRef.current = true; setBusy('delete');
       try {
-        await deleteLineItems(orgId, { quoteId: saved.id });
+        // Its lines go with it (on delete cascade)
         await removeQuote(orgId, saved.id);
         setQuotes(prev => prev.filter(q => q.id !== saved.id));
         showToast('Devis supprimé');

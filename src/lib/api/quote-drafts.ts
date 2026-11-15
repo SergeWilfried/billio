@@ -39,7 +39,8 @@ export async function saveQuoteDraft(orgId: string, opts: { id?: string; status?
     }
     return { ...stored, ...base };
   }
-  await updateQuote(orgId, opts.id, { ...base, notes: fields.notes });
+  // Only while it can still be edited: invoiced, declined or expired meanwhile, its lines stay as they are
+  await updateQuote(orgId, opts.id, { ...base, notes: fields.notes }, { onlyEditable: true });
   await deleteLineItems(orgId, { quoteId: opts.id });
   await saveLineItems(orgId, lines, { quoteId: opts.id });
   return { id: opts.id, ...base, expSoon: daysLeft > 0 && daysLeft <= 14, status: opts.status ?? 'draft' };
