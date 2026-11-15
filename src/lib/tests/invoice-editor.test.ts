@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { draftProblem, editorTotals, issueProblem, lineProblems, previewDoc } from '@/lib/invoice-editor';
+import { draftProblem, editorTotals, issueProblem, lineProblems } from '@/lib/invoice-editor';
 import type { LineItem } from '@/lib/schemas';
 
 const line = (id: string, desc: string, qty: number, price: number): LineItem => ({ id, desc, qty, price, unit: 'unité' });
@@ -34,20 +34,5 @@ describe('draft and issue checks', () => {
     const zero = [...ok, line('b', 'Offert', 1, 0)];
     expect(draftProblem('C1', '2026-11-15', '2026-11-29', zero)).toBeNull();
     expect(issueProblem('C1', '2026-11-15', '2026-11-29', zero)).toMatch(/montant nul/);
-  });
-});
-
-describe('previewDoc', () => {
-  it('leaves the number for issuing and marks the draft', () => {
-    const lines = [line('a', 'Conseil', 1, 100_000)];
-    const doc = previewDoc({
-      client: { name: 'Sahel SA', city: 'Ouagadougou', av: 'av-a', country: 'Burkina Faso', ifu: '00012345A', clientType: 'PM' },
-      subject: '', issued: '2026-11-15', due: '2026-11-29', lines, discountPct: 0, totals: editorTotals(lines, 0, false),
-    });
-    expect(doc.number).toMatch(/émission/);
-    expect(doc.watermark).toBe('BROUILLON');
-    expect(doc.subject).toBe('Facture sans titre');
-    expect(doc.client.ids[0]).toMatch(/00012345A/);
-    expect(doc.words).toMatch(/cent mille/);
   });
 });

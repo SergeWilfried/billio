@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { INITIAL_INVOICES, mockOwner } from '@/data';
 import type { Invoice } from '@/lib/schemas';
+import { cleanRichText, type RichDoc } from '@/lib/rich-text';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
@@ -19,6 +20,7 @@ export function dbToInvoice(row: Record<string, unknown>): Invoice {
     issuedByName: row.issued_by_name ? String(row.issued_by_name) : undefined,
     ownerId:     row.owner_id ? String(row.owner_id) : undefined,
     ownerName:   row.owner_name ? String(row.owner_name) : undefined,
+    notes:       cleanRichText(row.notes) ?? undefined,
   };
 }
 
@@ -41,7 +43,7 @@ export async function fetchInvoices(orgId: string): Promise<Invoice[]> {
 
 export async function createInvoice(
   orgId: string,
-  payload: Pick<Invoice, 'id' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'status' | 'discountPct'> & Pick<Invoice, 'ownerId'>,
+  payload: Pick<Invoice, 'id' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'status' | 'discountPct'> & Pick<Invoice, 'ownerId' | 'notes'>,
 ): Promise<Invoice> {
   if (MOCK) return { ...payload, number: payload.status === 'draft' ? undefined : mockNumber(), ...mockOwner(payload.ownerId) };
   const { data: { user } } = await supabase.auth.getUser();
@@ -57,6 +59,7 @@ export async function createInvoice(
       amount:       payload.amount,
       status:       payload.status,
       discount_pct: payload.discountPct ?? 0,
+      ...(payload.notes ? { notes: payload.notes } : {}),
       created_by:   user?.id ?? null,
       // The database makes the creator the owner unless this names another
       // member (an invoice made from a quote keeps the quote's owner)
@@ -69,7 +72,7 @@ export async function createInvoice(
 }
 
 /** Returns the invoice's first issue time and legal number, as the database set them. */
-export async function updateInvoice(orgId: string, id: string, patch: Partial<Pick<Invoice, 'status' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'discountPct'>>): Promise<{ firstIssuedAt?: string; number?: string; issuedByName?: string }> {
+export async function updateInvoice(orgId: string, id: string, patch: Partial<Pick<Invoice, 'status' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'discountPct'>> & { notes?: RichDoc | null }): Promise<{ firstIssuedAt?: string; number?: string; issuedByName?: string }> {
   if (MOCK) return patch.status && patch.status !== 'draft' ? { number: mockNumber() } : {};
   const dbPatch: Record<string, unknown> = {};
   if (patch.status      !== undefined) dbPatch.status       = patch.status;
@@ -79,6 +82,7 @@ export async function updateInvoice(orgId: string, id: string, patch: Partial<Pi
   if (patch.due         !== undefined) dbPatch.due_at       = patch.due;
   if (patch.amount      !== undefined) dbPatch.amount       = patch.amount;
   if (patch.discountPct !== undefined) dbPatch.discount_pct = patch.discountPct;
+  if (patch.notes       !== undefined) dbPatch.notes        = patch.notes;
   const { data, error } = await supabase.from('invoices').update(dbPatch).eq('org_id', orgId).eq('id', id)
     .select('first_issued_at, number, issued_by_name').maybeSingle();
   if (error) throw error;

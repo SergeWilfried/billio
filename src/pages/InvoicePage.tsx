@@ -34,6 +34,7 @@ import { VAT_LABEL, chargesVat, documentHasVat, splitTtc, vatOn } from '@/lib/va
 import Page from '@/components/Page';
 import { OwnerLine } from '@/components/owner/OwnerControls';
 import InvoiceSide from '@/components/invoice/InvoiceSide';
+import RichTextView from '@/components/RichTextView';
 import MoreMenu from '@/components/MoreMenu';
 import StatusPill from '@/components/sales/StatusPill';
 import { UI_V2 } from '@/lib/features';
@@ -226,7 +227,7 @@ export default function InvoicePage() {
       const issued = todayISO();
       const due = new Date(Date.parse(issued + 'T00:00:00Z') + termDays * 86_400_000).toISOString().slice(0, 10);
       const id = newDraftId();
-      const copy = { id, subject: invoice.subject, client: invoice.client, issued, due, amount: total, status: 'draft' as const, discountPct };
+      const copy = { id, subject: invoice.subject, client: invoice.client, issued, due, amount: total, status: 'draft' as const, discountPct, notes: invoice.notes };
       // The copy belongs to whoever duplicates it (set by the database, PRO-172)
       const stored = await createInvoice(orgId, copy);
       try {
@@ -709,10 +710,12 @@ export default function InvoicePage() {
                 </div>
               </div>
               <div>
-                <div className="pp-block-label">Notes</div>
-                <div className="pp-note">
-                  Merci pour votre confiance. Conditions de paiement : {orgSettings.paymentTerms || 'Net 14 jours'}.
-                </div>
+                <div className="pp-block-label">{invoice.notes ? 'Notes et conditions' : 'Notes'}</div>
+                {invoice.notes
+                  ? <RichTextView doc={invoice.notes} className="pp-note rich-text" />
+                  : <div className="pp-note">
+                      Merci pour votre confiance. Conditions de paiement : {orgSettings.paymentTerms || 'Net 14 jours'}.
+                    </div>}
               </div>
             </div>
 

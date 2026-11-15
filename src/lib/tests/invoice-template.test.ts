@@ -59,13 +59,15 @@ describe('QR code', () => {
 describe('invoice PDF', () => {
   // The app loads the fonts by URL; under Node they are read from disk
   const mod = (path: string) => decodeURIComponent(new URL(`../../../node_modules/${path}`, import.meta.url).pathname);
-  const file = (pkg: string, w: number) => mod(`@fontsource/${pkg}/files/${pkg}-latin-${w}-normal.woff`);
+  const file = (pkg: string, w: number, style = 'normal') => mod(`@fontsource/${pkg}/files/${pkg}-latin-${w}-${style}.woff`);
   registerPdfFonts({
-    Jakarta: [file('plus-jakarta-sans', 400), file('plus-jakarta-sans', 700)],
+    Jakarta: [file('plus-jakarta-sans', 400), file('plus-jakarta-sans', 700), file('plus-jakarta-sans', 400, 'italic'), file('plus-jakarta-sans', 700, 'italic')],
     Grotesk: [file('space-grotesk', 400), file('space-grotesk', 700)],
-    Lora:    [file('lora', 400), file('lora', 700)],
+    Lora:    [file('lora', 400), file('lora', 700), file('lora', 400, 'italic'), file('lora', 700, 'italic')],
     Plex:    [mod('@ibm/plex-mono/fonts/complete/woff/IBMPlexMono-Regular.woff'),
-              mod('@ibm/plex-mono/fonts/complete/woff/IBMPlexMono-Bold.woff')],
+              mod('@ibm/plex-mono/fonts/complete/woff/IBMPlexMono-Bold.woff'),
+              mod('@ibm/plex-mono/fonts/complete/woff/IBMPlexMono-Italic.woff'),
+              mod('@ibm/plex-mono/fonts/complete/woff/IBMPlexMono-BoldItalic.woff')],
   });
 
   const props: InvoicePDFProps = {
@@ -90,5 +92,26 @@ describe('invoice PDF', () => {
     expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
     const plain = await renderToBuffer(createElement(InvoicePDFDocument, { ...props, lines: props.lines.slice(0, 3), template }) as Parameters<typeof renderToBuffer>[0]);
     expect(buf.length).toBeGreaterThan(plain.length);
+  }, 30000);
+
+  // Notes and conditions (PRO-167): bold, italic, underline, links and lists in every font
+  it.each(PRESETS.map(p => [p.key, p.config] as const))('prints formatted notes in the %s template', async (_key, template) => {
+    const notes = {
+      type: 'doc' as const,
+      content: [
+        { type: 'paragraph' as const, content: [
+          { type: 'text' as const, text: 'Paiement à ' },
+          { type: 'text' as const, text: '30 jours', marks: [{ type: 'bold' as const }, { type: 'italic' as const }] },
+          { type: 'text' as const, text: ' — ' },
+          { type: 'text' as const, text: 'conditions', marks: [{ type: 'link' as const, attrs: { href: 'https://example.invalid/cgv' } }, { type: 'underline' as const }] },
+        ] },
+        { type: 'bulletList' as const, content: [{ type: 'listItem' as const, content: [{ type: 'paragraph' as const, content: [{ type: 'text' as const, text: 'Pénalités : 1 %', marks: [{ type: 'italic' as const }] }] }] }] },
+      ],
+    };
+    const short = { ...props, lines: props.lines.slice(0, 3) };
+    const buf = await renderToBuffer(createElement(InvoicePDFDocument, { ...short, template, invoice: { ...short.invoice, notes } }) as Parameters<typeof renderToBuffer>[0]);
+    expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
+    const plain = await renderToBuffer(createElement(InvoicePDFDocument, { ...short, template }) as Parameters<typeof renderToBuffer>[0]);
+    expect(buf.length).not.toBe(plain.length);
   }, 30000);
 });

@@ -7,6 +7,7 @@ import { createInvoice, fetchInvoiceIssue, newDraftId, removeInvoice, updateInvo
 import { deleteLineItems, saveLineItems } from '@/lib/api/line-items';
 import { filledLines } from '@/lib/line-validation';
 import type { Invoice, LineItem } from '@/lib/schemas';
+import type { RichDoc } from '@/lib/rich-text';
 
 export interface DraftFields {
   client: string;
@@ -16,6 +17,8 @@ export interface DraftFields {
   discountPct: number;
   /** TTC of the lines, after discount and VAT */
   amount: number;
+  /** Notes and conditions, already cleaned; null for none */
+  notes: RichDoc | null;
 }
 
 /**
@@ -35,7 +38,7 @@ export async function saveInvoiceDraft(orgId: string, opts: {
   const lines = filledLines(opts.lines);
   if (!opts.id) {
     const id = newDraftId();
-    const draft: Invoice = { id, subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, status: 'draft', discountPct: fields.discountPct };
+    const draft: Invoice = { id, subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, status: 'draft', discountPct: fields.discountPct, notes: fields.notes ?? undefined };
     const stored = await createInvoice(orgId, { ...draft, ownerId: opts.ownerId });
     try {
       await saveLineItems(orgId, lines, { invoiceId: id });
@@ -45,10 +48,10 @@ export async function saveInvoiceDraft(orgId: string, opts: {
     }
     return { ...draft, ownerId: stored.ownerId, ownerName: stored.ownerName };
   }
-  await updateInvoice(orgId, opts.id, { subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, discountPct: fields.discountPct });
+  await updateInvoice(orgId, opts.id, { subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, discountPct: fields.discountPct, notes: fields.notes });
   await deleteLineItems(orgId, { invoiceId: opts.id });
   await saveLineItems(orgId, lines, { invoiceId: opts.id });
-  return { id: opts.id, subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, status: 'draft', discountPct: fields.discountPct };
+  return { id: opts.id, subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, status: 'draft', discountPct: fields.discountPct, notes: fields.notes ?? undefined };
 }
 
 /**

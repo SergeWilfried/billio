@@ -1,14 +1,9 @@
-// The full-page invoice editor (PRO-167): totals, the problems shown on each
-// line, and the document its live A4 preview draws. One discount and one VAT
+// The invoice editor (PRO-167): totals and the problems shown on each line. One discount and one VAT
 // rate per invoice (the organisation's regime); per-line rates are PRO-182.
 
 import { vatOn } from '@/lib/vat';
 import { filledLines } from '@/lib/line-validation';
-import { invoiceTotalMention } from '@/lib/amount-in-words';
-import { getFiscalIdLabel } from '@/lib/ohada';
-import { clientTypeDef, clientTypeOf } from '@/lib/client-type';
-import type { PaperDoc } from '@/components/InvoicePaper';
-import type { Client, LineItem } from '@/lib/schemas';
+import type { LineItem } from '@/lib/schemas';
 
 export interface EditorTotals { subtotal: number; discount: number; net: number; tax: number; total: number }
 
@@ -51,35 +46,4 @@ export function issueProblem(client: string, issued: string, due: string, lines:
   if (draft) return draft;
   if (Object.keys(lineProblems(lines)).length > 0) return 'Une ligne a un montant nul : corrigez-la avant d’émettre.';
   return null;
-}
-
-const longDate = (iso: string) => iso
-  ? new Date(`${iso}T00:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-  : '—';
-
-/** The live preview's document: what will print, with the number and issue time left for issuing. */
-export function previewDoc(opts: {
-  client?: Client; subject: string; issued: string; due: string;
-  lines: LineItem[]; discountPct: number; totals: EditorTotals;
-}): PaperDoc {
-  const c = opts.client;
-  const ids = c ? [
-    c.ifu && `${getFiscalIdLabel(c.country ?? 'Burkina Faso')} ${c.ifu}`,
-    c.rccm && `RCCM ${c.rccm}`,
-    c.taxRegime, c.fiscalDivision,
-  ].filter((x): x is string => Boolean(x)) : [];
-  return {
-    number: 'N° attribué à l’émission',
-    issued: longDate(opts.issued),
-    due: longDate(opts.due),
-    subject: opts.subject.trim() || 'Facture sans titre',
-    client: c
-      ? { name: c.name, typeMention: clientTypeDef(clientTypeOf(c)).mention, city: [c.city, c.country].filter(v => v && v !== '—').join(', '), ids }
-      : { name: 'Client à choisir', city: '', ids: [] },
-    lines: filledLines(opts.lines).map(l => ({ desc: l.desc || '—', note: l.unit && l.unit !== 'unité' ? `par ${l.unit}` : undefined, qty: l.qty, price: l.price })),
-    discount: opts.totals.discount,
-    discountPct: opts.discountPct || undefined,
-    words: opts.totals.total > 0 ? invoiceTotalMention(opts.totals.total) : undefined,
-    watermark: 'BROUILLON',
-  };
 }

@@ -2,7 +2,8 @@ import { invoiceRef } from '@/lib/invoice-number';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
 import type { ReactNode } from 'react';
-import { Document, Page, View, Text, StyleSheet, Svg, Rect } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Link, StyleSheet, Svg, Rect } from '@react-pdf/renderer';
+import { cleanRichText, type RichBlock, type RichDoc, type RichInline, type RichMark, type TextAlign } from '@/lib/rich-text';
 import { calculateServiceWithholding } from '@/lib/tax-bf';
 import { clientTypeDef, clientTypeOf } from '@/lib/client-type';
 import { getFiscalIdLabel } from '@/lib/ohada';
@@ -13,6 +14,61 @@ import { VAT_LABEL, chargesVat, documentHasVat, vatOn } from '@/lib/vat';
 import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, pdfFont } from '@/lib/invoice-template';
 import { registerPdfFonts } from '@/lib/pdf-fonts';
 import { qrMatrix, qrRuns, type InvoiceCertification } from '@/lib/certification';
+
+/** A react-pdf style (the package doesn't export the type itself). */
+type Style = ReturnType<typeof StyleSheet.create>[string];
+
+// Notes and conditions (PRO-167): the editor's rich text, drawn with the same
+// formats the screen allows (bold, italic, underline, strike, links, lists, alignment)
+function pdfMarkStyle(marks: RichMark[] | undefined) {
+  const has = (t: RichMark['type']) => marks?.some(m => m.type === t) ?? false;
+  const deco = [has('underline') && 'underline', has('strike') && 'line-through'].filter(Boolean).join(' ');
+  return {
+    ...(has('bold') ? { fontWeight: 700 as const } : {}),
+    ...(has('italic') ? { fontStyle: 'italic' as const } : {}),
+    ...(deco ? { textDecoration: deco as 'underline' } : {}),
+  };
+}
+
+function pdfInline(content: RichInline[] | undefined, linkColor: string): ReactNode[] {
+  return (content ?? []).map((n, i) => {
+    if (n.type === 'hardBreak') return '\n';
+    const link = n.marks?.find(m => m.type === 'link');
+    const text = <Text key={i} style={pdfMarkStyle(n.marks)}>{n.text}</Text>;
+    return link && link.type === 'link'
+      ? <Link key={i} src={link.attrs.href} style={{ color: linkColor }}>{text}</Link>
+      : text;
+  });
+}
+
+function PdfRichBlocks({ blocks, style, linkColor }: { blocks: RichBlock[]; style: Style; linkColor: string }) {
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === 'bulletList' || b.type === 'orderedList') {
+          return (
+            <View key={i}>
+              {b.content.map((item, j) => (
+                <View key={j} style={{ flexDirection: 'row' }} wrap={false}>
+                  <Text style={[style, { width: 10 }]}>{b.type === 'orderedList' ? `${j + 1}.` : '•'}</Text>
+                  <View style={{ flex: 1 }}><PdfRichBlocks blocks={item.content} style={style} linkColor={linkColor} /></View>
+                </View>
+              ))}
+            </View>
+          );
+        }
+        const textBlock = b as { attrs?: { textAlign?: TextAlign }; content?: RichInline[] };
+        const align = textBlock.attrs?.textAlign ? { textAlign: textBlock.attrs.textAlign } : {};
+        const heading = b.type === 'heading' ? { fontWeight: 700 as const, fontSize: 9.5 } : {};
+        return <Text key={i} style={[style, align, heading]}>{pdfInline(textBlock.content, linkColor)}</Text>;
+      })}
+    </>
+  );
+}
+
+export function PdfRichText({ doc, style, linkColor = '#1F5FBF' }: { doc: RichDoc; style: Style; linkColor?: string }) {
+  return <View><PdfRichBlocks blocks={doc.content} style={style} linkColor={linkColor} /></View>;
+}
 
 // toLocaleString is unreliable in the react-pdf renderer environment
 const pdfFmt = (n: number): string =>
@@ -246,6 +302,8 @@ export function InvoicePDFDocument({
   registerPdfFonts();
   const t = normalizeConfig(template ?? DEFAULT_CONFIG);
   const { s } = makeStyles(t);
+  // Cleaned again here: the PDF only draws the formats it knows
+  const notes = cleanRichText(invoice.notes);
 
   const subtotal      = lines.reduce((sum, li) => sum + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
@@ -440,10 +498,10 @@ export function InvoicePDFDocument({
           : <Text style={s.payMethod}>Contactez-nous pour les modalit{'é'}s de paiement.</Text>}
       </View>
       <View style={s.payCol}>
-        <Text style={s.blockLabel}>Notes</Text>
-        <Text style={s.notesText}>
-          Merci pour votre confiance. Conditions de paiement : {paymentTerms}.
-        </Text>
+        <Text style={s.blockLabel}>{notes ? 'Notes et conditions' : 'Notes'}</Text>
+        {notes
+          ? <PdfRichText doc={notes} style={s.notesText} />
+          : <Text style={s.notesText}>Merci pour votre confiance. Conditions de paiement : {paymentTerms}.</Text>}
       </View>
     </View>
   );
