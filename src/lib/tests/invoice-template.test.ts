@@ -1,10 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToBuffer } from '@react-pdf/renderer';
-import { DEFAULT_CONFIG, FONT_FAMILIES, PRESETS, accentDark, accentTint, mixHex, normalizeConfig, pdfFont } from '@/lib/invoice-template';
+import { DEFAULT_CONFIG, FONT_FAMILIES, PRESETS, accentDark, accentTint, mixHex, normalizeConfig, paperBands, pdfFont } from '@/lib/invoice-template';
 import { registerPdfFonts } from '@/lib/pdf-fonts';
 import { qrMatrix, qrRuns } from '@/lib/certification';
 import { InvoicePDFDocument, type InvoicePDFProps } from '@/components/InvoicePDF';
+
+describe('header and footer bands', () => {
+  it('are on by default, also for templates saved before them', () => {
+    expect(DEFAULT_CONFIG.bands).toBe(true);
+    const old = normalizeConfig({ layout: 'classic', color: '#185FA5' });
+    expect(old.bands).toBe(true);
+    expect(old.bandColor).toBe('#F3F4F6');
+  });
+  it('keep a switched-off choice and refuse a tint outside the list', () => {
+    expect(normalizeConfig({ bands: false }).bands).toBe(false);
+    expect(normalizeConfig({ bandColor: '#000000' }).bandColor).toBe('#F3F4F6');
+    expect(normalizeConfig({ bandColor: '#EEF2F7' }).bandColor).toBe('#EEF2F7');
+  });
+  it('apply to Classique and Minimal only', () => {
+    const on = { bands: true, bandColor: '#F3F4F6' };
+    expect(paperBands({ ...on, layout: 'classic' })).toBe('#F3F4F6');
+    expect(paperBands({ ...on, layout: 'minimal' })).toBe('#F3F4F6');
+    expect(paperBands({ ...on, layout: 'band' })).toBeNull();
+    expect(paperBands({ ...on, layout: 'sidebar' })).toBeNull();
+    expect(paperBands({ ...on, layout: 'receipt' })).toBeNull();
+    expect(paperBands({ ...on, bands: false, layout: 'classic' })).toBeNull();
+  });
+});
 
 describe('normalizeConfig', () => {
   it('keeps a valid config as is', () => {
@@ -92,6 +115,15 @@ describe('invoice PDF', () => {
     expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
     const plain = await renderToBuffer(createElement(InvoicePDFDocument, { ...props, lines: props.lines.slice(0, 3), template }) as Parameters<typeof renderToBuffer>[0]);
     expect(buf.length).toBeGreaterThan(plain.length);
+  }, 30000);
+
+  // Bands change the drawing (a filled header and footer), on every page
+  it('draws the bands only when they are on', async () => {
+    const classic = PRESETS[0].config;
+    const on = await renderToBuffer(createElement(InvoicePDFDocument, { ...props, template: classic }) as Parameters<typeof renderToBuffer>[0]);
+    const off = await renderToBuffer(createElement(InvoicePDFDocument, { ...props, template: { ...classic, bands: false } }) as Parameters<typeof renderToBuffer>[0]);
+    expect(on.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(on.length).not.toBe(off.length);
   }, 30000);
 
   // Notes and conditions (PRO-167): bold, italic, underline, links and lists in every font

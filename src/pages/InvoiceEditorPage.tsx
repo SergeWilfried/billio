@@ -47,6 +47,7 @@ import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { contactValue } from '@/lib/share-links';
 import { invoiceRef } from '@/lib/invoice-number';
 import { renderInvoicePdf } from '@/lib/render-pdf';
+import { paperBands } from '@/lib/invoice-template';
 import { VAT_LABEL, VAT_RATE, chargesVat } from '@/lib/vat';
 import { fmt, newLineItem } from '@/data';
 import type { Activity, Invoice, LineItem } from '@/lib/schemas';
@@ -420,6 +421,7 @@ export default function InvoiceEditorPage() {
   }
 
   const locked = busy !== null || compliance.checking;
+  const pageBand = paperBands(invoiceTemplate);
   const live = saved ? invoices.find(i => i.id === saved.id) ?? saved : null;
   const ownerName = live?.ownerName ?? (quote?.ownerName ? quote.ownerName : 'vous');
   const sellerIds = [
@@ -467,7 +469,8 @@ export default function InvoiceEditorPage() {
             onBadLink={() => showToast('Lien refusé : utilisez une adresse https://… ou mailto:…', true)} />
 
           <div
-            className="paper ie-sheet" ref={sheetRef}
+            className={`paper ie-sheet${pageBand ? ' has-bands' : ''}`} ref={sheetRef}
+            style={pageBand ? { ['--band' as string]: pageBand } : undefined}
             // The toolbar's formatting follows where the cursor was last
             onFocusCapture={e => { if (!(e.target as HTMLElement).closest('.ie-notes')) setNotesActive(false); }}
           >
@@ -631,6 +634,13 @@ export default function InvoiceEditorPage() {
                 <li>Timbre fiscal (paiement en espèces) : barème à confirmer</li>
                 <li>Zone SECeF : QR code et code de la facture, ajoutés à la certification</li>
               </ul>
+            </div>
+
+            {/* The footer as the PDF prints it on every page, from Modèles */}
+            <div className="pp-foot ie-locked">
+              <span>{orgSettings.name || 'Mon entreprise'}</span>
+              <span>{invoiceTemplate.footer.trim() || 'Facture générée via Billio'}</span>
+              <button type="button" className="ie-source" onClick={() => { if (confirmDiscard(dirty)) navigate('/templates'); }}>Depuis Modèles · modifier</button>
             </div>
           </div>
         </div>

@@ -38,6 +38,7 @@ import RichTextView from '@/components/RichTextView';
 import MoreMenu from '@/components/MoreMenu';
 import StatusPill from '@/components/sales/StatusPill';
 import { UI_V2 } from '@/lib/features';
+import { paperBands } from '@/lib/invoice-template';
 import { invoiceBadge, fmtDateTime } from '@/lib/invoice-view';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
@@ -390,6 +391,8 @@ export default function InvoicePage() {
   };
 
   const canEdit = writable && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
+  // Header and footer bands of the organisation's template (PRO-167), in the new look
+  const pageBand = UI_V2 ? paperBands(invoiceTemplate) : null;
 
   const openEdit = () => {
     setEClient(invoice.client);
@@ -565,7 +568,7 @@ export default function InvoicePage() {
         <div className="detail-grid">
 
           {/* Invoice paper */}
-          <div className="paper">
+          <div className={`paper${pageBand ? ' has-bands' : ''}`} style={pageBand ? { ['--band' as string]: pageBand } : undefined}>
             <div className="pp-top">
               <div className="pp-biz">
                 <div className="pp-logo" aria-hidden="true"><BillioLogoSvg /></div>
@@ -732,7 +735,11 @@ export default function InvoicePage() {
               </div>
             )}
 
-            <div className="pp-foot">{orgSettings.name || 'Mon entreprise'} · Facture générée via Billio</div>
+            {/* The template's footer text, as the PDF prints it */}
+            <div className="pp-foot">
+              <span>{orgSettings.name || 'Mon entreprise'}</span>
+              <span>{invoiceTemplate.footer.trim() || 'Facture générée via Billio'}</span>
+            </div>
           </div>
 
           {UI_V2 ? (

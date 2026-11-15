@@ -24,7 +24,24 @@ export const DEFAULT_CONFIG: PaperConfig = {
   density: 'cozy', tableStyle: 'tinted', totalStyle: 'filled',
   showQty: true, showTax: true, showDiscount: false,
   showSignature: false, showPayment: true, footer: '',
+  bands: true, bandColor: '#F3F4F6',
 };
+
+/** Light tints for the header and footer bands: dark text stays readable on each. */
+export const BAND_COLORS: readonly { value: string; label: string }[] = [
+  { value: '#F3F4F6', label: 'Gris clair' },
+  { value: '#EEF2F7', label: 'Gris bleuté' },
+  { value: '#F5F2EB', label: 'Sable' },
+  { value: '#EFF4EF', label: 'Vert pâle' },
+];
+
+/** The layouts whose header and footer can sit in bands. */
+export const BANDED_LAYOUTS: readonly PaperLayout[] = ['classic', 'minimal'];
+
+/** Whether this template draws its header and footer in bands, and their tint. */
+export function paperBands(cfg: Pick<PaperConfig, 'layout' | 'bands' | 'bandColor'>): string | null {
+  return cfg.bands && BANDED_LAYOUTS.includes(cfg.layout) ? cfg.bandColor : null;
+}
 
 export interface TemplatePreset {
   key:     string;
@@ -93,6 +110,9 @@ export function normalizeConfig(raw: unknown): PaperConfig {
     showSignature: bool(r.showSignature, d.showSignature),
     showPayment:   bool(r.showPayment, d.showPayment),
     footer:        typeof r.footer === 'string' ? r.footer.slice(0, 200) : d.footer,
+    // Templates saved before the bands existed get them (the new default look)
+    bands:         bool(r.bands, d.bands),
+    bandColor:     typeof r.bandColor === 'string' && BAND_COLORS.some(c => c.value === r.bandColor) ? r.bandColor : d.bandColor,
   };
 }
 
