@@ -34,6 +34,14 @@ export async function fetchCreditNotes(orgId: string, invoiceId?: string): Promi
   return (data ?? []).map(dbToCreditNote);
 }
 
+/** Every credit note of one client, for the client's balance. */
+export async function fetchClientCreditNotes(orgId: string, clientCode: string): Promise<CreditNote[]> {
+  if (MOCK) return [];
+  const { data, error } = await supabase.from('credit_notes').select('*').eq('org_id', orgId).eq('client_code', clientCode);
+  if (error) throw error;
+  return (data ?? []).map(dbToCreditNote);
+}
+
 export async function createCreditNote(
   orgId: string,
   payload: Omit<CreditNote, 'id'> & { id: string },

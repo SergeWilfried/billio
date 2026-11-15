@@ -29,9 +29,17 @@ import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Status } from '@/data';
 import { calculateServiceWithholding, SERVICE_WITHHOLDING_THRESHOLD } from '@/lib/tax-bf';
 import type { Activity, CreditNote, LineItem, PayMethod, ServiceWithholdingScenario } from '@/lib/schemas';
-import { VAT_LABEL, chargesVat, splitTtc, vatOn } from '@/lib/vat';
+import { VAT_LABEL, chargesVat, documentHasVat, splitTtc, vatOn } from '@/lib/vat';
 import Page from '@/components/Page';
 import { OwnerLine } from '@/components/owner/OwnerControls';
+import InvoiceSide from '@/components/invoice/InvoiceSide';
+import MoreMenu from '@/components/MoreMenu';
+import StatusPill from '@/components/sales/StatusPill';
+import { UI_V2 } from '@/lib/features';
+import { invoiceBadge, fmtDateTime } from '@/lib/invoice-view';
+import { invoiceTotalMention } from '@/lib/amount-in-words';
+import { formatCadastralRef } from '@/lib/cadastral';
+import { clientTypeDef, clientTypeOf } from '@/lib/client-type';
 
 type DotKind = 'paid' | 'sent' | 'overdue' | 'avoir' | '';
 interface TlEntry { dot: DotKind; text: string; time: string; }
@@ -113,6 +121,9 @@ export default function InvoicePage() {
   const [avoirAmount,  setAvoirAmount]  = useState(0);
   const [avoirSaving,  setAvoirSaving]  = useState(false);
   const [creditNotes,  setCreditNotes]  = useState<CreditNote[]>([]);
+  // Goes up once a posting to the books has finished, so the side panel reads the entries again
+  const [ledgerTick, setLedgerTick] = useState(0);
+  const bumpLedger = () => setLedgerTick(t => t + 1);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -261,6 +272,7 @@ export default function InvoicePage() {
         console.error('[recordInvoiceIssuanceEntry] failed:', err);
         showToast(`Facture #${number ?? invoiceRef(invoice)} émise, mais l'écriture comptable de vente n'a pas pu être enregistrée. Signalez-le à votre comptable.`, true);
       }
+      bumpLedger();
       setSendKind('send');
     } catch (err) {
       console.error('[handleIssue] failed:', err);
@@ -346,7 +358,7 @@ export default function InvoicePage() {
         tvaAmount,
         date:         today,
         clientName:   client.name,
-      }).catch(err => console.error('Credit note accounting failed:', err));
+      }).catch(err => console.error('Credit note accounting failed:', err)).finally(bumpLedger);
       setAvoirDialog(false);
       showToast(`Avoir ${creditNoteRef(cn)} émis`);
     } catch (err) {
@@ -413,7 +425,7 @@ export default function InvoicePage() {
         }).catch(err => {
           console.error('Accounting update failed:', err);
           showToast('Facture mise à jour, mais l\'écriture comptable n\'a pas pu être rectifiée. Signalez-le à votre comptable.', true);
-        });
+        }).finally(bumpLedger);
       }
       setInvoices(prev => prev.map(i => i.id === invoice.id
         ? { ...i, subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount }
@@ -455,6 +467,7 @@ export default function InvoicePage() {
       });
       setPayments(prev => prev.some(p => p.id === res.payment.id) ? prev : [{ ...res.payment, client: res.payment.client || invoice.client }, ...prev]);
       setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: res.invoiceStatus } : i));
+      bumpLedger();
       setPayDialog(false);
       showToast(res.balance > 0
         ? `Paiement de ${fmt(payAmount)} F CFA enregistré — reste ${fmt(res.balance)} F CFA`
@@ -472,9 +485,55 @@ export default function InvoicePage() {
     <>
     <Page
       back={{ label: "Retour aux factures", onClick: () => navigate('/invoices') }}
-      title={<><button className="crumb-link" onClick={() => navigate('/invoices')}>Factures</button>{' / '}<b>#{invoiceRef(invoice)}</b></>}
+      title={UI_V2
+        ? <span className="iv-title"><span>Facture {invoice.status === 'draft' ? 'brouillon' : invoiceRef(invoice)}</span><StatusPill {...invoiceBadge(invoice, amountDue, paid)} /></span>
+        : <><button className="crumb-link" onClick={() => navigate('/invoices')}>Factures</button>{' / '}<b>#{invoiceRef(invoice)}</b></>}
+      subtitle={UI_V2 ? (
+        <span className="iv-sub">
+          <span>{client.name}</span>
+          <span>{invoice.status === 'draft' ? 'Pas encore émise' : <>Émise le {invoice.firstIssuedAt ? fmtDateTime(invoice.firstIssuedAt) : fmtDateLong(invoice.issued)}{invoice.issuedByName && <> par {invoice.issuedByName}</>}</>}</span>
+          <span>Échéance {fmtDateLong(invoice.due)}</span>
+          {invoice.ownerName && <span>Responsable {invoice.ownerName}</span>}
+        </span>
+      ) : undefined}
       documentTitle={`Facture ${invoiceRef(invoice)}`}
-      actions={<>
+      actions={UI_V2 ? <>
+        <button className="btn" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
+          <Icon name="printer" ariaHidden /> PDF
+        </button>
+        {writable && invoice.status === 'draft' && (<>
+          {canEdit && (
+            <button className="btn" onClick={openEdit}>
+              <Icon name="edit" ariaHidden /> Modifier
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={requestIssue} disabled={busyAction !== null || linesLoading || compliance.checking}>
+            <Icon name="send" ariaHidden /> {busyAction === 'issue' ? 'Émission…' : 'Émettre la facture'}
+          </button>
+        </>)}
+        {writable && (isOverdue || invoice.status === 'pending') && (
+          <button className="btn" onClick={() => setSendKind(isOverdue ? 'reminder' : 'send')} disabled={!paymentMethodsReady}>
+            <Icon name="send" ariaHidden /> {isOverdue ? 'Relancer' : 'Envoyer'}
+          </button>
+        )}
+        {writable && invoice.status !== 'draft' && creditable > 0 && (
+          <button className="btn" onClick={openAvoir}>
+            <Icon name="file-minus" ariaHidden /> Créer un avoir
+          </button>
+        )}
+        {writable && (isOverdue || invoice.status === 'pending') && (
+          <button className="btn btn-primary" onClick={() => { setPayRef(''); setPayMethod('cash'); setTvaRetenue(0); setServiceWithholding(0); setPayAmount(balance); setPayDialog(true); }}>
+            <Icon name="cash" ariaHidden /> Enregistrer un paiement
+          </button>
+        )}
+        {writable && (
+          <MoreMenu label="Autres actions" items={[
+            ...(canEdit && invoice.status !== 'draft' ? [{ label: 'Modifier', icon: 'edit', run: openEdit }] : []),
+            { label: busyAction === 'duplicate' ? 'Duplication…' : 'Dupliquer', icon: 'copy', disabled: busyAction !== null || linesLoading, run: handleDuplicate },
+            ...(invoice.status === 'draft' && canDelete(userRole) ? [{ label: 'Supprimer la facture', icon: 'trash', danger: true, run: handleDelete }] : []),
+          ]} />
+        )}
+      </> : <>
         <button className="btn" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
           <Icon name="printer" ariaHidden /> Télécharger PDF
         </button>
@@ -512,6 +571,9 @@ export default function InvoicePage() {
                     {(orgSettings.taxRegime || orgSettings.divisionFiscale) && (
                       <><br />{[orgSettings.taxRegime && `${orgSettings.taxRegime}`, orgSettings.divisionFiscale && `${orgSettings.divisionFiscale}`].filter(Boolean).join(' · ')}</>
                     )}
+                    {UI_V2 && orgSettings.cadastralRef && (
+                      <><br />Réf. cadastrale {formatCadastralRef(orgSettings.cadastralRef)}</>
+                    )}
                     {(orgSettings.email || orgSettings.phone) && (
                       <><br />{[orgSettings.email, orgSettings.phone].filter(Boolean).join(' · ')}</>
                     )}
@@ -529,6 +591,7 @@ export default function InvoicePage() {
               <div>
                 <div className="pp-block-label">Facturé à</div>
                 <div className="pp-client-name">{client.name}</div>
+                {UI_V2 && <div className="pp-client-meta">{clientTypeDef(clientTypeOf(client)).mention}</div>}
                 <div className="pp-client-meta">{[client.city, client.country].filter(Boolean).join(', ')}</div>
                 {(client.contact || client.email || client.phone) && (
                   <div className="pp-client-meta" style={{ marginTop: 2 }}>
@@ -550,7 +613,11 @@ export default function InvoicePage() {
                 <div className="pp-block-label">Détails</div>
                 <div className="pp-meta-grid">
                   <div className="k">Émis le</div>
-                  <div className="v">{fmtDateLong(invoice.issued)}</div>
+                  <div className="v">{UI_V2 && invoice.firstIssuedAt ? fmtDateTime(invoice.firstIssuedAt) : fmtDateLong(invoice.issued)}</div>
+                  {UI_V2 && invoice.issuedByName && (<>
+                    <div className="k">Émise par</div>
+                    <div className="v">{invoice.issuedByName}</div>
+                  </>)}
                   <div className="k">Échéance</div>
                   <div className={`v${isOverdue ? ' due' : ''}`}>{fmtDateLong(invoice.due)}</div>
                   <div className="k">Paiement</div>
@@ -610,6 +677,10 @@ export default function InvoicePage() {
               </div>
             </div>
 
+            {UI_V2 && (invoice.status === 'draft' ? total : invoice.amount) > 0 && (
+              <p className="pp-words">{invoiceTotalMention(invoice.status === 'draft' ? total : invoice.amount)}</p>
+            )}
+
             <div className="pp-pay">
               <div>
                 <div className="pp-block-label">Modes de paiement</div>
@@ -638,9 +709,36 @@ export default function InvoicePage() {
               </div>
             </div>
 
+            {UI_V2 && (
+              <div className="pp-mentions" aria-label="Mentions obligatoires">
+                <div className="pp-block-label">Mentions obligatoires (DGI)</div>
+                <ul>
+                  <li>{invoice.status === 'draft'
+                    ? 'Brouillon : la date, l’heure et l’opérateur seront fixés à l’émission'
+                    : <>Émise le {invoice.firstIssuedAt ? fmtDateTime(invoice.firstIssuedAt) : fmtDateLong(invoice.issued)}{invoice.issuedByName ? ` par ${invoice.issuedByName}` : ''}</>}</li>
+                  <li>{orgSettings.cadastralRef ? `Lieu de vente : réf. cadastrale ${formatCadastralRef(orgSettings.cadastralRef)}` : 'Référence cadastrale du lieu de vente : à renseigner dans Paramètres'}</li>
+                  <li>Timbre fiscal (paiement en espèces) : barème à confirmer</li>
+                </ul>
+              </div>
+            )}
+
             <div className="pp-foot">{orgSettings.name || 'Mon entreprise'} · Facture générée via Billio</div>
           </div>
 
+          {UI_V2 ? (
+            <InvoiceSide
+              key={`${orgId}:${invoice.id}`}
+              refreshKey={ledgerTick}
+              invoice={invoice}
+              total={invoice.status === 'draft' ? total : invoice.amount}
+              paid={paid}
+              credited={credited}
+              amountDue={amountDue}
+              creditNotes={creditNotes}
+              client={{ code: invoice.client, name: client.name, contact: client.contact, email: client.email, phone: client.phone }}
+              vatOnInvoice={documentHasVat(invoice.amount, discountedSub, canInvoiceTVA)}
+            />
+          ) : (<>
           {/* Rail */}
           <aside className="rail">
             <div className="rail-card">
@@ -721,6 +819,7 @@ export default function InvoicePage() {
               ))}
             </div>
           </aside>
+          </>)}
         </div>
     </Page>
 
