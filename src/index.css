@@ -2533,6 +2533,35 @@ html[data-ui="v2"] .page-section { display: none; }
 .ie-catalogue-add { font-size: 11.5px; white-space: nowrap; }
 .tot-row.ie-withholding .tv, .tot-row.ie-withholding span:first-child { color: #8A5207; }
 .ie-save-failed { color: var(--status-late, #B42318); }
+/* Credit note in the invoice editor (PRO-168) */
+.cn-nature { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--color-text-secondary); }
+.cn-nature select { font-size: 13px; font-weight: 600; max-width: 260px; }
+.cn-nature select.empty, .ie-field.empty { border-bottom-color: var(--status-partial, #B54708); }
+.cn-nature-hint { margin-top: 3px; font-size: 11.5px; color: var(--color-text-secondary); text-align: right; }
+.ie-lines tr.cn-off td { color: var(--color-text-tertiary); }
+.cn-desc { font-weight: 600; }
+.cn-sub { font-size: 11px; color: var(--color-text-tertiary); }
+.cn-max { margin-left: 4px; font-size: 11px; color: var(--color-text-tertiary); white-space: nowrap; }
+.tot-row.grand.cn-over { background: #FDECEC; color: var(--status-late, #B42318); }
+.cn-situation { margin: 4px 0 0; display: grid; gap: 3px; font-size: 12px; }
+.cn-situation div { display: flex; justify-content: space-between; gap: 12px; }
+.cn-situation dt { color: var(--color-text-secondary); }
+.cn-situation dd { margin: 0; }
+.cn-situation .due { font-weight: 700; border-top: 1px solid var(--color-border-tertiary); padding-top: 3px; }
+.cn-situation .due dt { color: var(--color-text-primary); }
+.cn-note { margin: 4px 0 0; font-size: 12px; color: var(--color-text-secondary); }
+.cn-entry { width: 360px; }
+.cn-entry .iv-lines { width: 100%; }
+.iv-credits { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; }
+.iv-credits li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: baseline; }
+.iv-credits li > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
+.iv-credits small { flex-basis: 100%; color: var(--color-text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iv-credits li.draft b { color: var(--color-text-secondary); font-weight: 600; }
+.iv-nature { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: #FDF0E1; color: #8A4A07; }
+.iv-credit-amt { color: #8A4A07; font-weight: 600; white-space: nowrap; }
+.dt-doc { display: flex; flex-direction: column; line-height: 1.25; }
+.dt-credit-of { font-size: 11.5px; font-weight: 600; color: #8A4A07; white-space: nowrap; }
+.dt-credit-amt { color: #8A4A07; font-weight: 600; white-space: nowrap; }
 .ie-cat { top: calc(100% - 2px); left: 0; width: 340px; }
 .ie-cat-price { font-weight: 600; white-space: nowrap; }
 .ie-notes-box { margin-top: 4px; border: 1px solid transparent; border-radius: 6px; padding: 6px 8px; min-height: 64px; cursor: text; }
