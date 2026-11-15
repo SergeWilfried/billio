@@ -2,17 +2,26 @@
 // rate per invoice (the organisation's regime); per-line rates are PRO-182.
 
 import { vatOn } from '@/lib/vat';
+import { calculateServiceWithholding, type ServiceWithholdingScenario } from '@/lib/tax-bf';
 import { filledLines } from '@/lib/line-validation';
 import type { LineItem } from '@/lib/schemas';
 
-export interface EditorTotals { subtotal: number; discount: number; net: number; tax: number; total: number }
+export interface EditorTotals {
+  subtotal: number; discount: number; net: number; tax: number; total: number;
+  /** Service withholding the client keeps (Art.207/212), as the PDF prints it; null for none */
+  withholding: number | null;
+  /** What the client pays: the total less the withholding */
+  toPay: number;
+}
 
-export function editorTotals(lines: LineItem[], discountPct: number, chargesVat: boolean): EditorTotals {
+export function editorTotals(lines: LineItem[], discountPct: number, chargesVat: boolean, scenario?: ServiceWithholdingScenario | null): EditorTotals {
   const subtotal = filledLines(lines).reduce((s, l) => s + l.qty * l.price, 0);
   const discount = Math.round(subtotal * (discountPct / 100));
   const net = subtotal - discount;
   const tax = vatOn(net, chargesVat);
-  return { subtotal, discount, net, tax, total: net + tax };
+  const total = net + tax;
+  const withholding = scenario ? calculateServiceWithholding(net, scenario) : null;
+  return { subtotal, discount, net, tax, total, withholding, toPay: total - (withholding ?? 0) };
 }
 
 /**

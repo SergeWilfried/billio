@@ -2523,6 +2523,16 @@ html[data-ui="v2"] .page-section { display: none; }
 .ie-pop-empty { padding: 8px 9px; font-size: 12.5px; color: var(--color-text-secondary); }
 .ie-pop-foot { border: 0; border-top: 1px solid var(--color-border-tertiary); background: none; padding: 8px 9px 4px; font: inherit; font-size: 12.5px; color: var(--brand); text-align: left; cursor: pointer; }
 .ie-pop-foot small { color: var(--color-text-secondary); }
+.ie-newclient { display: flex; flex-direction: column; gap: 8px; padding: 4px 4px 2px; }
+.ie-nc-row { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--color-text-secondary); min-width: 0; }
+.ie-nc-row small { font-size: 11px; color: var(--color-text-tertiary); }
+.ie-nc-row .form-input { font-size: 13px; padding: 6px 8px; }
+.ie-nc-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ie-nc-actions { display: flex; justify-content: flex-end; gap: 6px; padding-top: 2px; }
+.ie-nc-actions .btn { font-size: 12.5px; padding: 5px 10px; }
+.ie-catalogue-add { font-size: 11.5px; white-space: nowrap; }
+.tot-row.ie-withholding .tv, .tot-row.ie-withholding span:first-child { color: #8A5207; }
+.ie-save-failed { color: var(--status-late, #B42318); }
 .ie-cat { top: calc(100% - 2px); left: 0; width: 340px; }
 .ie-cat-price { font-weight: 600; white-space: nowrap; }
 .ie-notes-box { margin-top: 4px; border: 1px solid transparent; border-radius: 6px; padding: 6px 8px; min-height: 64px; cursor: text; }

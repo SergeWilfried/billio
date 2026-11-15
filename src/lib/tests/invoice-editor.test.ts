@@ -7,7 +7,17 @@ const line = (id: string, desc: string, qty: number, price: number): LineItem =>
 describe('editorTotals', () => {
   it('applies the discount before VAT and ignores empty lines', () => {
     const t = editorTotals([line('a', 'Conseil', 2, 50_000), line('b', '', 1, 0)], 10, true);
-    expect(t).toEqual({ subtotal: 100_000, discount: 10_000, net: 90_000, tax: 16_200, total: 106_200 });
+    expect(t).toEqual({ subtotal: 100_000, discount: 10_000, net: 90_000, tax: 16_200, total: 106_200, withholding: null, toPay: 106_200 });
+  });
+  it('takes the service withholding off what is to pay, on the amount after discount (as the PDF)', () => {
+    const t = editorTotals([line('a', 'Conseil', 2, 50_000)], 10, true, 'resident-with-ifu');
+    expect(t.withholding).toBe(4_500);
+    expect(t.toPay).toBe(106_200 - 4_500);
+  });
+  it('withholds nothing under the threshold', () => {
+    const t = editorTotals([line('a', 'Conseil', 1, 40_000)], 0, true, 'resident-with-ifu');
+    expect(t.withholding).toBeNull();
+    expect(t.toPay).toBe(t.total);
   });
   it('charges no VAT outside the VAT regime', () => {
     expect(editorTotals([line('a', 'Conseil', 1, 50_000)], 0, false).total).toBe(50_000);

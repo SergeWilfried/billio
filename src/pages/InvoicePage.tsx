@@ -28,7 +28,7 @@ import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Status } from '@/data';
-import { calculateServiceWithholding, SERVICE_WITHHOLDING_THRESHOLD } from '@/lib/tax-bf';
+import { calculateServiceWithholding, SERVICE_WITHHOLDING_RATE_LABEL, SERVICE_WITHHOLDING_THRESHOLD } from '@/lib/tax-bf';
 import type { Activity, CreditNote, LineItem, PayMethod, ServiceWithholdingScenario } from '@/lib/schemas';
 import { VAT_LABEL, chargesVat, documentHasVat, splitTtc, vatOn } from '@/lib/vat';
 import Page from '@/components/Page';
@@ -940,12 +940,7 @@ export default function InvoicePage() {
                   ? calculateServiceWithholding(discountedSub, clientWithholdingScenario)
                   : null;
                 const belowThreshold = discountedSub < SERVICE_WITHHOLDING_THRESHOLD;
-                const RATE_LABEL: Record<string, string> = {
-                  'resident-with-ifu':    '5 %',
-                  'resident-without-ifu': '25 %',
-                  'construction':         '1 %',
-                  'non-resident':         '20 %',
-                };
+                const RATE_LABEL: Record<string, string> = SERVICE_WITHHOLDING_RATE_LABEL;
                 return (<>
                   <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Retenue à la source services (Art.207/212)</span>

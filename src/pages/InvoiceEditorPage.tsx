@@ -7,9 +7,11 @@
 // typed here. « Notes et conditions » is rich text (Tiptap), formatted from the
 // toolbar. A floating bar holds the PDF, duplicate, checks and other actions.
 // Issued invoices are changed from their own page, as before.
+// A saved draft saves itself a few seconds after each change, and when the
+// page is left; a new invoice asks before its input is dropped (PRO-184).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
 import posthog from 'posthog-js';
 import Page from '@/components/Page';
@@ -25,11 +27,11 @@ import { usePaymentMethods } from '@/lib/use-payment-methods';
 import { useComplianceGuard } from '@/lib/use-compliance-guard';
 import { useDismiss } from '@/lib/use-dismiss';
 import { isInvoiceLimitError } from '@/lib/invoice-limit';
-import { confirmDiscard } from '@/lib/confirm-discard';
 import { filledLines } from '@/lib/line-validation';
 import { fetchLineItems } from '@/lib/api/line-items';
 import { removeInvoice } from '@/lib/api/invoices';
 import { updateQuote } from '@/lib/api/quotes';
+import { createProduct } from '@/lib/api/products';
 import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { createActivity } from '@/lib/api/activities';
 import { fetchClientDocuments } from '@/lib/api/client-documents';
@@ -49,14 +51,17 @@ import { invoiceRef } from '@/lib/invoice-number';
 import { renderInvoicePdf } from '@/lib/render-pdf';
 import { paperBands } from '@/lib/invoice-template';
 import { VAT_LABEL, VAT_RATE, chargesVat } from '@/lib/vat';
+import { SERVICE_WITHHOLDING_RATE_LABEL } from '@/lib/tax-bf';
 import { fmt, newLineItem } from '@/data';
-import type { Activity, Invoice, LineItem } from '@/lib/schemas';
+import type { Activity, Invoice, LineItem, Product } from '@/lib/schemas';
 
 const UNITS = ['unité', 'heure', 'jour', 'mois', 'an', 'projet', 'article', 'licence'];
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 /** What a line is, without its id: to tell unsaved changes */
 const lineKey = (ls: LineItem[]) => filledLines(ls).map(l => [l.desc, l.unit, l.qty, l.price, l.productId ?? '']);
 const timeOf = (d: Date) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+/** A saved draft saves itself this long after the last change */
+const AUTOSAVE_MS = 3000;
 
 /** An invoice copied by « Dupliquer », opened as a new invoice. */
 interface CopyState { copy?: { client: string; subject: string; discountPct: number; notes?: RichDoc; lines: LineItem[] } }
@@ -67,7 +72,7 @@ export default function InvoiceEditorPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const {
-    orgId, loading, invoices, setInvoices, quotes, setQuotes, clientsMap, products, orgSettings, invoiceTemplate,
+    orgId, loading, invoices, setInvoices, quotes, setQuotes, clientsMap, products, setProducts, orgSettings, invoiceTemplate,
     setActivity, showToast, userLabel, userRole,
   } = useApp();
   const { writable } = usePermissions();
@@ -93,11 +98,20 @@ export default function InvoiceEditorPage() {
   const [busy, setBusy] = useState<'save' | 'issue' | 'pdf' | 'delete' | null>(null);
   const busyRef = useRef(false);
   // What was last saved (or loaded), to tell unsaved changes
-  const [baseline, setBaseline] = useState('');
+  const [baseline, setBaselineState] = useState('');
+  // The same, readable at once (the leave guard runs between renders)
+  const baselineRef = useRef('');
+  const setBaseline = (v: string) => { baselineRef.current = v; setBaselineState(v); };
   const snapshotOf = (v: { client: string; issued: string; due: string; subject: string; discountPct: number; lines: LineItem[]; notes: RichDoc | null }) =>
     JSON.stringify({ ...v, lines: lineKey(v.lines) });
   const snapshot = snapshotOf({ client, issued, due, subject, discountPct, lines, notes });
   const dirty = ready && snapshot !== baseline;
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  // Leaving on purpose (issued, deleted): nothing to keep
+  const leaveOk = useRef(false);
 
   // ── Notes: Tiptap ──────────────────────────────────────────────────────────
   const [notesActive, setNotesActive] = useState(false);
@@ -132,6 +146,7 @@ export default function InvoiceEditorPage() {
       if (!routeId) { setSaved(null); setSavedAt(null); }
       setNotesSeed(seed => ({ key: seed.key + 1, doc: v.notes }));
       loadedFor.current = key;
+      leaveOk.current = false;
       setBaseline(isBaseline ? snapshotOf(v) : '');
       setReady(true);
     };
@@ -229,6 +244,36 @@ export default function InvoiceEditorPage() {
   };
   const codeOf = (l: LineItem) => (l.productId ? products.find(p => p.id === l.productId)?.sku : undefined) || '—';
 
+  // « Ajouter au catalogue »: a typed line becomes a catalogue item, and the line links to it
+  const [cataloguing, setCataloguing] = useState<string | null>(null);
+  const canCatalogue = (l: LineItem) => !l.productId && l.desc.trim() !== '' && !l.desc.startsWith('/') && l.price > 0;
+  async function addToCatalogue(l: LineItem) {
+    if (cataloguing || !canCatalogue(l)) return;
+    const name = l.desc.trim();
+    const link = (pid: string) => setLines(prev => prev.map(x => x.id === l.id ? { ...x, productId: pid } : x));
+    // Already there under this name: link it rather than make a second one
+    const same = products.find(p => p.name.trim().toLowerCase() === name.toLowerCase() && p.price === l.price && p.unit === (l.unit ?? 'unité'));
+    if (same) { link(same.id); showToast(`Ligne liée à « ${same.name} » du catalogue`); return; }
+    const service = ['heure', 'jour', 'mois', 'an', 'projet'].includes(l.unit ?? '');
+    const item: Product = {
+      id: crypto.randomUUID(), name, sku: '—', type: service ? 'service' : 'product', unit: l.unit ?? 'unité', price: l.price,
+      tax: vatOn ? Math.round(VAT_RATE * 100) : 0, used: 0, ico: service ? 'briefcase' : 'tag', color: service ? 'ico-blue' : 'ico-green',
+    };
+    setCataloguing(l.id);
+    try {
+      const stored = await createProduct(orgId, item);
+      setProducts(prev => [{ ...item, updatedAt: stored.updatedAt, updatedByName: stored.updatedByName, createdById: stored.createdById }, ...prev]);
+      link(item.id);
+      posthog.capture('product_created', { type: item.type, unit: item.unit, from: 'invoice_editor' });
+      showToast(`« ${name} » ajouté au catalogue`);
+    } catch (err) {
+      console.error('[createProduct]', err);
+      showToast('L’article n’a pas pu être ajouté au catalogue. Réessayez.', true);
+    } finally {
+      setCataloguing(null);
+    }
+  }
+
   const discountRef = useRef<HTMLInputElement>(null);
   const onInsert = (k: InsertKind) => {
     if (k === 'line') addLine();
@@ -237,7 +282,7 @@ export default function InvoiceEditorPage() {
     else editor?.commands.focus('end');
   };
 
-  const totals = editorTotals(lines, discountPct, vatOn);
+  const totals = editorTotals(lines, discountPct, vatOn, clientRec?.withholdingScenario);
   const problems = lineProblems(lines);
 
   // ── Checks before issuing (the same ones « Émettre » runs) ─────────────────
@@ -262,12 +307,16 @@ export default function InvoiceEditorPage() {
   const fields = { client, subject, issued, due, discountPct, amount: totals.total, notes };
   const clientName = clientRec?.name ?? client;
 
-  /** Saves the draft; returns it, or null when it wasn't saved (the reason is shown). */
-  async function save(): Promise<Invoice | null> {
-    const problem = draftProblem(client, issued, due, lines);
-    if (problem) { showToast(problem, true); return null; }
-    if (notesLength > NOTES_MAX_CHARS) { showToast(`Les notes sont trop longues (${NOTES_MAX_CHARS} caractères au plus).`, true); return null; }
-    if (notes && notesStoredSize(notes) > NOTES_MAX_BYTES) { showToast('Les notes ont trop de mises en forme pour être enregistrées. Simplifiez-les (moins de passages en gras, italique ou liens).', true); return null; }
+  /** Why the draft can't be saved as it is, or null */
+  const saveProblem = (): string | null =>
+    draftProblem(client, issued, due, lines)
+    ?? (notesLength > NOTES_MAX_CHARS ? `Les notes sont trop longues (${NOTES_MAX_CHARS} caractères au plus).` : null)
+    ?? (notes && notesStoredSize(notes) > NOTES_MAX_BYTES ? 'Les notes ont trop de mises en forme pour être enregistrées. Simplifiez-les (moins de passages en gras, italique ou liens).' : null);
+
+  /** Saves the draft; returns it, or null when it wasn't saved (the reason is shown unless `quiet`). */
+  async function save(opts?: { quiet?: boolean }): Promise<Invoice | null> {
+    const problem = saveProblem();
+    if (problem) { if (!opts?.quiet) showToast(problem, true); return null; }
     const isNew = !saved;
     const draft = await saveInvoiceDraft(orgId, { id: saved?.id, fields, lines, ownerId: isNew ? quote?.ownerId : undefined });
     const merged: Invoice = { ...saved, ...draft, ownerId: draft.ownerId ?? saved?.ownerId, ownerName: draft.ownerName ?? saved?.ownerName };
@@ -290,19 +339,80 @@ export default function InvoiceEditorPage() {
     return merged;
   }
 
+  // Every save goes through one queue, so an autosave and a click never write at once.
+  // Each runs the latest save(), with what the form holds when its turn comes.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  function queuedSave(opts?: { quiet?: boolean }): Promise<Invoice | null> {
+    const run = queue.current.catch(() => {}).then(() => saveRef.current(opts));
+    queue.current = run;
+    return run;
+  }
+
   /** The draft was issued in another tab or by someone else: nothing was written; open it as issued. */
   function onIssuedElsewhere(err: unknown): boolean {
     if (!(err instanceof DraftIssuedError)) return false;
     showToast('Cette facture a été émise entre-temps : vos modifications n’ont pas été enregistrées.', true);
+    leaveOk.current = true;
     navigate(`/invoices/${err.invoiceId}`, { replace: true });
     return true;
   }
+
+  // ── Autosave (saved drafts only: a new invoice is created by « Enregistrer ») ──
+  const [autoState, setAutoState] = useState<'saving' | 'failed' | null>(null);
+  async function autosave(): Promise<boolean> {
+    setAutoState('saving');
+    try {
+      const d = await queuedSave({ quiet: true });
+      setAutoState(d ? null : 'failed');
+      return !!d;
+    } catch (err) {
+      setAutoState(null);
+      if (onIssuedElsewhere(err)) return false;
+      console.error('[autosave]', err);
+      setAutoState('failed');
+      return false;
+    }
+  }
+  const autosaveRef = useRef(autosave);
+  autosaveRef.current = autosave;
+  const savable = saveProblem() === null;
+  useEffect(() => {
+    if (!saved || !dirty || !savable || busy !== null || compliance.checking) return;
+    const t = setTimeout(() => void autosaveRef.current(), AUTOSAVE_MS);
+    return () => clearTimeout(t);
+  }, [saved, dirty, savable, snapshot, busy, compliance.checking]);
+
+  // ── Leaving: closing the tab asks; in the app, a saved draft is saved first ──
+  useEffect(() => {
+    if (!dirty) return;
+    const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]);
+  const blocker = useBlocker(() => readyRef.current && !leaveOk.current && snapshotRef.current !== baselineRef.current);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    let live = true;
+    void (async () => {
+      const kept = saved && saveProblem() === null && !busyRef.current ? await autosaveRef.current() : false;
+      if (!live) return;
+      if (kept || window.confirm(saved
+        ? 'Les modifications n’ont pas pu être enregistrées. Quitter quand même ? Elles seront perdues.'
+        : 'Quitter sans enregistrer ? La facture n’a pas encore été enregistrée : ce qui est saisi sera perdu.')) blocker.proceed();
+      else blocker.reset();
+    })();
+    return () => { live = false; };
+    // Once per blocked navigation
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker.state]);
 
   async function onSave() {
     if (busyRef.current) return;
     busyRef.current = true; setBusy('save');
     try {
-      if (await save()) showToast('Brouillon enregistré');
+      if (await queuedSave()) { setAutoState(null); showToast('Brouillon enregistré'); }
     } catch (err) {
       if (onIssuedElsewhere(err)) return;
       console.error('[saveInvoiceDraft]', err);
@@ -317,7 +427,7 @@ export default function InvoiceEditorPage() {
     busyRef.current = true; setBusy('issue');
     let draft: Invoice | null = null;
     try {
-      draft = await save();
+      draft = await queuedSave();
       if (!draft) return;
       const res = await issueSavedDraft(orgId, draft.id, totals.total);
       const issuedInv: Invoice = { ...draft, status: 'pending', number: res.number, firstIssuedAt: res.firstIssuedAt ?? new Date().toISOString(), issuedByName: res.issuedByName ?? userLabel };
@@ -361,7 +471,7 @@ export default function InvoiceEditorPage() {
     void compliance.guard(client, () => void issue(), {
       returnTo: saved ? `/invoices/${saved.id}/edit` : '/invoices/new',
       beforeLeave: async () => {
-        try { const d = await save(); return d ? `/invoices/${d.id}/edit` : null; } catch { return null; }
+        try { const d = await queuedSave(); return d ? `/invoices/${d.id}/edit` : null; } catch { return null; }
       },
     });
   }
@@ -392,7 +502,7 @@ export default function InvoiceEditorPage() {
   }
 
   function onDuplicate() {
-    if (!confirmDiscard(dirty)) return;
+    // Leaving this draft: the guard saves it (or asks, for a new invoice)
     const state: CopyState = { copy: { client, subject, discountPct, notes: notes ?? undefined, lines: filledLines(lines) } };
     navigate('/invoices/new', { state });
     showToast('Copie ouverte : enregistrez-la pour la garder.');
@@ -412,6 +522,7 @@ export default function InvoiceEditorPage() {
       }
       setInvoices(prev => prev.filter(i => i.id !== saved.id));
       showToast('Brouillon supprimé');
+      leaveOk.current = true;
       navigate('/invoices', { replace: true });
     } catch (err) {
       console.error('[removeInvoice]', err);
@@ -423,7 +534,7 @@ export default function InvoiceEditorPage() {
 
   function onCancel() {
     if (busy || compliance.checking) return;
-    if (!confirmDiscard(dirty)) return;
+    // The leave guard saves a draft's changes, or asks for a new invoice
     navigate(saved ? `/invoices/${saved.id}` : quote ? `/quotes/${quote.id}` : '/invoices');
   }
 
@@ -463,7 +574,7 @@ export default function InvoiceEditorPage() {
   return (
     <>
       <Page
-        back={{ label: 'Annuler', onClick: onCancel }}
+        back={{ label: saved ? 'Fermer' : 'Annuler', onClick: onCancel }}
         title={<span className="iv-title"><span>{saved ? 'Brouillon de facture' : 'Nouvelle facture'}</span><StatusPill tone="draft" label="Brouillon" /></span>}
         subtitle={
           <span className="iv-sub">
@@ -472,12 +583,17 @@ export default function InvoiceEditorPage() {
             {saved
               ? <span><OwnerLine table="invoices" id={saved.id} ownerId={live?.ownerId} ownerName={live?.ownerName} className="ie-owner" /></span>
               : <span>Responsable : {ownerName}</span>}
-            <span>{savedAt ? `Enregistré à ${timeOf(savedAt)}` : saved ? 'Enregistré' : 'Pas encore enregistré'}{dirty && saved ? ' · modifications non enregistrées' : ''}</span>
+            <span aria-live="polite">
+              {autoState === 'saving' ? 'Enregistrement…'
+                : autoState === 'failed' ? <span className="ie-save-failed">Enregistrement automatique impossible{savable ? '' : ' : corrigez la facture'} · <button type="button" className="ie-link" onClick={() => void onSave()}>Enregistrer</button></span>
+                : savedAt ? `Enregistré à ${timeOf(savedAt)}` : saved ? 'Enregistré' : 'Pas encore enregistré'}
+              {dirty && saved && autoState === null ? ' · modifications en cours' : ''}
+            </span>
           </span>
         }
         documentTitle={saved ? 'Brouillon de facture' : 'Nouvelle facture'}
         actions={<>
-          <button className="btn" onClick={onCancel} disabled={locked}>Annuler</button>
+          <button className="btn" onClick={onCancel} disabled={locked}>{saved ? 'Fermer' : 'Annuler'}</button>
           <button className="btn" onClick={() => void onSave()} disabled={locked}>
             {busy === 'save' ? 'Enregistrement…' : 'Enregistrer le brouillon'}
           </button>
@@ -508,7 +624,7 @@ export default function InvoiceEditorPage() {
                     {orgSettings.cadastralRef && <><br />Réf. cadastrale {formatCadastralRef(orgSettings.cadastralRef)}</>}
                     {(orgSettings.email || orgSettings.phone) && <><br />{[orgSettings.email, orgSettings.phone].filter(Boolean).join(' · ')}</>}
                   </div>
-                  <button type="button" className="ie-source" onClick={() => { if (confirmDiscard(dirty)) navigate('/settings?tab=business'); }}>Depuis Paramètres · modifier</button>
+                  <button type="button" className="ie-source" onClick={() => navigate('/settings?tab=business')}>Depuis Paramètres · modifier</button>
                 </div>
               </div>
               <div className="pp-doc">
@@ -569,7 +685,12 @@ export default function InvoiceEditorPage() {
                   const found = catalogueFor(l);
                   return (
                     <tr key={l.id} className={problem ? 'has-err' : undefined}>
-                      <td className="ie-code">{codeOf(l)}</td>
+                      <td className="ie-code">
+                        {canCatalogue(l)
+                          ? <button type="button" className="ie-link ie-catalogue-add" onClick={() => void addToCatalogue(l)} disabled={locked || cataloguing !== null}
+                              title="Ajouter cette ligne au catalogue" aria-label={`Ajouter la ligne ${i + 1} au catalogue`}>{cataloguing === l.id ? '…' : '+ Catalogue'}</button>
+                          : codeOf(l)}
+                      </td>
                       <td className="ie-desc-cell">
                         <input className="ie-field ie-grow" data-line={l.id} placeholder="Description, ou « / » pour le catalogue" value={l.desc} disabled={locked}
                           aria-label={`Description, ligne ${i + 1}`} aria-invalid={problem ? true : undefined}
@@ -626,7 +747,14 @@ export default function InvoiceEditorPage() {
                   </span>
                 </div>
                 {vatOn && <div className="tot-row"><span>{VAT_LABEL}</span><span className="tv">{fmt(totals.tax)} F CFA</span></div>}
-                <div className="tot-row grand"><span>Total dû</span><span className="tv">{fmt(totals.total)} F CFA</span></div>
+                {totals.withholding !== null && clientRec?.withholdingScenario && (<>
+                  <div className="tot-row"><span>{vatOn ? 'Total TTC' : 'Total'}</span><span className="tv">{fmt(totals.total)} F CFA</span></div>
+                  <div className="tot-row ie-withholding">
+                    <span>Retenue à la source ({SERVICE_WITHHOLDING_RATE_LABEL[clientRec.withholdingScenario]}) — Art.207/212</span>
+                    <span className="tv">− {fmt(totals.withholding)} F CFA</span>
+                  </div>
+                </>)}
+                <div className="tot-row grand"><span>{totals.withholding !== null ? 'Net à payer' : 'Total dû'}</span><span className="tv">{fmt(totals.toPay)} F CFA</span></div>
               </div>
             </div>
             {totals.total > 0 && <p className="pp-words">{invoiceTotalMention(totals.total)}</p>}
@@ -639,7 +767,7 @@ export default function InvoiceEditorPage() {
                     ? paymentMethods.map(m => <div key={m.label} className="pp-pm"><span>{m.label} — {m.value}</span></div>)
                     : <div className="pp-pm"><span>Aucun moyen de paiement dans Paramètres.</span></div>}
                 </div>
-                <button type="button" className="ie-source" onClick={() => { if (confirmDiscard(dirty)) navigate('/settings?tab=payments'); }}>Depuis Paramètres → Paiements · modifier</button>
+                <button type="button" className="ie-source" onClick={() => navigate('/settings?tab=payments')}>Depuis Paramètres → Paiements · modifier</button>
               </div>
               <div className="ie-notes">
                 <div className="pp-block-label">Notes et conditions</div>
@@ -662,7 +790,7 @@ export default function InvoiceEditorPage() {
             <div className="pp-foot ie-locked">
               <span>{orgSettings.name || 'Mon entreprise'}</span>
               <span>{invoiceTemplate.footer.trim() || 'Facture générée via Billio'}</span>
-              <button type="button" className="ie-source" onClick={() => { if (confirmDiscard(dirty)) navigate('/templates'); }}>Depuis Modèles · modifier</button>
+              <button type="button" className="ie-source" onClick={() => navigate('/templates')}>Depuis Modèles · modifier</button>
             </div>
           </div>
         </div>
@@ -698,7 +826,7 @@ export default function InvoiceEditorPage() {
             <button type="button" className={`ie-bar-btn${moreOpen ? ' on' : ''}`} aria-label="Plus d’actions" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(o => !o)}>•••</button>
             {moreOpen && (
               <div className="dt-menu ie-pop ie-more" role="menu" aria-label="Plus d’actions">
-                <button type="button" role="menuitem" className="dt-mi" onClick={() => { setMoreOpen(false); if (confirmDiscard(dirty)) navigate('/templates'); }}>Modèle de facture…</button>
+                <button type="button" role="menuitem" className="dt-mi" onClick={() => { setMoreOpen(false); navigate('/templates'); }}>Modèle de facture…</button>
                 {saved && canDelete(userRole) && (
                   <button type="button" role="menuitem" className="dt-mi danger" onClick={() => { setMoreOpen(false); void onDeleteDraft(); }}>Supprimer le brouillon</button>
                 )}

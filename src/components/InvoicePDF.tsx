@@ -4,7 +4,7 @@ import { formatCadastralRef } from '@/lib/cadastral';
 import type { ReactNode } from 'react';
 import { Document, Page, View, Text, Link, StyleSheet, Svg, Rect } from '@react-pdf/renderer';
 import { cleanRichText, type RichBlock, type RichDoc, type RichInline, type RichMark, type TextAlign } from '@/lib/rich-text';
-import { calculateServiceWithholding } from '@/lib/tax-bf';
+import { calculateServiceWithholding, SERVICE_WITHHOLDING_RATE_LABEL } from '@/lib/tax-bf';
 import { clientTypeDef, clientTypeOf } from '@/lib/client-type';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Invoice, LineItem, ServiceWithholdingScenario } from '@/lib/schemas';
@@ -132,12 +132,7 @@ const SIDEBAR_W = 150;
 const RECEIPT_W = 300;
 const A4_W = 595.28;
 
-const RATE_LABEL: Record<string, string> = {
-  'resident-with-ifu':    '5 %',
-  'resident-without-ifu': '25 %',
-  'construction':         '1 %',
-  'non-resident':         '20 %',
-};
+const RATE_LABEL: Record<string, string> = SERVICE_WITHHOLDING_RATE_LABEL;
 
 /**
  * Template choices change only how the invoice looks: layout, colour, font,
