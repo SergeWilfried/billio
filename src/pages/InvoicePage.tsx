@@ -20,7 +20,8 @@ import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { invoiceMessage } from '@/lib/document-messages';
 import { contactValue } from '@/lib/share-links';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
-import { fetchCreditNotes, createCreditNote, nextCreditNoteId } from '@/lib/api/credit-notes';
+import { fetchCreditNotes, createCreditNote, nextCreditNoteId, creditNoteIssueError } from '@/lib/api/credit-notes';
+import { CREDIT_NATURES, type CreditNature } from '@/lib/credit-note';
 import { useComplianceGuard } from '@/lib/use-compliance-guard';
 import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '@/data';
@@ -123,6 +124,7 @@ export default function InvoicePage() {
   const [avoirReason,  setAvoirReason]  = useState('');
   const [avoirAmount,  setAvoirAmount]  = useState(0);
   const [avoirSaving,  setAvoirSaving]  = useState(false);
+  const [avoirNature,  setAvoirNature]  = useState<CreditNature | ''>('');
   const [creditNotes,  setCreditNotes]  = useState<CreditNote[]>([]);
   // Goes up once a posting to the books has finished, so the side panel reads the entries again
   const [ledgerTick, setLedgerTick] = useState(0);
@@ -332,27 +334,33 @@ export default function InvoicePage() {
   };
 
   const openAvoir = () => {
+    // The new look writes credit notes in the invoice editor (PRO-168)
+    if (UI_V2) { navigate(`/invoices/${invoice.id}/credit-note`); return; }
     setAvoirReason('');
+    setAvoirNature('');
     setAvoirAmount(creditable);
     setAvoirDialog(true);
   };
 
   const handleConfirmAvoir = async () => {
+    if (!avoirNature) { showToast('Choisissez la nature de l\'avoir.', true); return; }
     if (!avoirReason.trim()) { showToast('Saisissez le motif de l\'avoir.', true); return; }
     if (avoirAmount <= 0 || avoirAmount > creditable) { showToast(`Montant invalide (maximum ${fmt(creditable)} F CFA).`, true); return; }
     setAvoirSaving(true);
     try {
       const avId = await nextCreditNoteId(orgId);
       const today = new Date().toISOString().slice(0, 10);
-      const cn = await createCreditNote(orgId, {
-        id:        avId,
+      const cn = await createCreditNote(orgId, avId, {
         invoiceId: invoice.id,
         subject:   `Avoir sur ${invoiceRef(invoice)}`,
         client:    invoice.client,
         issued:    today,
         amount:    avoirAmount,
         reason:    avoirReason.trim(),
-      });
+        nature:    avoirNature,
+        lines:     [],
+        discountPct: 0,
+      }, 'issued');
       setCreditNotes(prev => [cn, ...prev]);
       // The database marks the invoice paid once nothing is left to collect
       if ((invoice.status === 'pending' || invoice.status === 'overdue') && balance - avoirAmount <= 0) {
@@ -372,7 +380,7 @@ export default function InvoicePage() {
       showToast(`Avoir ${creditNoteRef(cn)} émis`);
     } catch (err) {
       console.error('Create credit note failed:', err);
-      showToast('Erreur lors de l\'émission de l\'avoir', true);
+      showToast(creditNoteIssueError(err) ?? 'Erreur lors de l\'émission de l\'avoir', true);
     } finally {
       setAvoirSaving(false);
     }
@@ -390,7 +398,8 @@ export default function InvoicePage() {
     cheque: 'Chèque',
   };
 
-  const canEdit = writable && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
+  // Once a credit note was issued on it, its lines stay as credited (PRO-168): corrections go through credit notes
+  const canEdit = writable && creditNotes.length === 0 && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
   // Header and footer bands of the organisation's template (PRO-167), in the new look
   const pageBand = UI_V2 ? paperBands(invoiceTemplate) : null;
 
@@ -1146,6 +1155,11 @@ export default function InvoicePage() {
               </button>
             </div>
             <div className="inv-modal-body">
+              <label className="form-label" htmlFor="avoir-nature">Nature de l'avoir <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+              <select id="avoir-nature" className="form-input" value={avoirNature} onChange={e => setAvoirNature(e.target.value as CreditNature)} style={{ marginBottom: 12 }}>
+                <option value="">Choisir…</option>
+                {CREDIT_NATURES.map(n => <option key={n.code} value={n.code} disabled={n.code === 'RAN' && paid > 0}>{n.code} · {n.label}</option>)}
+              </select>
               <div className="form-label">Motif de l'avoir <span style={{ color: 'var(--color-danger)' }}>*</span></div>
               <input
                 className="form-input"

@@ -1,4 +1,5 @@
 import { invoiceRef } from '@/lib/invoice-number';
+import { documentAmounts } from '@/lib/document-amounts';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
 import type { ReactNode } from 'react';
@@ -10,7 +11,7 @@ import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Invoice, LineItem, ServiceWithholdingScenario } from '@/lib/schemas';
 import type { BizInfo, PaperConfig } from '@/components/InvoicePaper';
 import type { PaymentMethodLine } from '@/lib/payment-methods';
-import { VAT_LABEL, chargesVat, documentHasVat, vatOn } from '@/lib/vat';
+import { VAT_LABEL, chargesVat, documentHasVat } from '@/lib/vat';
 import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, paperBands, pdfFont } from '@/lib/invoice-template';
 import { registerPdfFonts } from '@/lib/pdf-fonts';
 import { qrMatrix, qrRuns, type InvoiceCertification } from '@/lib/certification';
@@ -109,7 +110,17 @@ export interface InvoicePDFProps {
   template?: PaperConfig;
   title?: string;
   /** Which wording the total in words uses; from the title when omitted */
-  documentKind?: 'facture' | 'devis';
+  documentKind?: 'facture' | 'devis' | 'avoir';
+  /**
+   * A credit note (« FACTURE D'AVOIR », PRO-168): its nature, the invoice it
+   * credits and its reason replace the due date, terms and payment methods.
+   * `invoice` then carries the credit note (number, dates, issuer, lines' discount).
+   */
+  creditNote?: {
+    nature: string; originalRef: string; originalIssued: string; reason: string;
+    /** The stored total: printed as is, the rounding left in the discount or the VAT */
+    storedTotal?: number;
+  };
   clientLabel?: string;
   paymentTerms?: string;
   deliveryTerms?: string;
@@ -315,7 +326,7 @@ const pdfFmtDateTime = (iso: string): string => {
 
 export function InvoicePDFDocument({
   invoice, lines, client, biz, template, title = 'Facture', documentKind, clientLabel = 'Facturé à',
-  paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [], certification,
+  paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [], certification, creditNote,
 }: InvoicePDFProps) {
   registerPdfFonts();
   const t = normalizeConfig(template ?? DEFAULT_CONFIG);
@@ -325,16 +336,14 @@ export function InvoicePDFDocument({
 
   const subtotal      = lines.reduce((sum, li) => sum + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
-  const discountAmt   = Math.round(subtotal * (discountPct / 100));
-  const discountedSub = subtotal - discountAmt;
   // VAT as issued: the stored total says whether it was charged, so a later
   // change of tax regime doesn't rewrite old invoices
-  const showVat       = documentHasVat(invoice.amount, discountedSub, chargesVat(biz.taxRegime));
-  const tax           = vatOn(discountedSub, showVat);
-  const total         = discountedSub + tax;
+  const showVat       = documentHasVat(invoice.amount, subtotal - Math.round(subtotal * (discountPct / 100)), chargesVat(biz.taxRegime));
+  const { discountAmt, discountedSub, tax, total } = documentAmounts(subtotal, discountPct, showVat, creditNote?.storedTotal);
   const isPaid = invoice.status === 'paid';
 
-  const svcWithholding = client.withholdingScenario
+  // A credit note gives back what was invoiced: no withholding of its own
+  const svcWithholding = client.withholdingScenario && !creditNote
     ? calculateServiceWithholding(discountedSub, client.withholdingScenario as ServiceWithholdingScenario)
     : null;
   const netAPayer = svcWithholding !== null ? total - svcWithholding : null;
@@ -387,7 +396,13 @@ export function InvoicePDFDocument({
   const detailsBlock = (
     <>
       <Text style={s.blockLabel}>Détails</Text>
-      {([
+      {(creditNote ? [
+        ['Date', pdfFmtDate(invoice.issued)],
+        ...(invoice.firstIssuedAt ? [['Émission', pdfFmtDateTime(invoice.firstIssuedAt)] as const] : []),
+        ...(invoice.issuedByName ? [['Émis par', invoice.issuedByName] as const] : []),
+        ['Nature', creditNote.nature],
+        ['Facture d’origine', `${creditNote.originalRef} du ${pdfFmtDate(creditNote.originalIssued)}`],
+      ] as const : [
         ['Émis le', pdfFmtDate(invoice.issued)],
         // DGI mentions w and y: when the invoice was issued, and by whom
         ...(invoice.firstIssuedAt ? [['Émission', pdfFmtDateTime(invoice.firstIssuedAt)] as const] : []),
@@ -411,10 +426,11 @@ export function InvoicePDFDocument({
     </View>
   );
 
-  const subject = invoice.subject ? (
+  const subjectText = creditNote ? creditNote.reason : invoice.subject;
+  const subject = subjectText ? (
     <View style={s.subjectRow}>
-      <Text style={{ fontSize: 9, fontWeight: 700, marginRight: 4 }}>Objet :</Text>
-      <Text style={{ fontSize: 9, color: '#1a1a1a', flex: 1 }}>{invoice.subject}</Text>
+      <Text style={{ fontSize: 9, fontWeight: 700, marginRight: 4 }}>{creditNote ? 'Motif :' : 'Objet :'}</Text>
+      <Text style={{ fontSize: 9, color: '#1a1a1a', flex: 1 }}>{subjectText}</Text>
     </View>
   ) : null;
 
@@ -495,7 +511,7 @@ export function InvoicePDFDocument({
           </View>
         ) : null}
         <View style={s.grandRow}>
-          <Text style={s.grandLabel}>{netAPayer !== null && !isPaid ? 'Net à payer' : 'Total dû'}</Text>
+          <Text style={s.grandLabel}>{creditNote ? 'Total de l’avoir' : netAPayer !== null && !isPaid ? 'Net à payer' : 'Total dû'}</Text>
           <Text style={s.grandVal}>{pdfFmt(amountDue)} F CFA</Text>
         </View>
       </View>
@@ -504,11 +520,18 @@ export function InvoicePDFDocument({
 
   // DGI mention t: the total in words, in every layout
   const totalInWords = (
-    <Text style={s.totalWords}>{invoiceTotalMention(total, documentKind ?? (title === 'Devis' ? 'devis' : 'facture'))}</Text>
+    <Text style={s.totalWords}>{invoiceTotalMention(total, documentKind ?? (creditNote ? 'avoir' : title === 'Devis' ? 'devis' : 'facture'))}</Text>
   );
 
   // Kept on one page, unless notes make it too long for one: then it may continue
-  const payment = (
+  const payment = creditNote ? (
+    <View style={s.paySection} wrap={false}>
+      <View style={s.payCol}>
+        <Text style={s.blockLabel}>R{'è'}glement</Text>
+        <Text style={s.notesText}>Le montant de cet avoir est d{'é'}duit du reste d{'û'} sur la facture {creditNote.originalRef}.</Text>
+      </View>
+    </View>
+  ) : (
     <View style={s.paySection} wrap={!!notes}>
       <View style={s.payCol}>
         <Text style={s.blockLabel}>Modes de paiement</Text>
@@ -632,8 +655,13 @@ export function InvoicePDFDocument({
           </View>
           <View style={s.strip}>
             <Text style={s.stripText}>Émis le : {pdfFmtDate(invoice.issued)}</Text>
-            <Text style={s.stripText}>Échéance : {pdfFmtDate(invoice.due)}</Text>
-            <Text style={s.stripText}>{paymentTerms}</Text>
+            {creditNote ? <>
+              <Text style={s.stripText}>Sur la facture : {creditNote.originalRef}</Text>
+              <Text style={s.stripText}>Nature : {creditNote.nature.split(' ·')[0]}</Text>
+            </> : <>
+              <Text style={s.stripText}>Échéance : {pdfFmtDate(invoice.due)}</Text>
+              <Text style={s.stripText}>{paymentTerms}</Text>
+            </>}
           </View>
           {parties}
         </>
@@ -650,9 +678,9 @@ export function InvoicePDFDocument({
               <Text style={s.asideName}>{bizName}</Text>
               {[bizAddr, bizContact, bizCompliance].filter(Boolean).map(l => <Text key={l} style={s.asideMeta}>{l}</Text>)}
               <View style={s.asideSep} />
-              <Text style={s.asideLabel}>{netAPayer !== null && !isPaid ? 'Net à payer' : 'Total dû'}</Text>
+              <Text style={s.asideLabel}>{creditNote ? 'Total de l’avoir' : netAPayer !== null && !isPaid ? 'Net à payer' : 'Total dû'}</Text>
               <Text style={s.asideTotal}>{pdfFmt(amountDue)} F CFA</Text>
-              <Text style={s.asideDue}>Éch. {pdfFmtDate(invoice.due)}</Text>
+              <Text style={s.asideDue}>{creditNote ? `Sur ${creditNote.originalRef}` : `Éch. ${pdfFmtDate(invoice.due)}`}</Text>
             </>
           )} />
         )}

@@ -137,8 +137,19 @@ export const creditNoteSchema = z.object({
   issued:    z.string(),
   amount:    z.number().min(0),
   reason:    z.string(),
-  /** Legal number (AV-2026-0001), given by the database */
+  /** Legal number (AV-2026-0001), given by the database at issue */
   number:    z.string().optional(),
+  /** A draft is written in the invoice editor and doesn't count until issued (PRO-168) */
+  status:    z.enum(['draft', 'issued']).default('issued'),
+  /** COR, RAN, RAM or RRR; none on credit notes from before PRO-168 */
+  nature:    z.enum(['COR', 'RAN', 'RAM', 'RRR']).optional(),
+  /** The credited lines; `sourceId` is the invoice line each one credits. Empty on older credit notes */
+  lines:     z.array(lineItemSchema.extend({ sourceId: z.string().optional() })).default([]),
+  /** The original invoice's discount, applied to these lines */
+  discountPct: z.number().min(0).max(100).default(0),
+  /** When and by whom it was issued, set by the database */
+  issuedTs:     z.string().optional(),
+  issuedByName: z.string().optional(),
 });
 
 export const quoteSchema = z.object({

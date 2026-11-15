@@ -16,6 +16,7 @@ import type { Feature } from '@/lib/plans';
 const LandingPage            = lazy(() => import('./pages/LandingPage'));
 const InvoiceGeneratorPage   = lazy(() => import('./pages/InvoiceGeneratorPage'));
 const InvoiceEditorPage      = lazy(() => import('./pages/InvoiceEditorPage'));
+const CreditNoteEditorPage   = lazy(() => import('./pages/CreditNoteEditorPage'));
 const AuthPage               = lazy(() => import('./pages/AuthPage'));
 const ResetPasswordPage      = lazy(() => import('./pages/ResetPasswordPage'));
 const InvitePage             = lazy(() => import('./pages/InvitePage'));
@@ -112,6 +113,8 @@ export default function App() {
             <Route path="/invoices" element={<SalesPage />} />
             {UI_V2 && <Route path="/invoices/new" element={<InvoiceEditorPage />} />}
             {UI_V2 && <Route path="/invoices/:id/edit" element={<InvoiceEditorPage />} />}
+            {UI_V2 && <Route path="/invoices/:id/credit-note" element={<CreditNoteEditorPage />} />}
+            {UI_V2 && <Route path="/credit-notes/:cnId/edit" element={<CreditNoteEditorPage />} />}
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/clients"  element={<Navigate to="/contacts" replace />} />
