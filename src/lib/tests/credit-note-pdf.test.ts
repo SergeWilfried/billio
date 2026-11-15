@@ -9,7 +9,7 @@ vi.mock('@/lib/render-pdf', async () => {
   const [{ cloneElement }, { renderToBuffer }, { InvoicePDFDocument }] = await Promise.all([import('react'), import('@react-pdf/renderer'), import('@/components/InvoicePDF')]);
   type Node = { lines?: { string?: string }[]; children?: Node[] };
   const collect = (n: Node | undefined, out: string[]) => {
-    for (const l of n?.lines ?? []) if (l.string) out.push(l.string.replace(/[\s  ]+/g, ' ').trim());
+    for (const l of n?.lines ?? []) if (l.string) out.push(l.string.replace(/[\s\u00a0\u202f]+/g, ' ').trim());
     for (const c of n?.children ?? []) collect(c, out);
   };
   return {
