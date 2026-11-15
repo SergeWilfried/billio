@@ -281,6 +281,12 @@ begin
   if coalesce(auth.role(), '') not in ('authenticated', 'anon') or v_inv is null then
     return coalesce(new, old);
   end if;
+  -- A line never moves to another invoice (the app never does it): a move
+  -- would lock only one of the two invoices
+  if tg_op = 'UPDATE' and (new.org_id, new.invoice_id) is distinct from (old.org_id, old.invoice_id) then
+    raise exception 'line_item_reassigned'
+      using errcode = 'BL002', detail = 'A line cannot move to another invoice.';
+  end if;
   -- The invoice lock that issuing a credit note takes: a line change and an
   -- issue on the same invoice happen one after the other, never interleaved
   perform 1 from invoices where org_id = v_org and id = v_inv for update;

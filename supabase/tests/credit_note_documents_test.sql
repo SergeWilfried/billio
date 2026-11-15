@@ -213,6 +213,13 @@ begin
   exception when raise_exception then null;
   end;
 
+  -- A line can't move to another invoice
+  begin
+    update line_items set invoice_id = 'F-4' where id = '00000000-0000-0000-0000-0000000000e2';
+    failures := failures + 1; raise warning 'a line moved to another invoice';
+  exception when sqlstate 'BL002' then null;
+  end;
+
   -- An invoice without credit notes can still be corrected
   insert into invoices (id, org_id, amount) values ('F-4', a, 50);
   insert into line_items values ('00000000-0000-0000-0000-00000000000d', a, 'F-4', 1);
