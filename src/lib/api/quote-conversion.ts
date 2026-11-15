@@ -42,7 +42,8 @@ export async function convertQuoteToInvoice(
   const invId      = newDraftId();
   const draft: Invoice = {
     id: invId, subject: quote.subject, client: quote.client, issued: today, due: dueDate,
-    amount: quote.amount, status: 'draft', discountPct: 0,
+    // The quote's discount and notes go with it (PRO-185)
+    amount: quote.amount, status: 'draft', discountPct: quote.discountPct ?? 0, notes: quote.notes,
   };
 
   // The invoice keeps the quote's « Responsable » (PRO-172), if they are still

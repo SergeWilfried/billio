@@ -163,6 +163,10 @@ export const quoteSchema = z.object({
   status:  quoteStatusSchema,
   /** The invoice it became, once converted (internal id; none for quotes converted before this was kept) */
   invoiceId: z.string().optional(),
+  /** Invoice-level discount, as on invoices (PRO-185); 0 on older quotes */
+  discountPct: z.number().min(0).max(100).optional(),
+  /** Notes and conditions (rich text), carried into the invoice (PRO-185) */
+  notes: z.custom<RichDoc>().optional(),
   /** « Responsable »: the team member in charge (PRO-172), set and named by the database */
   ownerId:     z.string().optional(),
   ownerName:   z.string().optional(),

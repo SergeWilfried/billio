@@ -29,6 +29,12 @@ beforeEach(() => {
 });
 
 describe('convertQuoteToInvoice', () => {
+  it('carries the quote’s discount and notes into the invoice (PRO-185)', async () => {
+    api.updateInvoice.mockResolvedValue({ number: 'FACT-2026-0002' });
+    const notes = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Valable 30 jours' }] }] };
+    await convertQuoteToInvoice('org', { ...quote, discountPct: 5, notes } as Quote, opts);
+    expect(api.createInvoice.mock.calls[0][1]).toMatchObject({ discountPct: 5, notes });
+  });
   it('saves a draft, marks the quote, then issues it with the number from the database', async () => {
     api.updateInvoice.mockResolvedValue({ number: 'FACT-2026-0001', firstIssuedAt: '2026-11-11T10:00:00Z' });
     const { invoice } = await convertQuoteToInvoice('org', quote, opts);
