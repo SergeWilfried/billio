@@ -5,7 +5,7 @@ import type { Session } from '@supabase/supabase-js';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { ToastProvider } from '@/context/ToastContext';
 import AppShell from '@/components/AppShell';
-import { ACCOUNTING_ENABLED } from '@/lib/features';
+import { ACCOUNTING_ENABLED, UI_V2 } from '@/lib/features';
 import FeatureGuard from '@/components/FeatureGuard';
 import type { Feature } from '@/lib/plans';
 
@@ -20,7 +20,10 @@ const ResetPasswordPage      = lazy(() => import('./pages/ResetPasswordPage'));
 const InvitePage             = lazy(() => import('./pages/InvitePage'));
 const OnboardingPage         = lazy(() => import('./pages/OnboardingPage'));
 const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
+const DashboardV2Page        = lazy(() => import('./pages/DashboardV2Page'));
 const SalesPage              = lazy(() => import('./pages/SalesPage'));
+const QuotesPage             = lazy(() => import('./pages/QuotesPage'));
+const PaymentsPage           = lazy(() => import('./pages/PaymentsPage'));
 const InvoicePage            = lazy(() => import('./pages/InvoicePage'));
 const ContactsPage           = lazy(() => import('./pages/ContactsPage'));
 const ProductsPage           = lazy(() => import('./pages/ProductsPage'));
@@ -104,7 +107,7 @@ export default function App() {
 
           {/* All other routes redirect to /onboarding when setup is missing */}
           <Route element={<OnboardingGuard />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/dashboard" element={UI_V2 ? <DashboardV2Page /> : <DashboardPage />} />
             <Route path="/invoices" element={<SalesPage />} />
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
@@ -116,7 +119,7 @@ export default function App() {
               <Route path="/accounting/trial-balance"        element={<Gated feature="accounting_syscohada" title="Balance générale"><TrialBalancePage /></Gated>} />
               <Route path="/accounting/financial-statements" element={<Gated feature="accounting_syscohada" title="États financiers"><FinancialStatementsPage /></Gated>} />
               <Route path="/accounting/fixed-assets"         element={<Gated feature="fixed_assets" title="Immobilisations"><FixedAssetsPage /></Gated>} />
-              <Route path="/accounting/suppliers"            element={<Navigate to="/contacts?tab=suppliers" replace />} />
+              <Route path="/accounting/suppliers"            element={<Navigate to="/contacts" replace />} />
               <Route path="/accounting/tax"                  element={<Gated feature="accounting_syscohada" title="Fiscalité"><TaxPage /></Gated>} />
               <Route path="/accounting/period-closing"       element={<Gated feature="period_closing" title="Clôture"><PeriodClosingPage /></Gated>} />
               <Route path="/accounting/opening-balances"     element={<Gated feature="accounting_syscohada" title="Ouverture"><OpeningBalancesPage /></Gated>} />
@@ -125,8 +128,9 @@ export default function App() {
             )}
             {/* Reports aren't built yet; old links land on the dashboard */}
             <Route path="/reports"  element={<Navigate to="/dashboard" replace />} />
-            <Route path="/payments" element={<Navigate to="/invoices?tab=payments" replace />} />
-            <Route path="/quotes"     element={<Navigate to="/invoices?tab=quotes" replace />} />
+            {/* In the ERP look Devis and Paiements are pages of their own (PRO-165) */}
+            <Route path="/payments" element={UI_V2 ? <Gated feature="payments_mobilemoney" title="Paiements"><PaymentsPage /></Gated> : <Navigate to="/invoices?tab=payments" replace />} />
+            <Route path="/quotes"     element={UI_V2 ? <Gated feature="quotes" title="Devis"><QuotesPage /></Gated> : <Navigate to="/invoices?tab=quotes" replace />} />
             <Route path="/quotes/:id" element={<Gated feature="quotes" title="Devis"><QuotePage /></Gated>} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings"  element={<SettingsPage />} />

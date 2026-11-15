@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect, type ReactNode } from 'react';
+import { invoiceRef } from '@/lib/invoice-number';
+import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react';
 import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
 import Icon from '@/components/Icon';
@@ -14,7 +15,12 @@ import { csvBlob } from '@/lib/csv';
 import { confirmDiscard } from '@/lib/confirm-discard';
 import { downloadBlob } from '@/lib/download';
 import { fmt, fmtCompact, fmtDate, clientInitials } from '@/data';
-import type { PayMethod, PayStatus, CreditNote } from '@/lib/schemas';
+import type { Payment, PayMethod, PayStatus, CreditNote } from '@/lib/schemas';
+import Page from '@/components/Page';
+import PaymentList from '@/components/sales/PaymentList';
+import { paymentAuthor } from '@/lib/sales-tables';
+import { useCommandIntent } from '@/lib/command-intent';
+import { UI_V2 } from '@/lib/features';
 
 type FilterKey = 'all' | 'cash' | 'wire' | 'momo' | 'cheque' | 'online' | 'pending';
 
@@ -53,7 +59,7 @@ const REF_META: Record<PayMethod, { label: string; placeholder: string }> = {
 /** Rendered by SalesPage, which passes the Factures | Devis | Paiements tab switcher. */
 export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
   const { writable } = usePermissions();
-  const { invoices, setInvoices, payments, setPayments, showToast, clientsMap, orgId, loading } = useApp();
+  const { invoices, setInvoices, payments, setPayments, showToast, clientsMap, orgId, loading, userLabel } = useApp();
 
   const [filter, setFilter]     = useState<FilterKey>('all');
   const [panelOpen, setPanelOpen] = useState(false);
@@ -94,6 +100,12 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
     pending: payments.filter(p => p.status === 'pending').length,
   };
 
+  // Payments point to the invoice's internal id; show its legal number
+  const invRef = useMemo(() => {
+    const byId = new Map(invoices.map(i => [i.id, invoiceRef(i)]));
+    return (id: string) => byId.get(id) ?? id;
+  }, [invoices]);
+
   const filtered = useMemo(() => {
     if (filter === 'pending') return payments.filter(p => p.status === 'pending');
     if (filter === 'online')  return payments.filter(p => p.source === 'online');
@@ -104,13 +116,16 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
   const onlineCount = payments.filter(p => p.source === 'online').length;
 
   // Relevé: the payments currently listed, as a CSV for Excel
+  // In the ERP look the table filters itself and tells us what it lists
+  const tableShown = useRef<Payment[]>([]);
   function exportStatement() {
-    if (filtered.length === 0) { showToast('Aucun paiement à exporter.', true); return; }
-    const rows = filtered.map(p => [
-      p.date, p.inv, clientsMap[p.client]?.name ?? p.client, METHOD_META[p.method].label, p.ref, p.amount, STATUS_LABEL[p.status],
+    const listed = UI_V2 ? tableShown.current : filtered;
+    if (listed.length === 0) { showToast('Aucun paiement à exporter.', true); return; }
+    const rows = listed.map(p => [
+      p.date, invRef(p.inv), clientsMap[p.client]?.name ?? p.client, METHOD_META[p.method].label, p.ref, p.amount, STATUS_LABEL[p.status], paymentAuthor(p),
     ]);
     downloadBlob(
-      csvBlob(['Date', 'Facture', 'Client', 'Méthode', 'Référence', 'Montant (F CFA)', 'Statut'], rows),
+      csvBlob(['Date', 'Facture', 'Client', 'Méthode', 'Référence', 'Montant (F CFA)', 'Statut', 'Saisi par'], rows),
       `releve-paiements-${todayISO()}.csv`,
     );
   }
@@ -122,6 +137,12 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
   }
 
   function closePanel() { setPanelOpen(false); }
+
+  // From the command box (PRO-162)
+  useCommandIntent(intent => {
+    if (intent.command !== 'new-payment' || !writable) return false;
+    openPanel();
+  }, !loading);
   function requestClosePanel() {
     if (confirmDiscard(invId !== '' || amount.trim() !== '' || ref.trim() !== '')) closePanel();
   }
@@ -151,6 +172,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
         ref:        ref.trim() || m.sub,
         amount:     amt,
         clientName: clientsMap[inv?.client ?? '']?.name ?? (inv?.client ?? '?'),
+        recordedBy: userLabel,
       });
       setPayments(prev => prev.some(p => p.id === res.payment.id) ? prev : [{ ...res.payment, client: res.payment.client || (inv?.client ?? '') }, ...prev]);
       setInvoices(prev => prev.map(i => i.id === invId ? { ...i, status: res.invoiceStatus } : i));
@@ -168,32 +190,38 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
     }
   }
 
-  if (loading) return <PageSkeleton title="Facturation" subtitle="Suivez vos encaissements" metrics={4} rows={6} />;
+  if (loading) return <PageSkeleton title={UI_V2 ? 'Paiements' : 'Facturation'} subtitle="Argent reçu sur vos factures" metrics={4} rows={6} />;
 
   return (
     <>
-      <div className="main">
-        {/* Topbar */}
-        <div className="topbar">
-          <div>
-            <div className="page-title">Facturation</div>
-            <div className="page-sub">Argent reçu sur vos factures</div>
-          </div>
-          <div className="topbar-actions">
-            <button className="btn" onClick={exportStatement} title="Exporter les paiements affichés (CSV)">
-              <Icon name="download" size={16} />
-              Relevé
+      <Page
+        title={UI_V2 ? 'Paiements' : 'Facturation'}
+        subtitle="Argent reçu sur vos factures"
+        actions={<>
+          <button className="btn" onClick={exportStatement} title="Exporter les paiements affichés (CSV)">
+            <Icon name="download" size={16} />
+            Relevé
+          </button>
+          {writable && (
+            <button className="btn btn-primary" onClick={openPanel}>
+              <Icon name="plus" size={16} />
+              Enregistrer un paiement
             </button>
-            {writable && (
-              <button className="btn btn-primary" onClick={openPanel}>
-                <Icon name="plus" size={16} />
-                Enregistrer un paiement
-              </button>
+          )}
+        </>}
+      >
+          {UI_V2 ? <>
+            {onlineCount > 0 && (
+              <div className="recon-banner">
+                <div className="rb-ico"><Icon name="bolt" size={18} /></div>
+                <div className="rb-text">
+                  <b>Les paiements en ligne se rapprochent automatiquement</b>
+                  Connecté via Paystack — chaque paiement en ligne est associé à la facture correspondante en temps réel.
+                </div>
+              </div>
             )}
-          </div>
-        </div>
-
-        <div className="content">
+            <PaymentList onShownChange={rows => { tableShown.current = rows; }} />
+          </> : <>
           {/* Metrics */}
           <div className="metrics">
             {/* Feature card — total received */}
@@ -319,7 +347,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
                       <div>
                         <div className="cell-text">{cl?.name ?? p.client}</div>
                         <div className="cell-sub">
-                          pour <span className="lnk">#{p.inv}</span>
+                          pour <span className="lnk">#{invRef(p.inv)}</span>
                         </div>
                       </div>
                     </div>
@@ -367,8 +395,8 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
               })
             )}
           </div>
-        </div>
-      </div>
+          </>}
+      </Page>
 
       {/* Scrim */}
       <div className={'scrim' + (panelOpen ? ' open' : '')} onClick={requestClosePanel} />
@@ -415,7 +443,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
               <option value="">Sélectionner une facture ouverte…</option>
               {openInvoices.map(inv => (
                 <option key={inv.id} value={inv.id}>
-                  #{inv.id} — {clientsMap[inv.client]?.name ?? inv.client} (reste {fmt(balanceOf(inv.id))} F CFA)
+                  #{invoiceRef(inv)} — {clientsMap[inv.client]?.name ?? inv.client} (reste {fmt(balanceOf(inv.id))} F CFA)
                 </option>
               ))}
             </select>

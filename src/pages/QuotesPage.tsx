@@ -1,3 +1,4 @@
+import { invoiceRef } from '@/lib/invoice-number';
 import { useState, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
@@ -16,11 +17,17 @@ import { createActivity } from '@/lib/api/activities';
 import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { confirmDiscard } from '@/lib/confirm-discard';
 import { contactValue } from '@/lib/share-links';
-import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
+import { convertQuoteToInvoice, ConversionOutcomeUnknownError } from '@/lib/api/quote-conversion';
+import { useComplianceGuard } from '@/lib/use-compliance-guard';
+import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { saveLineItems, deleteLineItems, fetchLineItems } from '@/lib/api/line-items';
 import { fmt, fmtCompact, fmtDate, newLineItem, clientInitials } from '@/data';
 import type { Activity, LineItem, QuoteStatus } from '@/lib/schemas';
 import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
+import Page from '@/components/Page';
+import QuoteList from '@/components/sales/QuoteList';
+import { useCommandIntent } from '@/lib/command-intent';
+import { UI_V2 } from '@/lib/features';
 
 type FilterKey = 'all' | QuoteStatus;
 
@@ -72,6 +79,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
   const [showPicker, setShowPicker]   = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
   const convertingRef = useRef<Set<string>>(new Set());
+  const compliance = useComplianceGuard();
   const submittingRef = useRef(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +138,13 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     setPanelOpen(true);
   }
   function closePanel() { setPanelOpen(false); setShowPicker(false); }
+
+  // From the command box (PRO-162): a new quote, maybe for a client
+  useCommandIntent(intent => {
+    if (intent.command !== 'new-quote' || !writable) return false;
+    openPanel();
+    if (intent.client) setFClient(intent.client);
+  }, !loading);
   function requestClosePanel() {
     const dirty = fClient !== '' || fSubject.trim() !== '' || filledLines(lines).length > 0;
     if (confirmDiscard(dirty)) closePanel();
@@ -182,8 +197,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     }
   }
 
-  async function convertToInvoice(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  async function convertToInvoice(id: string) {
     if (convertingRef.current.has(id)) return;
     const quote = quotes.find(q => q.id === id);
     if (!quote) return;
@@ -195,26 +209,31 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
         clientName: clientsMap[quote.client]?.name ?? quote.client,
       });
       setInvoices(prev => prev.some(i => i.id === invoice.id) ? prev : [invoice, ...prev]);
-      setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced' } : q));
+      setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'invoiced', invoiceId: invoice.id } : q));
       posthog.capture('quote_converted_to_invoice', { quote_id: id, invoice_id: invoice.id });
-      showToast(`Devis ${id} → Facture #${invoice.id} créée`);
+      showToast(`Devis ${id} → Facture #${invoiceRef(invoice)} créée`);
       if (!accountingOk) showToast('Facture créée, mais l\'écriture comptable a échoué. Vérifiez la comptabilité.', true);
     } catch (err) {
       console.error('[convertToInvoice] failed:', err);
+      if (isInvoiceLimitError(err)) { compliance.showLimit(); return; }
+      if (err instanceof ConversionOutcomeUnknownError) {
+        showToast('La conversion n\'a pas pu être confirmée. Rechargez la page et vérifiez vos factures avant de réessayer.', true);
+        return;
+      }
       showToast('Erreur lors de la conversion. Aucune facture n\'a été créée — veuillez réessayer.', true);
     } finally {
       convertingRef.current.delete(id);
     }
   }
 
-  function sendReminder(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  function sendReminder(id: string, e?: React.MouseEvent) {
+    e?.stopPropagation();
     setSendQuote({ id, kind: 'reminder' });
   }
 
   // A new draft with the same client, subject and lines, dated today
-  async function duplicateQuote(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  async function duplicateQuote(id: string, e?: React.MouseEvent) {
+    e?.stopPropagation();
     const quote = quotes.find(q => q.id === id);
     if (!quote || duplicating) return;
     setDuplicating(id);
@@ -242,8 +261,8 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     }
   }
 
-  function handleDelete(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  function handleDelete(id: string, e?: React.MouseEvent) {
+    e?.stopPropagation();
     setDeleteId(id);
   }
 
@@ -263,28 +282,34 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
     }
   }
 
-  if (loading) return <PageSkeleton title="Facturation" subtitle="Gérez vos devis" metrics={0} rows={6} />;
+  if (loading) return <PageSkeleton title={UI_V2 ? 'Devis' : 'Facturation'} subtitle="Estimations envoyées avant facturation" metrics={0} rows={6} />;
 
   return (
     <>
-      <div className="main">
-        {/* Topbar */}
-        <div className="topbar">
-          <div>
-            <div className="page-title">Facturation</div>
-            <div className="page-sub">Estimations envoyées avant facturation</div>
-          </div>
-          <div className="topbar-actions">
-            {writable && (
-              <button className="btn btn-primary" onClick={openPanel}>
-                <Icon name="plus" size={16} />
-                Nouveau devis
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="content">
+      <Page
+        title={UI_V2 ? 'Devis' : 'Facturation'}
+        subtitle="Estimations envoyées avant facturation"
+        actions={<>
+          {writable && (
+            <button className="btn btn-primary" onClick={openPanel}>
+              <Icon name="plus" size={16} />
+              Nouveau devis
+            </button>
+          )}
+        </>}
+      >
+          {UI_V2 ? (
+            <QuoteList
+              writable={writable}
+              deletable={deletable}
+              onOpen={id => navigate(`/quotes/${id}`)}
+              onConvert={q => void compliance.guard(q.client, () => void convertToInvoice(q.id), { returnTo: '/quotes' })}
+              onRemind={id => sendReminder(id)}
+              onDuplicate={id => void duplicateQuote(id)}
+              onDelete={id => handleDelete(id)}
+              duplicating={duplicating !== null}
+            />
+          ) : <>
           {/* Metrics */}
           <div className="metrics">
             <div className="metric-card">
@@ -417,7 +442,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
                       {writable && !['invoiced', 'declined', 'expired'].includes(q.status) && (
                         <button
                           className="btn-convert"
-                          onClick={e => convertToInvoice(q.id, e)}
+                          onClick={e => { e.stopPropagation(); void compliance.guard(q.client, () => void convertToInvoice(q.id), { returnTo: '/invoices?tab=quotes' }); }}
                         >
                           <Icon name="arrow-right" size={13} />
                           Facturer
@@ -453,8 +478,8 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
               })
             )}
           </div>
-        </div>
-      </div>
+          </>}
+      </Page>
 
       {/* Scrim */}
       <div className={'scrim' + (panelOpen ? ' open' : '')} onClick={requestClosePanel} />
@@ -673,6 +698,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
           />
         );
       })()}
+      {compliance.dialog}
     </>
   );
 }

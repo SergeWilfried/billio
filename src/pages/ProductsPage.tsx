@@ -8,8 +8,16 @@ import { ProductsEmptyIllustration } from '@/components/PageEmptyIllustrations';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { createProduct, updateProduct, removeProduct } from '@/lib/api/products';
-import { fmt, fmtCompact } from '@/data';
+import { lastChangeLabel } from '@/lib/change-label';
+import { fmt, fmtCompact, fmtDate } from '@/data';
 import type { ProductType, Product } from '@/lib/schemas';
+import Page from '@/components/Page';
+import ProductTable from '@/components/products/ProductTable';
+import { UI_V2 } from '@/lib/features';
+import { CATALOGUE_CSV_HEADER, catalogueCsvRows } from '@/lib/catalogue';
+import { csvBlob } from '@/lib/csv';
+import { downloadBlob } from '@/lib/download';
+import { todayISO } from '@/lib/invoice-status';
 
 type FilterKey = 'all' | ProductType;
 type ViewMode  = 'list' | 'grid';
@@ -27,7 +35,6 @@ export default function ProductsPage() {
   const { writable, deletable } = usePermissions();
   const { showToast, products, setProducts, orgId, loading } = useApp();
 
-  if (loading) return <PageSkeleton title="Produits & Services" subtitle="Gérez votre catalogue" variant="table-only" rows={6} />;
   const [filter, setFilter]         = useState<FilterKey>('all');
   const [view, setView]             = useState<ViewMode>('list');
   const [search, setSearch]         = useState('');
@@ -110,7 +117,8 @@ export default function ProductsPage() {
       const previous = products.find(p => p.id === editId);
       setProducts(prev => prev.map(p => p.id === editId ? { ...p, ...patch } : p));
       try {
-        await updateProduct(editId, patch);
+        const change = await updateProduct(editId, patch);
+        setProducts(prev => prev.map(p => p.id === editId ? { ...p, ...change } : p));
       } catch (err) {
         console.error('[updateProduct] failed:', err);
         if (previous) setProducts(prev => prev.map(p => p.id === editId ? previous : p));
@@ -135,7 +143,8 @@ export default function ProductsPage() {
       };
       setProducts(prev => [item, ...prev]);
       try {
-        await createProduct(orgId, item);
+        const stored = await createProduct(orgId, item);
+        setProducts(prev => prev.map(p => p.id === item.id ? { ...p, updatedAt: stored.updatedAt, updatedByName: stored.updatedByName, createdById: stored.createdById } : p));
       } catch (err) {
         console.error('[createProduct] failed:', err);
         setProducts(prev => prev.filter(p => p.id !== item.id));
@@ -148,25 +157,33 @@ export default function ProductsPage() {
     }
   };
 
+  // Waits until every hook above has run: returning earlier changes their
+  // number between renders, which React refuses
+  if (loading) return <PageSkeleton title="Produits & Services" subtitle="Articles réutilisables pour vos factures et devis" variant="table-only" rows={6} />;
+
+  // « Exporter »: the catalogue as a CSV for Excel
+  const exportCatalogue = () => {
+    if (products.length === 0) { showToast('Aucun article à exporter.', true); return; }
+    downloadBlob(csvBlob(CATALOGUE_CSV_HEADER, catalogueCsvRows(products)), `catalogue-${todayISO()}.csv`);
+  };
+
   return (
     <>
-      <div className="main">
-        <div className="topbar">
-          <div>
-            <div className="page-title">Produits &amp; Services</div>
-            <div className="page-sub">Articles réutilisables pour vos factures et devis</div>
-          </div>
-          <div className="topbar-actions">
-            <button className="btn"><Icon name="download" ariaHidden /> Exporter</button>
-            {writable && (
-              <button className="btn btn-primary" onClick={openPanel}>
-                <Icon name="plus" ariaHidden /> Nouvel article
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="content">
+      <Page
+        title="Produits & Services"
+        subtitle="Articles réutilisables pour vos factures et devis"
+        actions={<>
+          <button className="btn" onClick={exportCatalogue}><Icon name="download" ariaHidden /> Exporter</button>
+          {writable && (
+            <button className="btn btn-primary" onClick={openPanel}>
+              <Icon name="plus" ariaHidden /> Nouvel article
+            </button>
+          )}
+        </>}
+      >
+          {UI_V2 ? (
+            <ProductTable writable={writable} deletable={deletable} onEdit={openEdit} onDelete={handleDelete} />
+          ) : <>
           {/* Metrics */}
           <div className="metrics">
             <div className="metric-card">
@@ -275,6 +292,7 @@ export default function ProductsPage() {
                     <div style={{ minWidth: 0 }}>
                       <div className="prod-name">{p.name}</div>
                       <div className="prod-sku">{p.sku}</div>
+                      {lastChangeLabel(p, fmtDate) && <div className="prod-changed">{lastChangeLabel(p, fmtDate)}</div>}
                     </div>
                   </div>
                   <div><TypePill type={p.type} /></div>
@@ -331,6 +349,7 @@ export default function ProductsPage() {
                   </div>
                   <div className="pc-name">{p.name}</div>
                   <div className="pc-sku">{p.sku}</div>
+                  {lastChangeLabel(p, fmtDate) && <div className="prod-changed">{lastChangeLabel(p, fmtDate)}</div>}
                   <div className="pc-price tnum">
                     {fmt(p.price)}<span className="cur">F CFA</span>
                     <span className="per"> / {p.unit}</span>
@@ -347,8 +366,8 @@ export default function ProductsPage() {
               ))}
             </div>
           )}
-        </div>
-      </div>
+          </>}
+      </Page>
 
       {/* Slide-over: New item */}
       <div className={`scrim${panelOpen ? ' open' : ''}`} onClick={() => setPanelOpen(false)} />

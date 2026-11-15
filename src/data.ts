@@ -173,3 +173,40 @@ export function clientInitials(name: string): string {
 export function newLineItem(desc = '', qty = 1, price = 0, unit = 'unité', productId?: string): LineItem {
   return { id: crypto.randomUUID(), desc, unit, qty, price, ...(productId ? { productId } : {}) };
 }
+
+// ---------------------------------------------------------------------------
+// Demo team (PRO-172): who is « Responsable » of the demo records
+// ---------------------------------------------------------------------------
+
+export const MOCK_TEAM: { id: string; name: string; role: string }[] = [
+  { id: 'mock-user', name: 'Vous (démo)',    role: 'admin' },
+  { id: 'demo-awa',  name: 'Awa Ouédraogo',  role: 'member' },
+  { id: 'demo-issa', name: 'Issa Traoré',    role: 'accountant' },
+];
+
+/** Owner of a record created in demo mode: the one named, else the demo user. */
+export function mockOwner(ownerId?: string): { ownerId: string; ownerName: string } {
+  const m = MOCK_TEAM.find(t => t.id === ownerId) ?? MOCK_TEAM[0];
+  return { ownerId: m.id, ownerName: m.name };
+}
+
+// Spread the demo records over the team, so « Mes … » has something to show
+for (const list of [INITIAL_INVOICES, INITIAL_QUOTES, INITIAL_CLIENTS] as { ownerId?: string; ownerName?: string }[][]) {
+  list.forEach((r, i) => Object.assign(r, mockOwner(MOCK_TEAM[i % MOCK_TEAM.length].id)));
+}
+
+// Who recorded the demo payments (online ones have no one) and changed the items (PRO-173)
+INITIAL_PAYMENTS.forEach((p, i) => { if (p.source !== 'online') p.createdByName = MOCK_TEAM[i % MOCK_TEAM.length].name; });
+INITIAL_PRODUCTS.forEach((p, i) => {
+  p.updatedAt = new Date(Date.UTC(2026, 4, 2 + i * 3, 9)).toISOString();
+  p.updatedByName = MOCK_TEAM[(i + 1) % MOCK_TEAM.length].name;
+  p.createdById = MOCK_TEAM[i % MOCK_TEAM.length].id;
+});
+
+// Some demo clients are companies with their tax identifiers (PRO-169 record, KYB file)
+const DEMO_COMPANIES: Record<string, { ifu: string; rccm: string; taxRegime: string }> = {
+  OT: { ifu: '00012345A', rccm: 'BF-OUA-2015-B-1201', taxRegime: 'RNI' },
+  SB: { ifu: '00023456B', rccm: 'BF-BBD-2012-B-0457', taxRegime: 'RNI' },
+  AM: { ifu: '00034567C', rccm: 'ML-BKO-2018-B-2210', taxRegime: 'RSI' },
+};
+INITIAL_CLIENTS.forEach(c => { const d = DEMO_COMPANIES[c.code]; if (d) Object.assign(c, d, { clientType: 'PM' }); });

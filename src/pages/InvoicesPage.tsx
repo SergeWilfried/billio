@@ -2,13 +2,15 @@ import { useState, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
 import { useNavigate } from 'react-router-dom';
+import InvoiceClientSelect from '@/components/InvoiceClientSelect';
 import Icon from '@/components/Icon';
 import { EmptyState } from '@/components/EmptyState';
 import { tabPanelId, tabId } from '@/lib/tab-ids';
 import { InvoicesEmptyIllustration } from '@/components/PageEmptyIllustrations';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
-import { createInvoice, nextInvoiceId, removeInvoice } from '@/lib/api/invoices';
+import { createInvoice, fetchInvoiceIssue, newDraftId, removeInvoice, updateInvoice } from '@/lib/api/invoices';
+import { invoiceRef } from '@/lib/invoice-number';
 import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { fetchLineItems, saveLineItems } from '@/lib/api/line-items';
 import { createActivity } from '@/lib/api/activities';
@@ -18,11 +20,17 @@ import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
 import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import {
-  STATUS_LABEL, fmt, fmtCompact, fmtDate, fmtDue, nextId, newLineItem, clientInitials,
+  STATUS_LABEL, fmt, fmtCompact, fmtDate, fmtDue, newLineItem, clientInitials,
 } from '@/data';
 import type { FilterKey, Status, LineItem } from '@/data';
-import type { Activity } from '@/lib/schemas';
+import type { Activity, Invoice } from '@/lib/schemas';
 import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
+import { useComplianceGuard } from '@/lib/use-compliance-guard';
+import { isInvoiceLimitError } from '@/lib/invoice-limit';
+import Page from '@/components/Page';
+import InvoiceList from '@/components/sales/InvoiceList';
+import { useCommandIntent } from '@/lib/command-intent';
+import { UI_V2 } from '@/lib/features';
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all',     label: 'Toutes' },
@@ -35,7 +43,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 /** Rendered by SalesPage, which passes the Factures | Devis tab switcher. */
 export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
   const { writable } = usePermissions();
-  const { invoices, setInvoices, setActivity, showToast, clientsMap, products, orgSettings, orgId, loading } = useApp();
+  const { invoices, setInvoices, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userLabel } = useApp();
 
   const navigate = useNavigate();
 
@@ -86,7 +94,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     const q = search.trim().toLowerCase();
     return invoices.filter(i =>
       (filter === 'all' || i.status === filter) &&
-      (!q || i.id.toLowerCase().includes(q) || i.subject.toLowerCase().includes(q)
+      (!q || invoiceRef(i).toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || i.subject.toLowerCase().includes(q)
           || (clientsMap[i.client]?.name ?? i.client).toLowerCase().includes(q)));
   }, [invoices, filter, search, clientsMap],
   );
@@ -116,8 +124,19 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     setPanelOpen(true);
   };
   const closePanel = () => { setPanelOpen(false); setShowPicker(false); };
+
+  // From the command box (PRO-162): a new invoice, maybe for a client; the late ones
+  const [showLate, setShowLate] = useState(0);
+  useCommandIntent(intent => {
+    if (intent.command === 'show-late') { setShowLate(n => n + 1); return; }
+    if (intent.command !== 'new-invoice' || !writable) return false;
+    openPanel();
+    if (intent.client) setFClient(intent.client);
+  }, !loading);
   // Scrim, ✕ and Annuler ask first when something was typed
   const requestClosePanel = () => {
+    // The issue checks and the save use this form: wait for them rather than discard it midway
+    if (submitting || compliance.checking) return;
     const dirty = fClient !== '' || fSubject.trim() !== '' || fNotes.trim() !== '' || fDiscount !== 0 || filledLines(lineItems).length > 0
       || fDate !== panelDefaults.current.date || fDue !== panelDefaults.current.due;
     if (confirmDiscard(dirty)) closePanel();
@@ -133,8 +152,8 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
 
   // Sending happens from the invoice page's send dialog (email / WhatsApp)
   // Same PDF as the invoice page, without leaving the list
-  const downloadPdf = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
+  const downloadPdf = async (e: React.MouseEvent | null, id: string) => {
+    e?.stopPropagation();
     const invoice = invoices.find(i => i.id === id);
     if (!invoice || downloadingId) return;
     if (paymentMethodsStatus !== 'ready') { showToast(paymentMethodsNotReadyMessage(paymentMethodsStatus), true); return; }
@@ -147,12 +166,13 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
       }
       const client = clientsMap[invoice.client] ?? { name: invoice.client, city: '—', av: 'av-a' };
       const blob = await renderInvoicePdf({
+        template: invoiceTemplate,
         invoice, lines, client, biz: orgSettings,
         paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
         deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
         paymentMethods,
       });
-      downloadBlob(blob, `facture-${id.toLowerCase()}.pdf`);
+      downloadBlob(blob, `facture-${invoiceRef(invoice).toLowerCase()}.pdf`);
       posthog.capture('invoice_pdf_downloaded', { invoice_id: id, from: 'list' });
     } catch (err) {
       console.error('[downloadPdf] failed:', err);
@@ -162,12 +182,29 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     }
   };
 
-  const openSend = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
+  const openSend = (e: React.MouseEvent | null, id: string) => {
+    e?.stopPropagation();
     navigate(`/invoices/${id}`, { state: { openSend: true } });
   };
 
-  const submitInvoice = async (status: 'draft' | 'pending') => {
+  // Issuing: check the mandatory mentions first (after the form's own checks,
+  // which submitInvoice reports). Missing ones open the onboarding wizard; the
+  // invoice is kept as a draft meanwhile and the user comes back to it.
+  const compliance = useComplianceGuard();
+  const issueInvoice = () => {
+    if (submittingRef.current) return;
+    if (!fClient || lineItemsError(lineItems) || fDue < fDate) { void submitInvoice('pending'); return; }
+    void compliance.guard(fClient, () => void submitInvoice('pending'), {
+      returnTo: '/invoices',
+      beforeLeave: async () => {
+        const id = await submitInvoice('draft');
+        return id ? `/invoices/${id}` : null;
+      },
+    });
+  };
+
+  /** Saves the invoice; returns its id (internal reference), or undefined when it wasn't saved. */
+  const submitInvoice = async (status: 'draft' | 'pending'): Promise<string | undefined> => {
     if (submittingRef.current) return;
     if (!fClient)      { showToast('Veuillez sélectionner un client.', true); return; }
     const linesErr = lineItemsError(lineItems);
@@ -179,14 +216,17 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     const isFirstInvoice = invoices.length === 0;
     const cName = clientsMap[fClient]?.name ?? fClient;
     let invoiceCreated = false;
-    let id = '';
+    const id = newDraftId();
+    let draft: Invoice = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status: 'draft' as const, discountPct: fDiscount };
 
     try {
-      id = await nextInvoiceId(orgId);
-      const newInv = { id, subject: fSubject.trim() || 'Facture sans titre', client: fClient, issued: fDate, due: fDue, amount: total, status, discountPct: fDiscount };
-      await createInvoice(orgId, newInv);
+      // Saved as a draft first, with its lines, then issued: the database gives
+      // the legal number at issue, so a failure before that uses up no number
+      const stored = await createInvoice(orgId, draft);
+      // The database sets the « Responsable » (PRO-172)
+      draft = { ...draft, ownerId: stored.ownerId, ownerName: stored.ownerName };
       invoiceCreated = true;
-      // Don't leave an invoice without lines behind if saving them fails
+      // Don't leave a draft without lines behind if saving them fails
       try {
         await saveLineItems(orgId, filledLines(lineItems), { invoiceId: id });
       } catch (lineErr) {
@@ -195,6 +235,32 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
         throw lineErr;
       }
 
+      let newInv: Invoice = draft;
+      if (status === 'pending') {
+        try {
+          let issued: { number?: string; firstIssuedAt?: string; issuedByName?: string };
+          try {
+            issued = await updateInvoice(orgId, id, { status: 'pending' });
+          } catch (e) {
+            // The issue may have committed even though its response was lost
+            const stored = await fetchInvoiceIssue(orgId, id).catch(() => null);
+            if (!stored || stored.status === 'draft') throw e;
+            issued = stored;
+          }
+          // Keep the database's issue time (the Solo limit counts it) and number
+          newInv = { ...draft, status: 'pending', number: issued.number, firstIssuedAt: issued.firstIssuedAt ?? new Date().toISOString(), issuedByName: issued.issuedByName ?? userLabel };
+        } catch (issueErr) {
+          // The draft is saved: show it, so a retry issues it rather than creating another
+          setInvoices(prev => [draft, ...prev]);
+          closePanel();
+          if (isInvoiceLimitError(issueErr)) { compliance.showLimit(); showToast('Facture enregistrée comme brouillon.'); return id; }
+          console.error('[submitInvoice] issue failed:', issueErr);
+          showToast("La facture a été enregistrée comme brouillon, mais n'a pas pu être émise. Ouvrez-la pour réessayer.", true);
+          return id;
+        }
+      }
+      const ref = invoiceRef(newInv);
+
       posthog.capture('invoice_created', { invoice_type: status, item_count: lineItems.length, total_amount: total, currency: 'XOF' });
       if (status === 'pending') posthog.capture('invoice_sent', { invoice_id: id, delivery_method: fPay });
       if (isFirstInvoice) posthog.capture('first_invoice_created');
@@ -202,15 +268,15 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
       setInvoices(prev => [newInv, ...prev]);
 
       const actPayload = status === 'pending'
-        ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${id}`, bold: true as const }, { text: ' émise pour ' }, { text: cName, bold: true as const }] }
-        : { kind: 'viewed' as const, parts: [{ text: 'Brouillon ' }, { text: `#${id}`, bold: true as const }, { text: ' enregistré pour ' }, { text: cName, bold: true as const }] };
+        ? { kind: 'sent'   as const, parts: [{ text: 'Facture ' }, { text: `#${ref}`, bold: true as const }, { text: ' émise pour ' }, { text: cName, bold: true as const }] }
+        : { kind: 'viewed' as const, parts: [{ text: 'Brouillon ' }, { text: `#${ref}`, bold: true as const }, { text: ' enregistré pour ' }, { text: cName, bold: true as const }] };
       const actEntry: Activity = { ...actPayload, time: "À l'instant" };
       setActivity((prev: Activity[]) => [actEntry, ...prev]);
       // The invoice is saved at this point; a failed activity log must not make it look unsaved
       createActivity(orgId, actPayload).catch(err => console.error('[createActivity] failed:', err));
 
       closePanel();
-      showToast(status === 'pending' ? `Facture #${id} émise` : `Brouillon #${id} enregistré`);
+      showToast(status === 'pending' ? `Facture #${ref} émise` : `Brouillon #${ref} enregistré`);
       // Land on the new invoice with the send dialog open
       if (status === 'pending') navigate(`/invoices/${id}`, { state: { openSend: true } });
 
@@ -223,8 +289,10 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
           clientName: cName,
         }).catch(err => console.error('[recordInvoiceIssuanceEntry] failed:', err));
       }
+      return id;
     } catch (err) {
       console.error('[submitInvoice] error:', err);
+      // Solo limit reached (the database refused the invoice): offer the upgrade
       showToast(invoiceCreated
         ? `La facture #${id} a été créée, mais une erreur est survenue ensuite. Vérifiez-la avant de réessayer.`
         : 'Une erreur est survenue. La facture n\'a pas été enregistrée — veuillez réessayer.', true);
@@ -234,26 +302,31 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     }
   };
 
-  if (loading) return <PageSkeleton title="Facturation" subtitle="Gérez et suivez vos factures" metrics={4} rows={6} />;
+  if (loading) return <PageSkeleton title={UI_V2 ? 'Factures' : 'Facturation'} subtitle="Gérez et suivez vos factures" metrics={4} rows={6} />;
 
   return (
     <>
-      <div className="main">
-        <div className="topbar">
-          <div>
-            <div className="page-title">Facturation</div>
-            <div className="page-sub">Gérez et suivez vos factures</div>
-          </div>
-          <div className="topbar-actions">
-            {writable && (
-              <button className="btn btn-primary" onClick={openPanel}>
-                <Icon name="plus" ariaHidden /> Nouvelle facture
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="content">
+      <Page
+        title={UI_V2 ? 'Factures' : 'Facturation'}
+        subtitle="Gérez et suivez vos factures"
+        actions={<>
+          {writable && (
+            <button className="btn btn-primary" onClick={openPanel}>
+              <Icon name="plus" ariaHidden /> Nouvelle facture
+            </button>
+          )}
+        </>}
+      >
+          {UI_V2 ? (
+            <InvoiceList
+              writable={writable}
+              onOpen={id => navigate(`/invoices/${id}`)}
+              onSend={id => openSend(null, id)}
+              onDownload={id => void downloadPdf(null, id)}
+              downloading={downloadingId !== null}
+              showLate={showLate}
+            />
+          ) : <>
           {/* Metrics */}
           <div className="metrics">
             <div className="metric-card">
@@ -357,7 +430,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
                   onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && navigate(`/invoices/${inv.id}`)}
                 >
                   <div>
-                    <div className="inv-id">#{inv.id}</div>
+                    <div className="inv-id">#{invoiceRef(inv)}</div>
                     <div className="inv-subject">{inv.subject}</div>
                   </div>
                   <div className="client-cell">
@@ -384,7 +457,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
                       </button>
                     )}
                     {inv.status === 'paid' && (
-                      <button className="icon-btn" aria-label={`Télécharger le PDF de #${inv.id}`} disabled={downloadingId !== null} onClick={e => downloadPdf(e, inv.id)}>
+                      <button className="icon-btn" aria-label={`Télécharger le PDF de #${invoiceRef(inv)}`} disabled={downloadingId !== null} onClick={e => downloadPdf(e, inv.id)}>
                         <Icon name="download" size={15} ariaHidden />
                       </button>
                     )}
@@ -398,8 +471,8 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
               );
             })}
           </div>
-        </div>
-      </div>
+          </>}
+      </Page>
 
       {/* Slide-over panel — sibling of .main, both inside .main-rel */}
       <div className={`scrim${panelOpen ? ' open' : ''}`} onClick={requestClosePanel} />
@@ -407,7 +480,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
         <div className="panel-slide-head">
           <div>
             <div className="panel-slide-title">Nouvelle facture</div>
-            <div className="panel-slide-sub">#{nextId(invoices)}</div>
+            <div className="panel-slide-sub">Numéro attribué à l'émission</div>
           </div>
           <button className="icon-btn" onClick={requestClosePanel} aria-label="Fermer">
             <Icon name="x" size={15} ariaHidden />
@@ -417,12 +490,8 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
         <div className="panel-body">
           <div className="form-group">
             <label className="form-label">Client</label>
-            <select className="form-input" value={fClient} onChange={e => setFClient(e.target.value)}>
-              <option value="">Sélectionner un client…</option>
-              {Object.entries(clientsMap).map(([code, c]) => (
-                <option key={code} value={code}>{c.name}</option>
-              ))}
-            </select>
+            {/* Locked while issuing: the checks run with the client chosen when it started */}
+            <InvoiceClientSelect value={fClient} onChange={setFClient} open={panelOpen} disabled={submitting || compliance.checking} />
           </div>
 
           <div className="form-row">
@@ -548,14 +617,15 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
         </div>
 
         <div className="panel-footer">
-          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting} onClick={() => submitInvoice('draft')}>
+          <button className="btn" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting || compliance.checking} onClick={() => submitInvoice('draft')}>
             {submitting ? 'Enregistrement…' : 'Enregistrer brouillon'}
           </button>
-          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting} onClick={() => submitInvoice('pending')}>
-            <Icon name="send" ariaHidden /> {submitting ? 'Émission…' : 'Émettre la facture'}
+          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={submitting || compliance.checking} onClick={issueInvoice}>
+            <Icon name="send" ariaHidden /> {submitting ? 'Émission…' : compliance.checking ? 'Vérification…' : 'Émettre la facture'}
           </button>
         </div>
       </div>
+      {compliance.dialog}
     </>
   );
 }

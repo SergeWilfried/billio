@@ -1,3 +1,4 @@
+import { invoiceRef } from '@/lib/invoice-number';
 import { useState, useEffect, useRef } from 'react';
 import { canWrite } from '@/lib/permissions';
 import posthog from 'posthog-js';
@@ -7,13 +8,16 @@ import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { updateQuote } from '@/lib/api/quotes';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
-import { convertQuoteToInvoice } from '@/lib/api/quote-conversion';
+import { convertQuoteToInvoice, ConversionOutcomeUnknownError } from '@/lib/api/quote-conversion';
+import { useComplianceGuard } from '@/lib/use-compliance-guard';
+import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { renderInvoicePdf } from '@/lib/render-pdf';
 import { downloadBlob } from '@/lib/download';
 import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import { fmt, fmtDateLong, newLineItem } from '@/data';
 import type { LineItem } from '@/lib/schemas';
 import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
+import Page from '@/components/Page';
 
 const STATUS_LABEL: Record<string, string> = {
   draft:    'Brouillon',
@@ -34,7 +38,8 @@ const BillioLogoSvg = () => (
 export default function QuotePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { quotes, setQuotes, setInvoices, showToast, clientsMap, products, orgSettings, orgId, loading, userRole } = useApp();
+  const { quotes, invoices, setQuotes, setInvoices, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole } = useApp();
+  const compliance = useComplianceGuard();
   const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
   const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [lines, setLines] = useState<LineItem[]>([]);
@@ -66,24 +71,18 @@ export default function QuotePage() {
     if (id && orgId) fetchLineItems(orgId, { quoteId: id }).then(setLines).catch(err => { console.error('[QuotePage] fetchLineItems error:', err); setLines([]); });
   }, [id, orgId]);
 
-  if (loading) return <PageSkeleton title="Devis" variant="table-only" metrics={0} rows={4} />;
+  if (loading) return <PageSkeleton title="Devis" variant="document" rows={4} />;
 
   const quote = quotes.find(q => q.id === id);
   if (!quote) {
     return (
-      <div className="main">
-        <div className="topbar">
-          <div className="crumbs">
-            <button className="crumb-back" onClick={() => navigate('/invoices?tab=quotes')} aria-label="Retour">
-              <Icon name="arrow-left" ariaHidden />
-            </button>
-            <div className="crumb-text">Devis introuvable</div>
-          </div>
-        </div>
-        <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)' }}>
+      <Page
+        back={{ label: "Retour", onClick: () => navigate('/invoices?tab=quotes') }}
+        title="Devis introuvable"
+        contentStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)' }}
+      >
           Le devis #{id} n'existe pas.
-        </div>
-      </div>
+      </Page>
     );
   }
 
@@ -184,11 +183,13 @@ export default function QuotePage() {
     const pdfAmount  = editOpen ? eTotal : total;
     try {
       const blob = await renderInvoicePdf({
+        template: invoiceTemplate,
         invoice: { id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 },
         lines: pdfLines,
         client,
         biz: orgSettings,
         title: 'Facture Proforma',
+        documentKind: 'devis',
         clientLabel: 'Adressé à',
         paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
         paymentMethods,
@@ -202,6 +203,12 @@ export default function QuotePage() {
     }
   };
 
+  // Converting issues an invoice: check the mandatory mentions first
+  const requestConvert = () => {
+    if (convertingRef.current) return;
+    void compliance.guard(quote.client, () => void handleConvertToInvoice(), { returnTo: `/quotes/${quote.id}` });
+  };
+
   const handleConvertToInvoice = async () => {
     if (convertingRef.current) return;
     convertingRef.current = true;
@@ -209,13 +216,18 @@ export default function QuotePage() {
     try {
       const { invoice, accountingOk } = await convertQuoteToInvoice(orgId, quote, { canInvoiceTVA, clientName: client.name });
       setInvoices(prev => prev.some(i => i.id === invoice.id) ? prev : [invoice, ...prev]);
-      setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced' } : q));
+      setQuotes(prev => prev.map(q => q.id === quote.id ? { ...q, status: 'invoiced', invoiceId: invoice.id } : q));
       posthog.capture('quote_converted_to_invoice', { quote_id: quote.id, invoice_id: invoice.id });
-      showToast(`Devis ${quote.id} → Facture #${invoice.id} créée`);
+      showToast(`Devis ${quote.id} → Facture #${invoiceRef(invoice)} créée`);
       if (!accountingOk) showToast('Facture créée, mais l\'écriture comptable a échoué. Vérifiez la comptabilité.', true);
       navigate(`/invoices/${invoice.id}`);
     } catch (err) {
       console.error('[convertToInvoice] failed:', err);
+      if (isInvoiceLimitError(err)) { compliance.showLimit(); return; }
+      if (err instanceof ConversionOutcomeUnknownError) {
+        showToast('La conversion n\'a pas pu être confirmée. Rechargez la page et vérifiez vos factures avant de réessayer.', true);
+        return;
+      }
       showToast('Erreur lors de la conversion. Aucune facture n\'a été créée — veuillez réessayer.', true);
     } finally {
       convertingRef.current = false;
@@ -225,36 +237,27 @@ export default function QuotePage() {
 
   return (
     <>
-    <div className="main">
-      <div className="topbar">
-        <div className="crumbs">
-          <button className="crumb-back" onClick={() => navigate('/invoices?tab=quotes')} aria-label="Retour aux devis">
-            <Icon name="arrow-left" ariaHidden />
+    <Page
+      back={{ label: "Retour aux devis", onClick: () => navigate('/invoices?tab=quotes') }}
+      title={<><button className="crumb-link" onClick={() => navigate('/invoices?tab=quotes')}>Devis</button>{' / '}<b>#{quote.id}</b></>}
+      documentTitle={`Devis ${quote.id}`}
+      actions={<>
+        <button className="btn" onClick={handleDownloadPDF} disabled={!paymentMethodsReady}>
+          <Icon name="printer" ariaHidden /> Télécharger PDF
+        </button>
+        {canEdit && (
+          <button className="btn" onClick={openEdit} disabled={converting}>
+            <Icon name="edit" ariaHidden /> Modifier
           </button>
-          <div className="crumb-text">
-            <button className="crumb-link" onClick={() => navigate('/invoices?tab=quotes')}>Devis</button>
-            {' / '}<b>#{quote.id}</b>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <button className="btn" onClick={handleDownloadPDF} disabled={!paymentMethodsReady}>
-            <Icon name="printer" ariaHidden /> Télécharger PDF
+        )}
+        {canConvert && (
+          <button className="btn btn-primary" onClick={requestConvert} disabled={converting || compliance.checking}>
+            <Icon name="arrow-right" ariaHidden />
+            {converting ? 'Conversion…' : 'Créer une facture'}
           </button>
-          {canEdit && (
-            <button className="btn" onClick={openEdit} disabled={converting}>
-              <Icon name="edit" ariaHidden /> Modifier
-            </button>
-          )}
-          {canConvert && (
-            <button className="btn btn-primary" onClick={handleConvertToInvoice} disabled={converting}>
-              <Icon name="arrow-right" ariaHidden />
-              {converting ? 'Conversion…' : 'Créer une facture'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="content">
+        )}
+      </>}
+    >
         <div className="detail-grid">
 
           {/* Quote paper */}
@@ -379,7 +382,7 @@ export default function QuotePage() {
 
               <div className="rail-actions">
                 {canConvert && (
-                  <button className="btn btn-primary btn-block" onClick={handleConvertToInvoice} disabled={converting}>
+                  <button className="btn btn-primary btn-block" onClick={requestConvert} disabled={converting || compliance.checking}>
                     <Icon name="arrow-right" ariaHidden />
                     {converting ? 'Conversion…' : 'Créer une facture'}
                   </button>
@@ -410,6 +413,12 @@ export default function QuotePage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <span className={`status-pill sq-${quote.status}`}>{STATUS_LABEL[quote.status]}</span>
               </div>
+              {(() => {
+                const inv = quote.invoiceId ? invoices.find(i => i.id === quote.invoiceId) : undefined;
+                return inv ? (
+                  <p className="doc-link">Facture : <button type="button" className="dt-linkcell" onClick={() => navigate(`/invoices/${inv.id}`)}>{invoiceRef(inv)}</button></p>
+                ) : null;
+              })()}
               <div className="rail-title">Informations</div>
               <div style={{ fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 7 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -424,8 +433,7 @@ export default function QuotePage() {
             </div>
           </aside>
         </div>
-      </div>
-    </div>
+    </Page>
 
     {/* Edit panel */}
     <div className={`scrim${editOpen ? ' open' : ''}`} onClick={() => { if (!saving) setEditOpen(false); }} />
@@ -549,6 +557,7 @@ export default function QuotePage() {
         </button>
       </div>
     </div>
+      {compliance.dialog}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { INITIAL_QUOTES } from '@/data';
+import { INITIAL_QUOTES, mockOwner } from '@/data';
 import type { Quote } from '@/lib/schemas';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
@@ -16,6 +16,9 @@ export function dbToQuote(row: Record<string, unknown>): Quote {
     expSoon: daysLeft > 0 && daysLeft <= 14,
     amount:  Number(row.amount),
     status:  (row.status ?? 'draft') as Quote['status'],
+    invoiceId: row.invoice_id ? String(row.invoice_id) : undefined,
+    ownerId:     row.owner_id ? String(row.owner_id) : undefined,
+    ownerName:   row.owner_name ? String(row.owner_name) : undefined,
   };
 }
 
@@ -43,7 +46,7 @@ export async function createQuote(
 ): Promise<Quote> {
   const daysLeft = (new Date(payload.valid).getTime() - Date.now()) / 86_400_000;
   const expSoon  = daysLeft > 0 && daysLeft <= 14;
-  if (MOCK) return { ...payload, expSoon };
+  if (MOCK) return { ...payload, expSoon, ...mockOwner() };
   const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from('quotes')
@@ -67,7 +70,7 @@ export async function createQuote(
 export async function updateQuote(
   orgId: string,
   id: string,
-  patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount'>>,
+  patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount'>> & { invoiceId?: string | null },
 ): Promise<void> {
   if (MOCK) return;
   const dbPatch: Record<string, unknown> = {};
@@ -77,6 +80,7 @@ export async function updateQuote(
   if (patch.issued  !== undefined) dbPatch.issued_at    = patch.issued;
   if (patch.valid   !== undefined) dbPatch.valid_until  = patch.valid;
   if (patch.amount  !== undefined) dbPatch.amount       = patch.amount;
+  if (patch.invoiceId !== undefined) dbPatch.invoice_id = patch.invoiceId;
   const { error } = await supabase.from('quotes').update(dbPatch).eq('org_id', orgId).eq('id', id);
   if (error) throw error;
 }

@@ -2,6 +2,8 @@ import { supabase } from '@/lib/supabase';
 import type { CreditNote } from '@/lib/schemas';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+// Demo mode has no database: number credit notes in memory
+let mockSeq = 0;
 
 function dbToCreditNote(row: Record<string, unknown>): CreditNote {
   return {
@@ -12,6 +14,7 @@ function dbToCreditNote(row: Record<string, unknown>): CreditNote {
     issued:    String(row.issued_at),
     amount:    Number(row.amount),
     reason:    String(row.reason ?? ''),
+    number:    row.number ? String(row.number) : undefined,
   };
 }
 
@@ -31,11 +34,19 @@ export async function fetchCreditNotes(orgId: string, invoiceId?: string): Promi
   return (data ?? []).map(dbToCreditNote);
 }
 
+/** Every credit note of one client, for the client's balance. */
+export async function fetchClientCreditNotes(orgId: string, clientCode: string): Promise<CreditNote[]> {
+  if (MOCK) return [];
+  const { data, error } = await supabase.from('credit_notes').select('*').eq('org_id', orgId).eq('client_code', clientCode);
+  if (error) throw error;
+  return (data ?? []).map(dbToCreditNote);
+}
+
 export async function createCreditNote(
   orgId: string,
   payload: Omit<CreditNote, 'id'> & { id: string },
 ): Promise<CreditNote> {
-  if (MOCK) return { ...payload };
+  if (MOCK) return { ...payload, number: `AV-${new Date().getUTCFullYear()}-${String(++mockSeq).padStart(4, '0')}` };
   const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from('credit_notes')

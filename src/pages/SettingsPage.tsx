@@ -1,4 +1,6 @@
+import { cadastralRequired, formatCadastralRef, parseCadastralRef } from '@/lib/cadastral';
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { canManageOrg } from '@/lib/permissions';
 import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
@@ -6,7 +8,7 @@ import Icon from '@/components/Icon';
 import { useApp } from '@/context/AppContext';
 import { supabase } from '@/lib/supabase';
 import {
-  PLANS, PLAN_LABELS, PLAN_ORDER, formatPrice,
+  PLANS, PLAN_LABELS, PLAN_ORDER, formatPrice, planPrice, type BillingPeriod,
   SOLO_INVOICE_LIMIT,
   type PlanStatus,
 } from '@/lib/plans';
@@ -15,6 +17,10 @@ import {
   DEFAULT_PAYMENT_SETTINGS, type PaymentSettings,
 } from '@/lib/api/payment-settings';
 import { getFiscalIdLabel } from '@/lib/ohada';
+import { sellerIssues, type SellerInfo } from '@/lib/invoice-compliance';
+import { issuedThisMonth } from '@/lib/invoice-limit';
+import BillingPeriodSwitch from '@/components/BillingPeriodSwitch';
+import Page from '@/components/Page';
 
 type SettingsTab = 'profile' | 'business' | 'invoicing' | 'reminders' | 'payments' | 'providers' | 'notifications' | 'team' | 'plan';
 
@@ -169,6 +175,64 @@ const CURRENCIES = [
 ];
 
 /* ─── Business ─────────────────────────────────────────────────── */
+/* ─── DGI compliance checklist (PRO-133) ─────────────────────────── */
+// The seller mentions every invoice must carry, from the values in the form
+// below and the payment settings. Missing ones trigger a warning when an
+// invoice is issued.
+function ComplianceChecklist({ seller, orgId }: { seller: SellerInfo; orgId: string }) {
+  const [payments, setPayments] = useState<PaymentSettings | null | undefined>(undefined);
+  useEffect(() => {
+    if (!orgId) return;
+    fetchPaymentSettings(orgId).then(setPayments, () => setPayments(null));
+  }, [orgId]);
+
+  const missing = new Set(sellerIssues(seller, payments ?? null).map(i => i.key));
+  const id = getFiscalIdLabel(seller.country);
+  const rows: { key: string; label: string; hint?: string }[] = [
+    { key: 'seller-name', label: 'Raison sociale' },
+    { key: 'seller-address', label: 'Adresse' },
+    { key: 'seller-ifu', label: id },
+    { key: 'seller-rccm', label: 'RCCM' },
+    { key: 'seller-regime', label: 'Régime fiscal' },
+    { key: 'seller-division', label: 'Division fiscale' },
+    ...(cadastralRequired(seller.country) ? [{ key: 'seller-cadastre', label: 'Référence cadastrale' }] : []),
+    { key: 'seller-bank', label: 'Coordonnées bancaires', hint: 'onglet Moyens de paiement' },
+  ];
+  const count = rows.filter(r => missing.has(r.key)).length;
+
+  return (
+    <div className="s-card" style={{ marginBottom: 16 }}>
+      <div className="s-card-head">
+        <div className="s-card-title">Conformité DGI</div>
+        <div className="s-card-desc">
+          {count === 0
+            ? 'Vos factures portent toutes les mentions obligatoires de l\'entreprise.'
+            : `${count} mention${count > 1 ? 's' : ''} obligatoire${count > 1 ? 's' : ''} manquante${count > 1 ? 's' : ''} : sans elles, vos clients professionnels risquent de ne pas pouvoir déduire la TVA.`}
+        </div>
+      </div>
+      <div className="s-card-body">
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+          {rows.map(r => {
+            const ok = !missing.has(r.key);
+            const unknown = r.key === 'seller-bank' && payments === null;
+            return (
+              <li key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, color: ok ? 'var(--color-text-secondary)' : 'var(--color-text-primary, #1C2733)' }}>
+                <Icon name={unknown ? 'dots' : ok ? 'circle-check' : 'alert-triangle'} size={16} ariaHidden
+                  style={{ color: unknown ? 'var(--color-text-tertiary)' : ok ? '#276C2B' : '#8A5207', flexShrink: 0 }} />
+                <span>
+                  {r.label}
+                  <span className="sr-only">{unknown ? ' : non vérifié' : ok ? ' : renseigné' : ' : manquant'}</span>
+                  {!ok && r.hint && <small style={{ display: 'block', color: 'var(--color-text-tertiary)' }}>{r.hint}</small>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 function BusinessSection() {
   const { orgId, showToast, setOrgSettings } = useApp();
 
@@ -177,6 +241,7 @@ function BusinessSection() {
   const [rccm,            setRccm]           = useState('');
   const [taxRegime,            setTaxRegime]           = useState('');
   const [divisionFiscale,      setDivisionFiscale]     = useState('');
+  const [cadastralRef,         setCadastralRef]        = useState('');
   const [businessCreationDate, setBusinessCreationDate]= useState('');
   const [address,  setAddress] = useState('');
   const [city,     setCity]    = useState('');
@@ -191,7 +256,7 @@ function BusinessSection() {
     if (!orgId) return;
     supabase
       .from('organizations')
-      .select('name, ifu, rccm, tax_regime, division_fiscale, business_creation_date, address, city, country, currency, email, phone')
+      .select('name, ifu, rccm, tax_regime, division_fiscale, cadastral_ref, business_creation_date, address, city, country, currency, email, phone')
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
@@ -202,6 +267,7 @@ function BusinessSection() {
         setRccm(data.rccm             ?? '');
         setTaxRegime(data.tax_regime             ?? '');
         setDivisionFiscale(data.division_fiscale ?? '');
+        setCadastralRef(formatCadastralRef(data.cadastral_ref));
         setBusinessCreationDate(data.business_creation_date ?? '');
         setAddress(data.address ?? '');
         setCity(data.city     ?? '');
@@ -215,19 +281,28 @@ function BusinessSection() {
 
   async function handleSave() {
     if (!orgId) return;
+    const cadastral = cadastralRef.trim() ? parseCadastralRef(cadastralRef) : '';
+    if (cadastral === null) { showToast('Référence cadastrale : 11 chiffres (section, îlot, parcelle), ex. 0123 456 7890.', true); return; }
     setSaving(true);
     const { error } = await supabase
       .from('organizations')
-      .update({ name, ifu, rccm, tax_regime: taxRegime, division_fiscale: divisionFiscale, business_creation_date: businessCreationDate || null, address, city, country, currency, email, phone })
+      .update({ name, ifu, rccm, tax_regime: taxRegime, division_fiscale: divisionFiscale, cadastral_ref: cadastral || null, business_creation_date: businessCreationDate || null, address, city, country, currency, email, phone })
       .eq('id', orgId);
     setSaving(false);
     if (error) { showToast(error.message, true); return; }
-    setOrgSettings(prev => ({ ...prev, name, ifu, rccm, taxRegime, divisionFiscale, businessCreationDate, address, city, country, email, phone }));
+    setOrgSettings(prev => ({ ...prev, name, ifu, rccm, taxRegime, divisionFiscale, cadastralRef: cadastral, businessCreationDate, address, city, country, email, phone }));
     posthog.capture('settings_saved', { section: 'business' });
     showToast('Entreprise enregistrée');
   }
 
   return (
+    <>
+    {!loading && (
+      <ComplianceChecklist
+        seller={{ name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef }}
+        orgId={orgId}
+      />
+    )}
     <div className="s-card">
       <div className="s-card-head">
         <div className="s-card-title">Informations entreprise</div>
@@ -261,6 +336,13 @@ function BusinessSection() {
           <div className="s-field">
             <label className="s-label">Division fiscale</label>
             <input className="form-input" value={divisionFiscale} onChange={e => setDivisionFiscale(e.target.value)} disabled={loading} placeholder="ex. Ouagadougou I" />
+          </div>
+        </div>
+        <div className="s-field">
+          <label className="s-label">Référence cadastrale du lieu de vente</label>
+          <input className="form-input" value={cadastralRef} onChange={e => setCadastralRef(e.target.value)} disabled={loading} placeholder="Section, îlot, parcelle : 0123 456 7890" inputMode="numeric" />
+          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+            Mention obligatoire sur les factures (11 chiffres : section 4, îlot 3, parcelle 4).
           </div>
         </div>
         <div className="s-field">
@@ -309,6 +391,7 @@ function BusinessSection() {
         </button>
       </div>
     </div>
+    </>
   );
 }
 
@@ -1459,9 +1542,10 @@ function fmtDate(iso: string) {
 
 function PlanSection() {
   const { plan, planStatus, planRenewsAt, trialEndsAt, invoices } = useApp();
+  const [period, setPeriod] = useState<BillingPeriod>('monthly');
 
-  const thisMonth    = new Date().toISOString().slice(0, 7);
-  const monthlyCount = invoices.filter(inv => inv.issued.startsWith(thisMonth)).length;
+  // Counted like the database enforces it: issued (not draft) this UTC month
+  const monthlyCount = issuedThisMonth(invoices);
   const isSolo       = plan === 'solo';
   const usageLimit   = isSolo ? SOLO_INVOICE_LIMIT : null;
   const usagePct     = usageLimit ? Math.min(100, (monthlyCount / usageLimit) * 100) : Math.min(100, (monthlyCount / 100) * 30);
@@ -1562,6 +1646,7 @@ function PlanSection() {
             <div className="s-card-desc">Débloquez plus de fonctionnalités pour votre entreprise.</div>
           </div>
           <div className="s-card-body" style={{ gap: 10 }}>
+            <BillingPeriodSwitch value={period} onChange={setPeriod} className="s-period" />
             {upgradePlans.map(p => (
               <div key={p.id} className={`s-upgrade-row${p.popular ? ' s-upgrade-row--popular' : ''}`}>
                 <div style={{ flex: 1 }}>
@@ -1572,7 +1657,7 @@ function PlanSection() {
                   <div className="s-upgrade-tagline">{p.tagline}</div>
                   <ul className="s-upgrade-perks">
                     {p.perks.map(perk => (
-                      <li key={perk}><Icon name="check" size={12} className="s-upgrade-check" />{perk}</li>
+                      <li key={perk} title={perk}><Icon name="check" size={12} className="s-upgrade-check" /><span>{perk}</span></li>
                     ))}
                   </ul>
                 </div>
@@ -1582,8 +1667,8 @@ function PlanSection() {
                       ? <span className="s-upgrade-price-main">Sur devis</span>
                       : <>
                           <span className="s-upgrade-price-cur">{p.currency}</span>
-                          <span className="s-upgrade-price-main">{formatPrice(p.price)}</span>
-                          <span className="s-upgrade-price-period">/mois</span>
+                          <span className="s-upgrade-price-main">{formatPrice(planPrice(p, period).amount!)}</span>
+                          <span className="s-upgrade-price-period">{planPrice(p, period).per}</span>
                         </>
                     }
                   </div>
@@ -1619,22 +1704,24 @@ const ORG_TABS: SettingsTab[] = ['business', 'invoicing', 'payments', 'providers
 export default function SettingsPage() {
   const { showToast } = useApp();
   const { managesOrg } = usePermissions();
-  const [tab, setTab] = useState<SettingsTab>('profile');
+  // ?tab= opens a section directly (e.g. links from the invoice compliance warning)
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<SettingsTab>(() => {
+    const t = searchParams.get('tab');
+    return TABS.some(x => x.key === t) ? (t as SettingsTab) : 'profile';
+  });
   const onSave = () => showToast('Paramètres enregistrés');
 
   return (
-    <div className="main">
-      <div className="topbar">
-        <div>
-          <div className="page-title">Paramètres</div>
-          <div className="page-sub">Gérez vos préférences de workspace et de facturation</div>
-        </div>
+    <Page
+      title="Paramètres"
+      subtitle="Gérez vos préférences de workspace et de facturation"
+      actions={<>
         <button className="btn btn-primary" onClick={onSave} disabled={ORG_TABS.includes(tab) && !managesOrg}>
           <Icon name="check" size={15} /> Enregistrer
         </button>
-      </div>
-
-      <div className="content">
+      </>}
+    >
         <div className="s-grid">
           {/* Sub-nav */}
           <nav className="s-nav">
@@ -1680,7 +1767,6 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </Page>
   );
 }

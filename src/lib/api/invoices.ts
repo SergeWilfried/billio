@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { INITIAL_INVOICES } from '@/data';
+import { INITIAL_INVOICES, mockOwner } from '@/data';
 import type { Invoice } from '@/lib/schemas';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
@@ -14,18 +14,19 @@ export function dbToInvoice(row: Record<string, unknown>): Invoice {
     amount:      Number(row.amount),
     status:      row.status as Invoice['status'],
     discountPct: Number(row.discount_pct ?? 0),
+    firstIssuedAt: row.first_issued_at ? String(row.first_issued_at) : undefined,
+    number:      row.number ? String(row.number) : undefined,
+    issuedByName: row.issued_by_name ? String(row.issued_by_name) : undefined,
+    ownerId:     row.owner_id ? String(row.owner_id) : undefined,
+    ownerName:   row.owner_name ? String(row.owner_name) : undefined,
   };
 }
 
-export async function nextInvoiceId(orgId: string): Promise<string> {
-  if (MOCK) return 'INV-' + String(Math.floor(Math.random() * 9000) + 1000);
-  // Atomic per-org sequence — safe against concurrent requests and cross-org
-  // collisions. The DB function holds a row-level lock so two callers for the
-  // same org always get different numbers.
-  const { data, error } = await supabase.rpc('next_invoice_number', { p_org_id: orgId });
-  if (error) throw error;
-  return 'INV-' + String(data as number).padStart(4, '0');
-}
+export { newDraftId } from '@/lib/invoice-number';
+
+// Demo mode has no database: number issued invoices the same way, in memory
+let mockSeq = 0;
+const mockNumber = () => `FACT-${new Date().getUTCFullYear()}-${String(++mockSeq).padStart(4, '0')}`;
 
 export async function fetchInvoices(orgId: string): Promise<Invoice[]> {
   if (MOCK) return [...INITIAL_INVOICES];
@@ -40,9 +41,9 @@ export async function fetchInvoices(orgId: string): Promise<Invoice[]> {
 
 export async function createInvoice(
   orgId: string,
-  payload: Pick<Invoice, 'id' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'status' | 'discountPct'>,
+  payload: Pick<Invoice, 'id' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'status' | 'discountPct'> & Pick<Invoice, 'ownerId'>,
 ): Promise<Invoice> {
-  if (MOCK) return { ...payload };
+  if (MOCK) return { ...payload, number: payload.status === 'draft' ? undefined : mockNumber(), ...mockOwner(payload.ownerId) };
   const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from('invoices')
@@ -57,6 +58,9 @@ export async function createInvoice(
       status:       payload.status,
       discount_pct: payload.discountPct ?? 0,
       created_by:   user?.id ?? null,
+      // The database makes the creator the owner unless this names another
+      // member (an invoice made from a quote keeps the quote's owner)
+      ...(payload.ownerId ? { owner_id: payload.ownerId } : {}),
     })
     .select()
     .single();
@@ -64,8 +68,9 @@ export async function createInvoice(
   return dbToInvoice(data as Record<string, unknown>);
 }
 
-export async function updateInvoice(orgId: string, id: string, patch: Partial<Pick<Invoice, 'status' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'discountPct'>>): Promise<void> {
-  if (MOCK) return;
+/** Returns the invoice's first issue time and legal number, as the database set them. */
+export async function updateInvoice(orgId: string, id: string, patch: Partial<Pick<Invoice, 'status' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'discountPct'>>): Promise<{ firstIssuedAt?: string; number?: string; issuedByName?: string }> {
+  if (MOCK) return patch.status && patch.status !== 'draft' ? { number: mockNumber() } : {};
   const dbPatch: Record<string, unknown> = {};
   if (patch.status      !== undefined) dbPatch.status       = patch.status;
   if (patch.subject     !== undefined) dbPatch.subject      = patch.subject;
@@ -74,8 +79,23 @@ export async function updateInvoice(orgId: string, id: string, patch: Partial<Pi
   if (patch.due         !== undefined) dbPatch.due_at       = patch.due;
   if (patch.amount      !== undefined) dbPatch.amount       = patch.amount;
   if (patch.discountPct !== undefined) dbPatch.discount_pct = patch.discountPct;
-  const { error } = await supabase.from('invoices').update(dbPatch).eq('org_id', orgId).eq('id', id);
+  const { data, error } = await supabase.from('invoices').update(dbPatch).eq('org_id', orgId).eq('id', id)
+    .select('first_issued_at, number, issued_by_name').maybeSingle();
   if (error) throw error;
+  // No row: the invoice was deleted meanwhile, or this user can't change it
+  if (!data) throw new Error(`invoice ${id} not found or not writable`);
+  const row = data as { first_issued_at?: string | null; number?: string | null; issued_by_name?: string | null };
+  return { firstIssuedAt: row.first_issued_at ? String(row.first_issued_at) : undefined, number: row.number ?? undefined, issuedByName: row.issued_by_name ?? undefined };
+}
+
+/** The invoice's stored status and legal number, or null if it doesn't exist. */
+export async function fetchInvoiceIssue(orgId: string, id: string): Promise<{ status: string; number?: string; firstIssuedAt?: string; issuedByName?: string } | null> {
+  if (MOCK) return null;
+  const { data, error } = await supabase.from('invoices').select('status, number, first_issued_at, issued_by_name').eq('org_id', orgId).eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as { status: string; number?: string | null; first_issued_at?: string | null; issued_by_name?: string | null };
+  return { status: row.status, number: row.number ?? undefined, firstIssuedAt: row.first_issued_at ?? undefined, issuedByName: row.issued_by_name ?? undefined };
 }
 
 export async function removeInvoice(orgId: string, id: string): Promise<void> {

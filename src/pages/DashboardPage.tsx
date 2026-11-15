@@ -1,3 +1,4 @@
+import { invoiceRef } from '@/lib/invoice-number';
 import { useEffect, useMemo, useState } from 'react';
 import { canWrite, type UserRole } from '@/lib/permissions';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +15,7 @@ import { dashboardMetrics } from '@/lib/dashboard-metrics';
 import { fetchCreditNotes } from '@/lib/api/credit-notes';
 import { todayISO } from '@/lib/invoice-status';
 import type { CreditNote } from '@/lib/schemas';
+import Page from '@/components/Page';
 
 function ActivityLine({ parts }: { parts: ActivityPart[] }) {
   return (
@@ -97,22 +99,17 @@ export default function DashboardPage() {
 
 
   return (
-    <div className="main">
-      <div className="topbar">
-        <div>
-          <div className="page-title">Tableau de bord</div>
-          <div className="page-sub">Aperçu de {monthLabel}</div>
-        </div>
-        <div className="topbar-actions">
-          {canWrite(role) && (
-            <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
-              <Icon name="plus" ariaHidden /> Nouvelle facture
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="content">
+    <Page
+      title="Tableau de bord"
+      subtitle={<>Aperçu de {monthLabel}</>}
+      actions={<>
+        {canWrite(role) && (
+          <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
+            <Icon name="plus" ariaHidden /> Nouvelle facture
+          </button>
+        )}
+      </>}
+    >
         {/* Metrics */}
         <div className="metrics">
           <div className="metric-card">
@@ -202,7 +199,7 @@ export default function DashboardPage() {
                 onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && navigate(`/invoices/${inv.id}`)}
               >
                 <div>
-                  <div className="inv-id">#{inv.id}</div>
+                  <div className="inv-id">#{invoiceRef(inv)}</div>
                   <div className="inv-subject">{inv.subject}</div>
                 </div>
                 <div className="client-cell">
@@ -290,7 +287,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Page>
   );
 }
