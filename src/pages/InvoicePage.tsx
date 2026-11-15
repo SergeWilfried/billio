@@ -121,6 +121,9 @@ export default function InvoicePage() {
   const [avoirAmount,  setAvoirAmount]  = useState(0);
   const [avoirSaving,  setAvoirSaving]  = useState(false);
   const [creditNotes,  setCreditNotes]  = useState<CreditNote[]>([]);
+  // Goes up once a posting to the books has finished, so the side panel reads the entries again
+  const [ledgerTick, setLedgerTick] = useState(0);
+  const bumpLedger = () => setLedgerTick(t => t + 1);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -269,6 +272,7 @@ export default function InvoicePage() {
         console.error('[recordInvoiceIssuanceEntry] failed:', err);
         showToast(`Facture #${number ?? invoiceRef(invoice)} émise, mais l'écriture comptable de vente n'a pas pu être enregistrée. Signalez-le à votre comptable.`, true);
       }
+      bumpLedger();
       setSendKind('send');
     } catch (err) {
       console.error('[handleIssue] failed:', err);
@@ -354,7 +358,7 @@ export default function InvoicePage() {
         tvaAmount,
         date:         today,
         clientName:   client.name,
-      }).catch(err => console.error('Credit note accounting failed:', err));
+      }).catch(err => console.error('Credit note accounting failed:', err)).finally(bumpLedger);
       setAvoirDialog(false);
       showToast(`Avoir ${creditNoteRef(cn)} émis`);
     } catch (err) {
@@ -421,7 +425,7 @@ export default function InvoicePage() {
         }).catch(err => {
           console.error('Accounting update failed:', err);
           showToast('Facture mise à jour, mais l\'écriture comptable n\'a pas pu être rectifiée. Signalez-le à votre comptable.', true);
-        });
+        }).finally(bumpLedger);
       }
       setInvoices(prev => prev.map(i => i.id === invoice.id
         ? { ...i, subject: eSubject.trim() || 'Facture sans titre', client: eClient, issued: eDate, due: eDue, amount: eTotal, discountPct: eDiscount }
@@ -463,6 +467,7 @@ export default function InvoicePage() {
       });
       setPayments(prev => prev.some(p => p.id === res.payment.id) ? prev : [{ ...res.payment, client: res.payment.client || invoice.client }, ...prev]);
       setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: res.invoiceStatus } : i));
+      bumpLedger();
       setPayDialog(false);
       showToast(res.balance > 0
         ? `Paiement de ${fmt(payAmount)} F CFA enregistré — reste ${fmt(res.balance)} F CFA`
@@ -722,6 +727,8 @@ export default function InvoicePage() {
 
           {UI_V2 ? (
             <InvoiceSide
+              key={`${orgId}:${invoice.id}`}
+              refreshKey={ledgerTick}
               invoice={invoice}
               total={invoice.status === 'draft' ? total : invoice.amount}
               paid={paid}

@@ -7,6 +7,7 @@ import { OwnerLine } from '@/components/owner/OwnerControls';
 import { useApp } from '@/context/AppContext';
 import { usePermissions } from '@/lib/use-permissions';
 import { fetchInvoiceEntries } from '@/lib/api/accounting';
+import { fetchClientCreditNotes } from '@/lib/api/credit-notes';
 import { withIntent } from '@/lib/command-intent';
 import { clientBalance, expectedSalesEntry, invoiceActivity, fmtDateTime } from '@/lib/invoice-view';
 import { contactValue } from '@/lib/share-links';
@@ -24,7 +25,7 @@ function Card({ title, children, action }: { title: string; children: ReactNode;
   );
 }
 
-export default function InvoiceSide({ invoice, total, paid, credited, amountDue, creditNotes, client, vatOnInvoice }: {
+export default function InvoiceSide({ invoice, total, paid, credited, amountDue, creditNotes, client, vatOnInvoice, refreshKey = 0 }: {
   invoice: Invoice;
   /** TTC of the invoice (its lines for a draft). */
   total: number;
@@ -35,11 +36,15 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
   client: { code: string; name: string; contact?: string; email?: string; phone?: string };
   /** Whether this invoice carries VAT (for the expected entry). */
   vatOnInvoice: boolean;
+  /** Goes up once a payment, issue, credit note or edit has been posted: entries are read again. */
+  refreshKey?: number;
 }) {
   const { invoices, payments, quotes, orgId, activity: teamActivity } = useApp();
   const { postable } = usePermissions();
   const navigate = useNavigate();
-  const [entries, setEntries] = useState<JournalEntry[] | null>(null);
+  // null while loading; 'error' when the entries couldn't be read (not the same as none)
+  const [entries, setEntries] = useState<JournalEntry[] | 'error' | null>(null);
+  const [retry, setRetry] = useState(0);
   const creditIds = creditNotes.map(c => c.id).join(',');
 
   useEffect(() => {
@@ -47,15 +52,30 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
     let live = true;
     fetchInvoiceEntries(orgId, invoice.id, creditIds ? creditIds.split(',') : [])
       .then(e => { if (live) setEntries(e); })
-      .catch(err => { console.error('[fetchInvoiceEntries]', err); if (live) setEntries([]); });
+      .catch(err => { console.error('[fetchInvoiceEntries]', err); if (live) setEntries('error'); });
     return () => { live = false; };
-  }, [postable, orgId, invoice.id, invoice.status, creditIds]);
+  }, [postable, orgId, invoice.id, invoice.status, creditIds, refreshKey, retry]);
+
+  // The client's balance counts the credit notes on all their invoices, not only this one
+  const [clientCredits, setClientCredits] = useState<CreditNote[] | 'error' | null>(null);
+  useEffect(() => {
+    if (!orgId) return;
+    let live = true;
+    fetchClientCreditNotes(orgId, invoice.client)
+      .then(c => { if (live) setClientCredits(c); })
+      .catch(err => { console.error('[fetchClientCreditNotes]', err); if (live) setClientCredits('error'); });
+    return () => { live = false; };
+  }, [orgId, invoice.client, creditIds, refreshKey]);
 
   const activity = invoiceActivity(invoice, payments, creditNotes, fmt);
   // Sends and reminders are logged in the team's activity with the invoice's number
   const ref = `#${invoiceRef(invoice)}`;
   const sends = teamActivity.filter(a => a.kind === 'sent' && a.parts.some(p => p.text === ref));
-  const owed = clientBalance(invoice.client, invoices, payments, creditNotes);
+  // This invoice's credit notes may be newer than the client-wide list
+  const allCredits = Array.isArray(clientCredits)
+    ? [...clientCredits.filter(c => !creditNotes.some(n => n.id === c.id)), ...creditNotes]
+    : null;
+  const owed = allCredits ? clientBalance(invoice.client, invoices, payments, allCredits) : null;
   const fromQuote = quotes.find(q => q.invoiceId === invoice.id);
   const contact = contactValue(client.contact), email = contactValue(client.email), phone = contactValue(client.phone);
 
@@ -73,6 +93,12 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
       {postable && invoice.status !== 'draft' && (
         <Card title="Comptabilité">
           {entries === null ? <p className="dt-muted">Chargement…</p>
+            : entries === 'error' ? (
+              <p className="dt-muted iv-note">
+                Les écritures n’ont pas pu être chargées.{' '}
+                <button type="button" className="dt-linkcell" onClick={() => { setEntries(null); setRetry(r => r + 1); }}>Réessayer</button>
+              </p>
+            )
             : entries.length > 0 ? entries.map(e => (
               <div key={e.id} className="iv-entry">
                 <div className="iv-entry-head">
@@ -107,7 +133,9 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
           {contact && <div><dt>Contact</dt><dd>{contact}</dd></div>}
           {email && <div><dt>E-mail</dt><dd><a href={`mailto:${email}`}>{email}</a></dd></div>}
           {phone && <div><dt>Téléphone</dt><dd>{phone}</dd></div>}
-          <div><dt>Solde total</dt><dd className={owed > 0 ? 'iv-strong' : undefined}>{fmt(owed)} F CFA</dd></div>
+          <div><dt>Solde total</dt><dd className={owed !== null && owed > 0 ? 'iv-strong' : undefined}>
+            {owed !== null ? `${fmt(owed)} F CFA` : clientCredits === 'error' ? 'Indisponible' : '…'}
+          </dd></div>
         </dl>
       </Card>
 
