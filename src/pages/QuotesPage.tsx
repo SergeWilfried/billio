@@ -303,7 +303,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
               writable={writable}
               deletable={deletable}
               onOpen={id => navigate(`/quotes/${id}`)}
-              onConvert={q => void compliance.guard(q.client, () => void convertToInvoice(q.id), { returnTo: '/quotes' })}
+              onConvert={q => navigate(`/invoices/new?quote=${encodeURIComponent(q.id)}`)}
               onRemind={id => sendReminder(id)}
               onDuplicate={id => void duplicateQuote(id)}
               onDelete={id => handleDelete(id)}

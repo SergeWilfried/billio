@@ -8,7 +8,7 @@ import type { PaperConfig, PaperLayout, PaperDensity, TableStyle, TotalStyle, Bi
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { usePermissions } from '@/lib/use-permissions';
-import { DEFAULT_CONFIG, FONT_FAMILIES, PRESETS } from '@/lib/invoice-template';
+import { BAND_COLORS, BANDED_LAYOUTS, DEFAULT_CONFIG, FONT_FAMILIES, PRESETS } from '@/lib/invoice-template';
 import { createTemplate, fetchTemplates, setDefaultTemplate, updateTemplate, type SavedTemplate } from '@/lib/api/invoice-templates';
 import { fetchPaymentSettings } from '@/lib/api/payment-settings';
 import { paymentMethodLines, type PaymentMethodLine } from '@/lib/payment-methods';
@@ -378,6 +378,42 @@ function EditorControls({ cfg, onChange }: { cfg: PaperConfig; onChange: (c: Pap
           </div>
         ))}
       </div>
+
+      {/* Header and footer bands (Classique, Minimal) */}
+      {BANDED_LAYOUTS.includes(cfg.layout) && (
+        <div className="ed-group">
+          <div className="ed-group-title"><Icon name="layout-grid" size={14} ariaHidden />En-tête et pied de page</div>
+          <div className="tog-row">
+            <div className="row-label">
+              En bandeau
+              <small>Fond teinté sur toute la largeur, en haut et en bas de page</small>
+            </div>
+            <button
+              className={`tp-toggle${cfg.bands ? ' on' : ''}`}
+              onClick={() => set('bands', !cfg.bands)}
+              aria-pressed={cfg.bands}
+              aria-label="En-tête et pied de page en bandeau"
+            />
+          </div>
+          {cfg.bands && (
+            <div className="swatch-row" role="radiogroup" aria-label="Teinte du bandeau" style={{ marginTop: 10 }}>
+              {BAND_COLORS.map(c => (
+                <button
+                  type="button"
+                  key={c.value}
+                  role="radio"
+                  aria-checked={cfg.bandColor === c.value}
+                  aria-label={c.label}
+                  title={c.label}
+                  className={`swatch band-swatch${cfg.bandColor === c.value ? ' active' : ''}`}
+                  style={{ background: c.value }}
+                  onClick={() => set('bandColor', c.value)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="ed-group">

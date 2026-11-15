@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react';
 import { fmt } from '@/data';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
+import { paperBands } from '@/lib/invoice-template';
 import type { PaymentMethodLine } from '@/lib/payment-methods';
 
 export type PaperLayout   = 'classic' | 'band' | 'minimal' | 'sidebar' | 'receipt';
@@ -27,6 +28,10 @@ export interface PaperConfig {
   /** Kept for saved templates; the invoice always shows payment details. */
   showPayment:   boolean;
   footer:        string;
+  /** Header and footer in light bands (Classique and Minimal only); on unless switched off */
+  bands:         boolean;
+  /** The bands' tint, one of BAND_COLORS */
+  bandColor:     string;
 }
 
 export interface BizInfo {
@@ -440,8 +445,10 @@ export default function InvoicePaper({ config, biz, paymentMethods, paymentTerms
     payLines: paymentMethods ?? (biz?.name ? [] : MOCK_PAYMENT),
     paymentTerms: paymentTerms || 'Net 14 jours',
   };
+  const band = paperBands(config);
   const paperStyle: React.CSSProperties = {
     '--acc': config.color,
+    ...(band ? { '--band': band } : {}),
     fontFamily: config.fontFamily,
   } as React.CSSProperties;
 
@@ -451,6 +458,7 @@ export default function InvoicePaper({ config, biz, paymentMethods, paymentTerms
         className="tp-paper"
         data-layout={config.layout}
         data-density={config.density}
+        data-bands={band ? 'on' : undefined}
         style={paperStyle}
       >
         {config.layout === 'classic'  && <ClassicBody  cfg={config} />}

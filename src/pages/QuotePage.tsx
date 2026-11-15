@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { canWrite } from '@/lib/permissions';
 import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
+import { UI_V2 } from '@/lib/features';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
@@ -206,6 +207,8 @@ export default function QuotePage() {
   // Converting issues an invoice: check the mandatory mentions first
   const requestConvert = () => {
     if (convertingRef.current) return;
+    // The ERP look opens the invoice editor with the quote's data (PRO-167)
+    if (UI_V2) { navigate(`/invoices/new?quote=${encodeURIComponent(quote.id)}`); return; }
     void compliance.guard(quote.client, () => void handleConvertToInvoice(), { returnTo: `/quotes/${quote.id}` });
   };
 

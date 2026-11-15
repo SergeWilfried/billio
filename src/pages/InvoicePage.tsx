@@ -13,6 +13,7 @@ import { creditNoteRef, invoiceRef, isIssuedLockedError } from '@/lib/invoice-nu
 import { createActivity } from '@/lib/api/activities';
 import { deleteInvoiceEntries, updateInvoiceIssuanceEntry, recordCreditNoteEntry, recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { settleInvoicePayment } from '@/lib/api/payments';
+import { updateQuote } from '@/lib/api/quotes';
 import { invoiceBalance, daysOverdue, todayISO } from '@/lib/invoice-status';
 import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import { filledLines, lineItemsError } from '@/lib/line-validation';
@@ -33,9 +34,11 @@ import { VAT_LABEL, chargesVat, documentHasVat, splitTtc, vatOn } from '@/lib/va
 import Page from '@/components/Page';
 import { OwnerLine } from '@/components/owner/OwnerControls';
 import InvoiceSide from '@/components/invoice/InvoiceSide';
+import RichTextView from '@/components/RichTextView';
 import MoreMenu from '@/components/MoreMenu';
 import StatusPill from '@/components/sales/StatusPill';
 import { UI_V2 } from '@/lib/features';
+import { paperBands } from '@/lib/invoice-template';
 import { invoiceBadge, fmtDateTime } from '@/lib/invoice-view';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
@@ -83,7 +86,7 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, quotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
+  const { invoices, quotes, setQuotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
   const writable = canWrite(userRole);
   const compliance = useComplianceGuard();
   const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
@@ -225,7 +228,7 @@ export default function InvoicePage() {
       const issued = todayISO();
       const due = new Date(Date.parse(issued + 'T00:00:00Z') + termDays * 86_400_000).toISOString().slice(0, 10);
       const id = newDraftId();
-      const copy = { id, subject: invoice.subject, client: invoice.client, issued, due, amount: total, status: 'draft' as const, discountPct };
+      const copy = { id, subject: invoice.subject, client: invoice.client, issued, due, amount: total, status: 'draft' as const, discountPct, notes: invoice.notes };
       // The copy belongs to whoever duplicates it (set by the database, PRO-172)
       const stored = await createInvoice(orgId, copy);
       try {
@@ -317,6 +320,12 @@ export default function InvoicePage() {
       return;
     }
     deleteInvoiceEntries(orgId, invoice.id).catch(err => console.error('[deleteInvoiceEntries] failed:', err));
+    // A draft started from a quote (PRO-167): the quote can be invoiced again
+    for (const q of quotes.filter(q => q.invoiceId === invoice.id && q.status !== 'invoiced')) {
+      updateQuote(orgId, q.id, { invoiceId: null }, { onlyIfInvoiceId: invoice.id })
+        .then(() => setQuotes(prev => prev.map(x => x.id === q.id && x.invoiceId === invoice.id ? { ...x, invoiceId: undefined } : x)))
+        .catch(err => console.error('[updateQuote] unlink failed:', err));
+    }
     setInvoices(prev => prev.filter(i => i.id !== invoice.id));
     showToast('Facture supprimée');
     navigate('/invoices');
@@ -382,6 +391,8 @@ export default function InvoicePage() {
   };
 
   const canEdit = writable && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
+  // Header and footer bands of the organisation's template (PRO-167), in the new look
+  const pageBand = UI_V2 ? paperBands(invoiceTemplate) : null;
 
   const openEdit = () => {
     setEClient(invoice.client);
@@ -503,7 +514,7 @@ export default function InvoicePage() {
         </button>
         {writable && invoice.status === 'draft' && (<>
           {canEdit && (
-            <button className="btn" onClick={openEdit}>
+            <button className="btn" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
               <Icon name="edit" ariaHidden /> Modifier
             </button>
           )}
@@ -557,7 +568,7 @@ export default function InvoicePage() {
         <div className="detail-grid">
 
           {/* Invoice paper */}
-          <div className="paper">
+          <div className={`paper${pageBand ? ' has-bands' : ''}`} style={pageBand ? { ['--band' as string]: pageBand } : undefined}>
             <div className="pp-top">
               <div className="pp-biz">
                 <div className="pp-logo" aria-hidden="true"><BillioLogoSvg /></div>
@@ -702,10 +713,12 @@ export default function InvoicePage() {
                 </div>
               </div>
               <div>
-                <div className="pp-block-label">Notes</div>
-                <div className="pp-note">
-                  Merci pour votre confiance. Conditions de paiement : {orgSettings.paymentTerms || 'Net 14 jours'}.
-                </div>
+                <div className="pp-block-label">{invoice.notes ? 'Notes et conditions' : 'Notes'}</div>
+                {invoice.notes
+                  ? <RichTextView doc={invoice.notes} className="pp-note rich-text" />
+                  : <div className="pp-note">
+                      Merci pour votre confiance. Conditions de paiement : {orgSettings.paymentTerms || 'Net 14 jours'}.
+                    </div>}
               </div>
             </div>
 
@@ -722,7 +735,11 @@ export default function InvoicePage() {
               </div>
             )}
 
-            <div className="pp-foot">{orgSettings.name || 'Mon entreprise'} · Facture générée via Billio</div>
+            {/* The template's footer text, as the PDF prints it */}
+            <div className="pp-foot">
+              <span>{orgSettings.name || 'Mon entreprise'}</span>
+              <span>{invoiceTemplate.footer.trim() || 'Facture générée via Billio'}</span>
+            </div>
           </div>
 
           {UI_V2 ? (

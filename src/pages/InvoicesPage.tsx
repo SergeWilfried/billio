@@ -130,6 +130,8 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
   useCommandIntent(intent => {
     if (intent.command === 'show-late') { setShowLate(n => n + 1); return; }
     if (intent.command !== 'new-invoice' || !writable) return false;
+    // The ERP look edits invoices on their own page (PRO-167)
+    if (UI_V2) { navigate(intent.client ? `/invoices/new?client=${encodeURIComponent(intent.client)}` : '/invoices/new', { replace: true }); return 'navigated'; }
     openPanel();
     if (intent.client) setFClient(intent.client);
   }, !loading);
@@ -311,7 +313,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
         subtitle="Gérez et suivez vos factures"
         actions={<>
           {writable && (
-            <button className="btn btn-primary" onClick={openPanel}>
+            <button className="btn btn-primary" onClick={UI_V2 ? () => navigate('/invoices/new') : openPanel}>
               <Icon name="plus" ariaHidden /> Nouvelle facture
             </button>
           )}
