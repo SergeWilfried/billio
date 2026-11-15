@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { amountOnlyLines, amountOnlyVat, amountTotals, vatChoiceFromDraft, vatFromCreditEntry, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
+import { amountOnlyLines, amountOnlyVat, amountTotals, vatChoiceFromDraft, vatFromCreditEntry, legacyCreditVat, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
 import { documentAmounts } from '@/lib/document-amounts';
 import { docRows, invoiceRows } from '@/lib/sales-tables';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
@@ -142,5 +142,17 @@ describe('vatFromCreditEntry', () => {
     expect(vatFromCreditEntry([{ piece: 'AV-AV-0003', lines: [{ acct: '706', d: 8_475, c: 0 }, { acct: '443', d: 1_525, c: 0 }, { acct: '411', d: 0, c: 10_000 }] }], 'AV-0003')).toBe(true);
     expect(vatFromCreditEntry([{ piece: 'AV-AV-0003', lines: [{ acct: '706', d: 10_000, c: 0 }, { acct: '411', d: 0, c: 10_000 }] }], 'AV-0003')).toBe(false);
     expect(vatFromCreditEntry([{ piece: 'VE-F-1', lines: [{ acct: '443', d: 0, c: 18 }] }], 'AV-0003')).toBeNull();
+  });
+});
+
+describe('legacyCreditVat', () => {
+  const own = { piece: 'AV-AV-0003', lines: [{ acct: '706', d: 10_000, c: 0 }, { acct: '411', d: 0, c: 10_000 }] };
+  const sale = { piece: 'VE-F-1', lines: [{ acct: '443', d: 0, c: 18 }] };
+  it('is certain only from the note’s own entry', () => {
+    expect(legacyCreditVat([own, sale], 'AV-0003', 'F-1', true)).toEqual({ vat: false, estimated: false });
+  });
+  it('marks the invoice’s sales entry, or the invoice, as an estimate', () => {
+    expect(legacyCreditVat([sale], 'AV-0003', 'F-1', false)).toEqual({ vat: true, estimated: true });
+    expect(legacyCreditVat(null, 'AV-0003', 'F-1', false)).toEqual({ vat: false, estimated: true });
   });
 });

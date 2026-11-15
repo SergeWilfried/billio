@@ -100,6 +100,18 @@ export function vatFromCreditEntry(entries: Pick<JournalEntry, 'piece' | 'lines'
   return e.lines.some(l => l.acct.startsWith('443') && l.d > 0);
 }
 
+/**
+ * The VAT to print for a credit note without lines (older ones). Only its
+ * own entry is certain: the invoice's sales entry, or the invoice as shown,
+ * are an estimate (the regime of the note's day may have differed).
+ */
+export function legacyCreditVat(entries: Pick<JournalEntry, 'piece' | 'lines'>[] | null, creditNoteId: string, invoiceId: string, fallback: boolean): { vat: boolean; estimated: boolean } {
+  const own = entries ? vatFromCreditEntry(entries, creditNoteId) : null;
+  if (own !== null) return { vat: own, estimated: false };
+  const sale = entries ? vatFromSalesEntry(entries, invoiceId) : null;
+  return { vat: sale ?? fallback, estimated: true };
+}
+
 /** Totals of the credit note: the invoice's discount and VAT applied to the credited lines. */
 export function creditTotals(lines: CreditLine[], invoice: { discountPct?: number }, chargedVat: boolean): EditorTotals {
   return editorTotals(lines, invoice.discountPct ?? 0, chargedVat);

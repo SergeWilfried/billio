@@ -10,7 +10,7 @@ import { fetchInvoiceEntries } from '@/lib/api/accounting';
 import { fetchClientCreditNotes, fetchCreditNoteDrafts } from '@/lib/api/credit-notes';
 import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
 import { creditNoteRef } from '@/lib/invoice-number';
-import { vatFromCreditEntry, vatFromSalesEntry } from '@/lib/credit-note';
+import { legacyCreditVat } from '@/lib/credit-note';
 import { withIntent } from '@/lib/command-intent';
 import { clientBalance, expectedSalesEntry, invoiceActivity, fmtDateTime } from '@/lib/invoice-view';
 import { contactValue } from '@/lib/share-links';
@@ -91,9 +91,8 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
     try {
       // A note without lines (older ones): its own accounting entry says whether it carried VAT,
       // else the invoice's sales entry, else the invoice as shown here
-      const known = Array.isArray(entries) ? vatFromCreditEntry(entries, cn.id) ?? vatFromSalesEntry(entries, invoice.id) : null;
-      const chargedVat = known ?? vatOnInvoice;
-      if (known === null && cn.lines.length === 0) showToast('La TVA de cet ancien avoir n’a pas pu être lue dans la comptabilité : le PDF suit la facture.', true);
+      const { vat: chargedVat, estimated } = legacyCreditVat(Array.isArray(entries) ? entries : null, cn.id, invoice.id, vatOnInvoice);
+      if (estimated && cn.lines.length === 0) showToast('L’écriture de cet ancien avoir n’a pas pu être lue : la TVA du PDF est estimée d’après la facture.', true);
       showPdf(await renderCreditNotePdf({ creditNote: cn, invoice, chargedVat, client: rec, biz: orgSettings, template: invoiceTemplate }), tab);
     } catch (err) {
       tab?.close();
