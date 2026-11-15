@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat } from '@/lib/credit-note';
+import { amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit } from '@/lib/credit-note';
+import { documentAmounts } from '@/lib/document-amounts';
 import { docRows, invoiceRows } from '@/lib/sales-tables';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
 
@@ -60,5 +61,42 @@ describe('docRows', () => {
     expect(rows.map(r => r.kind === 'credit' ? r.creditNote.id : r.id)).toEqual(['F-43', 'AV-2', 'AV-1', 'F-42', 'AV-9']);
     const first = rows[1];
     expect(first.kind === 'credit' && first.origin?.id).toBe('F-42');
+  });
+});
+
+describe('reconcileFinalCredit', () => {
+  // Two units at 10 005 with 5 % discount, no VAT: the invoice is 19 009, each one-unit credit 9 505
+  const two = [line('u', 'Unité', 2, 10_005)];
+  const inv = { amount: 19_009, discountPct: 5 };
+  it('lets the last credit take exactly what is left', () => {
+    const first = creditTotals(creditLines(two, { u: 1 }), inv, false);
+    expect(first.total).toBe(9_505);
+    const left = creditableAmount(inv, [cn({ amount: first.total })]);
+    expect(left).toBe(9_504);
+    const last = reconcileFinalCredit(creditTotals(creditLines(two, { u: 1 }), inv, false), { emptiesInvoice: true, left, chargedVat: false, tolerance: 4 });
+    expect(last.total).toBe(9_504);
+    expect(last.net).toBe(9_504);
+    expect(creditIssueProblem({ nature: 'RAM', reason: 'Retour', total: last.total, max: left, paid: 0 })).toBeNull();
+  });
+  it('puts the gap in the VAT when VAT was charged, and leaves a large gap to the checks', () => {
+    const t = creditTotals(creditLines(invLines, { b: 1 }), { discountPct: 5 }, true);
+    expect(reconcileFinalCredit(t, { emptiesInvoice: true, left: t.total - 1, chargedVat: true, tolerance: 2 }).tax).toBe(t.tax - 1);
+    expect(reconcileFinalCredit(t, { emptiesInvoice: true, left: t.total - 500, chargedVat: true, tolerance: 2 })).toEqual(t);
+    expect(reconcileFinalCredit(t, { emptiesInvoice: false, left: t.total - 1, chargedVat: true, tolerance: 2 })).toEqual(t);
+  });
+});
+
+describe('credit note amounts on the PDF', () => {
+  it('prints the stored total of an amount-only note (no franc lost or added by rounding)', () => {
+    const ht = amountTotals(10_000, true).net;
+    expect(ht + Math.round(ht * 0.18)).not.toBe(10_000); // does not round-trip on its own
+    expect(documentAmounts(ht, 0, true, 10_000).total).toBe(10_000);
+    expect(documentAmounts(ht, 0, true, 10_000).tax).toBe(1_525);
+  });
+  it('prints a reconciled last credit as stored, without VAT too', () => {
+    const a = documentAmounts(10_005, 5, false, 9_504);
+    expect([a.discountAmt, a.total]).toEqual([501, 9_504]);
+    // Without a stored total, the usual rounding
+    expect(documentAmounts(10_005, 5, false).total).toBe(9_505);
   });
 });

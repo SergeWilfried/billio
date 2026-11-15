@@ -50,7 +50,9 @@ export default function InvoiceList({ writable, onOpen, onSend, onDownload, down
   const [typeFilter, setTypeFilter] = useState('all');
   const [natureFilter, setNatureFilter] = useState('all');
   const rows = useMemo(() => {
-    const all = docRows(invRows, [...creditDrafts, ...creditNotes], invoices);
+    // Two queries: a draft issued between them shows once, as issued
+    const issuedIds = new Set(creditNotes.map(c => c.id));
+    const all = docRows(invRows, [...creditDrafts.filter(d => !issuedIds.has(d.id)), ...creditNotes], invoices);
     return all.filter(r => (typeFilter === 'all' || r.kind === typeFilter)
       && (typeFilter !== 'credit' || natureFilter === 'all' || (r.kind === 'credit' && r.creditNote.nature === natureFilter)));
   }, [invRows, creditDrafts, creditNotes, invoices, typeFilter, natureFilter]);

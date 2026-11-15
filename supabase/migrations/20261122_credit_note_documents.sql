@@ -12,7 +12,8 @@
 --                 mentions), set by the database, never by the app.
 --
 -- Only issued credit notes count: the number (AV-YYYY-NNNN) is given at issue,
--- the total check and the invoice balance ignore drafts. A draft can be changed
+-- the total check and the invoice balance ignore drafts. At issue, each
+-- credited line is also checked against what is left of its invoice line. A draft can be changed
 -- and deleted; an issued credit note can't. RAN can't be issued on an invoice
 -- that has received a payment.
 
@@ -107,6 +108,29 @@ begin
     raise exception 'Credit notes (% + %) exceed invoice total %', v_credited, new.amount, v_amount
       using errcode = 'P0001', hint = 'exceeds_invoice_total';
   end if;
+
+  -- Per line, still under the invoice lock: what this note credits on each
+  -- source line, plus what issued notes already credited, stays within the
+  -- line's quantity. A source line no longer on the invoice (its lines were
+  -- replaced) is left to the amount check above.
+  if exists (
+    select 1
+      from (select l ->> 'sourceId' as src, sum((l ->> 'qty')::numeric) as qty
+              from jsonb_array_elements(new.lines) l
+             where l ->> 'sourceId' is not null
+             group by 1) s
+      join line_items li
+        on li.org_id = new.org_id and li.invoice_id = new.invoice_id and li.id::text = s.src
+     where s.qty + coalesce((
+             select sum((x ->> 'qty')::numeric)
+               from credit_notes c, jsonb_array_elements(c.lines) x
+              where c.org_id = new.org_id and c.invoice_id = new.invoice_id
+                and c.status = 'issued' and c.id <> new.id
+                and x ->> 'sourceId' = s.src), 0) > li.qty
+  ) then
+    raise exception 'A credited line exceeds what is left of its invoice line'
+      using errcode = 'P0001', hint = 'exceeds_line_quantity';
+  end if;
   return new;
 end;
 $$;
@@ -147,8 +171,8 @@ declare
 begin
   if tg_op = 'UPDATE' and old.status = 'issued' then
     -- Issued: frozen for the app (maintenance outside it can still fix a row)
-    if v_app and (new.status, new.invoice_id, new.client_code, new.amount, new.reason, new.nature, new.lines, new.discount_pct, new.issued_at)
-         is distinct from (old.status, old.invoice_id, old.client_code, old.amount, old.reason, old.nature, old.lines, old.discount_pct, old.issued_at) then
+    if v_app and (new.org_id, new.status, new.invoice_id, new.client_code, new.subject, new.amount, new.reason, new.nature, new.lines, new.discount_pct, new.issued_at)
+         is distinct from (old.org_id, old.status, old.invoice_id, old.client_code, old.subject, old.amount, old.reason, old.nature, old.lines, old.discount_pct, old.issued_at) then
       raise exception 'issued_document_locked'
         using errcode = 'BL002', detail = 'An issued credit note cannot be changed; issue another one.';
     end if;

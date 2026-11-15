@@ -1,4 +1,5 @@
 import { invoiceRef } from '@/lib/invoice-number';
+import { documentAmounts } from '@/lib/document-amounts';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
 import type { ReactNode } from 'react';
@@ -10,7 +11,7 @@ import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Invoice, LineItem, ServiceWithholdingScenario } from '@/lib/schemas';
 import type { BizInfo, PaperConfig } from '@/components/InvoicePaper';
 import type { PaymentMethodLine } from '@/lib/payment-methods';
-import { VAT_LABEL, chargesVat, documentHasVat, vatOn } from '@/lib/vat';
+import { VAT_LABEL, chargesVat, documentHasVat } from '@/lib/vat';
 import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, paperBands, pdfFont } from '@/lib/invoice-template';
 import { registerPdfFonts } from '@/lib/pdf-fonts';
 import { qrMatrix, qrRuns, type InvoiceCertification } from '@/lib/certification';
@@ -115,7 +116,11 @@ export interface InvoicePDFProps {
    * credits and its reason replace the due date, terms and payment methods.
    * `invoice` then carries the credit note (number, dates, issuer, lines' discount).
    */
-  creditNote?: { nature: string; originalRef: string; originalIssued: string; reason: string };
+  creditNote?: {
+    nature: string; originalRef: string; originalIssued: string; reason: string;
+    /** The stored total: printed as is, the rounding left in the discount or the VAT */
+    storedTotal?: number;
+  };
   clientLabel?: string;
   paymentTerms?: string;
   deliveryTerms?: string;
@@ -331,13 +336,10 @@ export function InvoicePDFDocument({
 
   const subtotal      = lines.reduce((sum, li) => sum + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
-  const discountAmt   = Math.round(subtotal * (discountPct / 100));
-  const discountedSub = subtotal - discountAmt;
   // VAT as issued: the stored total says whether it was charged, so a later
   // change of tax regime doesn't rewrite old invoices
-  const showVat       = documentHasVat(invoice.amount, discountedSub, chargesVat(biz.taxRegime));
-  const tax           = vatOn(discountedSub, showVat);
-  const total         = discountedSub + tax;
+  const showVat       = documentHasVat(invoice.amount, subtotal - Math.round(subtotal * (discountPct / 100)), chargesVat(biz.taxRegime));
+  const { discountAmt, discountedSub, tax, total } = documentAmounts(subtotal, discountPct, showVat, creditNote?.storedTotal);
   const isPaid = invoice.status === 'paid';
 
   // A credit note gives back what was invoiced: no withholding of its own

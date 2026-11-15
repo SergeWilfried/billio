@@ -3,7 +3,7 @@
 // it can be tested.
 
 import { filledLines } from '@/lib/line-validation';
-import { documentHasVat } from '@/lib/vat';
+import { documentHasVat, splitTtc } from '@/lib/vat';
 import { editorTotals, type EditorTotals } from '@/lib/invoice-editor';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
 
@@ -54,6 +54,27 @@ export function invoiceChargedVat(invoice: Pick<Invoice, 'amount' | 'discountPct
 /** Totals of the credit note: the invoice's discount and VAT applied to the credited lines. */
 export function creditTotals(lines: CreditLine[], invoice: { discountPct?: number }, chargedVat: boolean): EditorTotals {
   return editorTotals(lines, invoice.discountPct ?? 0, chargedVat);
+}
+
+/**
+ * The credit that empties every line takes exactly what is left of the
+ * invoice. Discount and VAT are rounded per credit note, so successive partial
+ * credits can end a franc or two away from the invoice total. Only that small
+ * gap (`tolerance`) is absorbed, in the VAT (or the discount, without VAT); a
+ * larger gap (older amount-only credit notes) is left for the checks to refuse.
+ */
+export function reconcileFinalCredit(t: EditorTotals, opts: { emptiesInvoice: boolean; left: number; chargedVat: boolean; tolerance: number }): EditorTotals {
+  const diff = opts.left - t.total;
+  if (!opts.emptiesInvoice || diff === 0 || Math.abs(diff) > opts.tolerance) return t;
+  return opts.chargedVat
+    ? { ...t, tax: t.tax + diff, total: opts.left, toPay: opts.left }
+    : { ...t, discount: t.discount - diff, net: t.net + diff, total: opts.left, toPay: opts.left };
+}
+
+/** A credit note on an invoice without stored lines: an amount TTC, split into HT and VAT. */
+export function amountTotals(amount: number, chargedVat: boolean): EditorTotals {
+  const { ht, tva } = splitTtc(amount, chargedVat);
+  return { subtotal: ht, discount: 0, net: ht, tax: tva, total: amount, withholding: null, toPay: amount };
 }
 
 /**

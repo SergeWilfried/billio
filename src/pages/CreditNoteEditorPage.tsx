@@ -26,7 +26,8 @@ import {
 import { recordCreditNoteEntry } from '@/lib/api/accounting';
 import { createActivity } from '@/lib/api/activities';
 import {
-  CREDIT_NATURES, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, natureLabel,
+  CREDIT_NATURES, amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, natureLabel,
+  reconcileFinalCredit,
   type CreditNature,
 } from '@/lib/credit-note';
 import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
@@ -59,6 +60,8 @@ export default function CreditNoteEditorPage() {
   const [issuedNotes, setIssuedNotes] = useState<CreditNote[]>([]);
   const [ready, setReady] = useState(false);
   const [qty, setQty] = useState<Record<string, number>>({});
+  // An invoice without stored lines is credited by amount (TTC), as the old dialog did
+  const [amt, setAmt] = useState(0);
   const [nature, setNature] = useState<CreditNature | ''>('');
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(() => isoDay(new Date()));
@@ -66,7 +69,9 @@ export default function CreditNoteEditorPage() {
   const [baseline, setBaselineState] = useState('');
   const baselineRef = useRef('');
   const setBaseline = (v: string) => { baselineRef.current = v; setBaselineState(v); };
-  const snapshot = JSON.stringify({ qty: Object.entries(qty).filter(([, q]) => q > 0).sort(), nature, reason: reason.trim(), date });
+  const snapOf = (v: { qty: Record<string, number>; amt: number; nature: string; reason: string; date: string }) =>
+    JSON.stringify({ qty: Object.entries(v.qty).filter(([, q]) => q > 0).sort(), amt: v.amt, nature: v.nature, reason: v.reason.trim(), date: v.date });
+  const snapshot = snapOf({ qty, amt, nature, reason, date });
   const dirty = ready && snapshot !== baseline;
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -95,9 +100,22 @@ export default function CreditNoteEditorPage() {
       if (inv.status === 'draft') return fail('Un avoir se crée sur une facture émise.', `/invoices/${inv.id}/edit`);
       const [ls, notes] = await Promise.all([fetchLineItems(orgId, { invoiceId: inv.id }), fetchCreditNotes(orgId, inv.id)]);
       if (!live) return;
+      // A draft keeps its quantities, but never more than what is left on each
+      // line now (a credit note may have been issued since it was saved)
+      const remaining = creditableQty(filledLines(ls), notes.filter(n => n.id !== cn?.id));
       const q: Record<string, number> = {};
-      for (const l of cn?.lines ?? []) if (l.sourceId) q[l.sourceId] = (q[l.sourceId] ?? 0) + l.qty;
+      let reduced = false;
+      for (const l of cn?.lines ?? []) {
+        if (!l.sourceId) continue;
+        const want = (q[l.sourceId] ?? 0) + l.qty;
+        const cap = remaining[l.sourceId] ?? 0;
+        if (want > cap) reduced = true;
+        q[l.sourceId] = Math.min(want, cap);
+      }
+      if (reduced) showToast('Certaines quantités dépassaient ce qui reste à créditer et ont été réduites.', true);
+      const a = cn && cn.lines.length === 0 ? cn.amount : 0;
       setDraft(cn);
+      setAmt(a);
       setInvoiceId(inv.id);
       setInvLines(filledLines(ls));
       setIssuedNotes(notes.filter(n => n.id !== cn?.id));
@@ -107,7 +125,10 @@ export default function CreditNoteEditorPage() {
       const d = cn?.issued ?? isoDay(new Date());
       setDate(d);
       setSavedAt(null);
-      setBaseline(cn ? JSON.stringify({ qty: Object.entries(q).filter(([, x]) => x > 0).sort(), nature: cn.nature ?? '', reason: cn.reason.trim(), date: d }) : JSON.stringify({ qty: [], nature: '', reason: '', date: d }));
+      // What the draft holds as saved; a reduced quantity counts as a change to save
+      const savedQty: Record<string, number> = {};
+      for (const l of cn?.lines ?? []) if (l.sourceId) savedQty[l.sourceId] = (savedQty[l.sourceId] ?? 0) + l.qty;
+      setBaseline(snapOf({ qty: savedQty, amt: a, nature: cn?.nature ?? '', reason: cn?.reason ?? '', date: d }));
       loadedFor.current = loadKey;
       leaveOk.current = false;
       setReady(true);
@@ -127,8 +148,14 @@ export default function CreditNoteEditorPage() {
   const left = useMemo(() => creditableQty(invLines, issuedNotes), [invLines, issuedNotes]);
   const lines = useMemo(() => creditLines(invLines, qty), [invLines, qty]);
   const vatCharged = invoice ? invoiceChargedVat(invoice, invLines, chargesVat(orgSettings.taxRegime)) : false;
-  const totals = creditTotals(lines, { discountPct: invoice?.discountPct ?? 0 }, vatCharged);
+  const amountOnly = invLines.length === 0;
   const max = invoice ? creditableAmount(invoice, issuedNotes) : 0;
+  // The credit that empties every line takes exactly what is left (rounding)
+  const emptiesInvoice = !amountOnly && lines.length > 0 && invLines.every(l => (qty[l.id] ?? 0) >= (left[l.id] ?? 0));
+  const totals = amountOnly
+    ? amountTotals(amt, vatCharged)
+    : reconcileFinalCredit(creditTotals(lines, { discountPct: invoice?.discountPct ?? 0 }, vatCharged),
+      { emptiesInvoice, left: max, chargedVat: vatCharged, tolerance: 2 * (issuedNotes.length + 1) });
   const bal = invoice ? invoiceBalance(invoice, payments, issuedNotes) : { paid: 0, credited: 0, balance: 0 };
   const dueAfter = Math.max(0, bal.balance - totals.total);
   const problem = creditIssueProblem({ nature, reason, total: totals.total, max, paid: bal.paid });
@@ -136,14 +163,16 @@ export default function CreditNoteEditorPage() {
     const v = Math.max(0, Math.min(left[lid] ?? 0, parseFloat(raw) || 0));
     setQty(prev => ({ ...prev, [lid]: v }));
   };
-  const creditAll = () => setQty({ ...left });
-  const clearAll = () => setQty({});
+  const creditAll = () => { if (amountOnly) setAmt(max); else setQty({ ...left }); };
+  const clearAll = () => { setQty({}); setAmt(0); };
 
   const checks = [
     nature ? { ok: true, text: `Nature : ${natureLabel(nature)}` } : { ok: false, text: 'Choisissez la nature de l’avoir' },
     ...(nature === 'RAN' && bal.paid > 0 ? [{ ok: false, text: 'RAN impossible : la facture a reçu un paiement (choisissez RAM)' }] : []),
     reason.trim() ? { ok: true, text: 'Motif indiqué' } : { ok: false, text: 'Indiquez le motif' },
-    totals.total > 0 ? { ok: true, text: `${lines.length} ligne${lines.length > 1 ? 's' : ''} créditée${lines.length > 1 ? 's' : ''}` } : { ok: false, text: 'Indiquez au moins une quantité à créditer' },
+    totals.total > 0
+      ? { ok: true, text: amountOnly ? `Montant : ${fmt(totals.total)} F CFA` : `${lines.length} ligne${lines.length > 1 ? 's' : ''} créditée${lines.length > 1 ? 's' : ''}` }
+      : { ok: false, text: amountOnly ? 'Indiquez le montant à créditer' : 'Indiquez au moins une quantité à créditer' },
     totals.total > max ? { ok: false, text: `Dépasse ce qui reste à créditer (${fmt(max)} F CFA)` } : { ok: true, text: `Reste à créditer sur la facture : ${fmt(max)} F CFA` },
   ];
   const blocking = checks.filter(c => !c.ok).length;
@@ -153,7 +182,7 @@ export default function CreditNoteEditorPage() {
   const busyRef = useRef(false);
   const fields = (): CreditNoteFields | null => invoice ? {
     invoiceId: invoice.id, subject: `Avoir sur ${invoiceRef(invoice)}`, client: invoice.client, issued: date,
-    amount: totals.total, reason: reason.trim(), nature: nature || undefined, lines, discountPct: invoice.discountPct ?? 0,
+    amount: totals.total, reason: reason.trim(), nature: nature || undefined, lines, discountPct: amountOnly ? 0 : invoice.discountPct ?? 0,
   } : null;
 
   async function run(kind: 'save' | 'issue' | 'pdf' | 'delete', fn: () => Promise<void>) {
@@ -199,11 +228,13 @@ export default function CreditNoteEditorPage() {
           setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, status: 'paid' as const } : i));
         }
         const clientName = clientRec?.name ?? invoice.client;
-        recordCreditNoteEntry(orgId, { creditNoteId: cn.id, invoiceId: invoice.id, htAmount: totals.net, tvaAmount: totals.tax, date: cn.issued, clientName })
-          .catch(err => {
-            console.error('[recordCreditNoteEntry]', err);
-            showToast(`Avoir ${ref} émis, mais l’écriture comptable n’a pas pu être enregistrée. Signalez-le à votre comptable.`, true);
-          });
+        // Posted before leaving, so the invoice page reads the entry with the others
+        try {
+          await recordCreditNoteEntry(orgId, { creditNoteId: cn.id, invoiceId: invoice.id, htAmount: totals.net, tvaAmount: totals.tax, date: cn.issued, clientName });
+        } catch (err) {
+          console.error('[recordCreditNoteEntry]', err);
+          showToast(`Avoir ${ref} émis, mais l’écriture comptable n’a pas pu être enregistrée. Signalez-le à votre comptable.`, true);
+        }
         const act = { kind: 'avoir' as const, parts: [{ text: 'Avoir ' }, { text: ref, bold: true as const }, { text: ` (${cn.nature}) sur ` }, { text: `#${invoiceRef(invoice)}`, bold: true as const }, { text: ` · ${clientName}` }] };
         setActivity((prev: Activity[]) => [{ ...act, time: "À l'instant" }, ...prev]);
         createActivity(orgId, act).catch(err => console.error('[createActivity] failed:', err));
@@ -419,7 +450,18 @@ export default function CreditNoteEditorPage() {
                   </tr>
                 );
               })}
-              {invLines.length === 0 && <tr><td colSpan={6} className="ie-muted">Cette facture n’a pas de lignes enregistrées.</td></tr>}
+              {amountOnly && (
+                <tr>
+                  <td colSpan={5}>
+                    <label htmlFor="cn-amount" className="cn-desc">Montant TTC à créditer</label>
+                    <div className="cn-sub">Cette facture n’a pas de lignes enregistrées : l’avoir porte sur un montant (au plus {fmt(max)} F CFA).</div>
+                  </td>
+                  <td className="r">
+                    <input id="cn-amount" className="ie-field num ie-price" type="number" min="0" max={max} step="1" value={amt || ''} placeholder="0" disabled={locked}
+                      onChange={e => setAmt(Math.max(0, Math.min(max, Math.round(parseFloat(e.target.value) || 0))))} />
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 

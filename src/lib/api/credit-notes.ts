@@ -146,6 +146,7 @@ function mockIssue() {
 export function creditNoteIssueError(err: unknown): string | null {
   const hint = (err as { hint?: string } | null)?.hint;
   if (hint === 'exceeds_invoice_total') return 'Cet avoir dépasse ce qui reste à créditer sur la facture.';
+  if (hint === 'exceeds_line_quantity') return 'Une ligne a été créditée entre-temps par un autre avoir : rouvrez l’avoir pour voir ce qui reste.';
   if (hint === 'ran_after_payment') return 'RAN (annulation) n’est possible que si la facture n’a reçu aucun paiement : choisissez RAM.';
   if (hint === 'nature_required') return 'Choisissez la nature de l’avoir.';
   if (hint === 'reason_required') return 'Indiquez le motif de l’avoir.';

@@ -14,6 +14,9 @@ create table public.invoices (
   id text not null, org_id uuid not null references public.organizations, status text not null default 'pending',
   amount numeric not null default 0, number text, primary key (org_id, id)
 );
+create table public.line_items (
+  id uuid primary key, org_id uuid, invoice_id text, qty numeric
+);
 create table public.payments (
   id text, org_id uuid, inv_id text, amount numeric, status text
 );
@@ -146,6 +149,34 @@ begin
   perform set_config('request.jwt.claim.role', '', true);
   update credit_notes set reason = 'corrigé' where id = 'AV-D1';
   if (select reason from credit_notes where id = 'AV-D1') <> 'corrigé' then failures := failures + 1; raise warning 'maintenance blocked'; end if;
+
+  -- Subject and organisation are frozen too (the PDF prints the subject of an amount-only note)
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  begin
+    update credit_notes set subject = 'autre' where id = 'AV-0001';
+    failures := failures + 1; raise warning 'issued subject changed';
+  exception when sqlstate 'BL002' then null;
+  end;
+  insert into organizations values ('00000000-0000-0000-0000-0000000000b2', 'B');
+  begin
+    update credit_notes set org_id = '00000000-0000-0000-0000-0000000000b2' where id = 'AV-0001';
+    failures := failures + 1; raise warning 'issued credit note moved to another organisation';
+  exception when sqlstate 'BL002' then null;
+  end;
+
+  -- Per line: two notes can't credit the same invoice line beyond its quantity
+  insert into invoices (id, org_id, amount) values ('F-3', a, 200);
+  insert into line_items values ('00000000-0000-0000-0000-00000000000a', a, 'F-3', 1), ('00000000-0000-0000-0000-00000000000b', a, 'F-3', 1);
+  insert into credit_notes (id, org_id, invoice_id, amount, status, nature, reason, lines)
+    values ('AV-L1', a, 'F-3', 100, 'issued', 'COR', 'ligne A', '[{"desc":"A","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-00000000000a"}]');
+  begin
+    insert into credit_notes (id, org_id, invoice_id, amount, status, nature, reason, lines)
+      values ('AV-L2', a, 'F-3', 100, 'issued', 'COR', 'ligne A encore', '[{"desc":"A","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-00000000000a"}]');
+    failures := failures + 1; raise warning 'an invoice line was credited twice';
+  exception when raise_exception then null;
+  end;
+  insert into credit_notes (id, org_id, invoice_id, amount, status, nature, reason, lines)
+    values ('AV-L3', a, 'F-3', 100, 'issued', 'COR', 'ligne B', '[{"desc":"B","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-00000000000b"}]');
 
   -- Shape of the lines
   begin

@@ -40,6 +40,7 @@ export async function renderCreditNotePdf(opts: {
       originalRef: invoiceRef(invoice),
       originalIssued: invoice.issued,
       reason: cn.reason,
+      storedTotal: cn.amount,
     },
   });
 }
