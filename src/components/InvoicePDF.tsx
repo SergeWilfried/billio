@@ -2,7 +2,8 @@ import { invoiceRef } from '@/lib/invoice-number';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
 import type { ReactNode } from 'react';
-import { Document, Page, View, Text, StyleSheet, Svg, Rect } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Link, StyleSheet, Svg, Rect } from '@react-pdf/renderer';
+import { cleanRichText, type RichBlock, type RichDoc, type RichInline, type RichMark, type TextAlign } from '@/lib/rich-text';
 import { calculateServiceWithholding } from '@/lib/tax-bf';
 import { clientTypeDef, clientTypeOf } from '@/lib/client-type';
 import { getFiscalIdLabel } from '@/lib/ohada';
@@ -10,9 +11,64 @@ import type { Invoice, LineItem, ServiceWithholdingScenario } from '@/lib/schema
 import type { BizInfo, PaperConfig } from '@/components/InvoicePaper';
 import type { PaymentMethodLine } from '@/lib/payment-methods';
 import { VAT_LABEL, chargesVat, documentHasVat, vatOn } from '@/lib/vat';
-import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, pdfFont } from '@/lib/invoice-template';
+import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, paperBands, pdfFont } from '@/lib/invoice-template';
 import { registerPdfFonts } from '@/lib/pdf-fonts';
 import { qrMatrix, qrRuns, type InvoiceCertification } from '@/lib/certification';
+
+/** A react-pdf style (the package doesn't export the type itself). */
+type Style = ReturnType<typeof StyleSheet.create>[string];
+
+// Notes and conditions (PRO-167): the editor's rich text, drawn with the same
+// formats the screen allows (bold, italic, underline, strike, links, lists, alignment)
+function pdfMarkStyle(marks: RichMark[] | undefined) {
+  const has = (t: RichMark['type']) => marks?.some(m => m.type === t) ?? false;
+  const deco = [has('underline') && 'underline', has('strike') && 'line-through'].filter(Boolean).join(' ');
+  return {
+    ...(has('bold') ? { fontWeight: 700 as const } : {}),
+    ...(has('italic') ? { fontStyle: 'italic' as const } : {}),
+    ...(deco ? { textDecoration: deco as 'underline' } : {}),
+  };
+}
+
+function pdfInline(content: RichInline[] | undefined, linkColor: string): ReactNode[] {
+  return (content ?? []).map((n, i) => {
+    if (n.type === 'hardBreak') return '\n';
+    const link = n.marks?.find(m => m.type === 'link');
+    const text = <Text key={i} style={pdfMarkStyle(n.marks)}>{n.text}</Text>;
+    return link && link.type === 'link'
+      ? <Link key={i} src={link.attrs.href} style={{ color: linkColor }}>{text}</Link>
+      : text;
+  });
+}
+
+function PdfRichBlocks({ blocks, style, linkColor }: { blocks: RichBlock[]; style: Style; linkColor: string }) {
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === 'bulletList' || b.type === 'orderedList') {
+          return (
+            <View key={i}>
+              {b.content.map((item, j) => (
+                <View key={j} style={{ flexDirection: 'row' }}>
+                  <Text style={[style, { width: 10 }]}>{b.type === 'orderedList' ? `${j + 1}.` : '•'}</Text>
+                  <View style={{ flex: 1 }}><PdfRichBlocks blocks={item.content} style={style} linkColor={linkColor} /></View>
+                </View>
+              ))}
+            </View>
+          );
+        }
+        const textBlock = b as { attrs?: { textAlign?: TextAlign }; content?: RichInline[] };
+        const align = textBlock.attrs?.textAlign ? { textAlign: textBlock.attrs.textAlign } : {};
+        const heading = b.type === 'heading' ? { fontWeight: 700 as const, fontSize: 9.5 } : {};
+        return <Text key={i} style={[style, align, heading]}>{pdfInline(textBlock.content, linkColor)}</Text>;
+      })}
+    </>
+  );
+}
+
+export function PdfRichText({ doc, style, linkColor = '#1F5FBF' }: { doc: RichDoc; style: Style; linkColor?: string }) {
+  return <View><PdfRichBlocks blocks={doc.content} style={style} linkColor={linkColor} /></View>;
+}
 
 // toLocaleString is unreliable in the react-pdf renderer environment
 const pdfFmt = (n: number): string =>
@@ -63,7 +119,15 @@ export interface InvoicePDFProps {
   certification?: InvoiceCertification;
 }
 
-const PAD = 40;
+// Page frame in points (1 mm ≈ 2.83 pt). 15 mm sides; content starts 18 mm down
+// so the header of later pages (10 mm from the top) never meets it; 24 mm kept
+// at the bottom for the footer, whose text sits about 10.5 mm above the edge,
+// clear of the strip many office printers can't reach.
+const PAD = 42;
+const PAGE_TOP = 50;
+const PAGE_BOTTOM = 68;
+const HEADER_TOP = 28;
+const FOOTER_BOTTOM = 30;
 const SIDEBAR_W = 150;
 const RECEIPT_W = 300;
 const A4_W = 595.28;
@@ -109,12 +173,13 @@ function makeStyles(t: PaperConfig) {
       : { borderTopWidth: 1, borderTopColor: '#e5e7eb' };
   const grandColor = t.totalStyle === 'filled' ? dark : '#1a1a1a';
 
+  const band = paperBands(t);
   return {
-    left, right, acc, dark, tint,
+    left, right, acc, dark, tint, band,
     s: StyleSheet.create({
       page: {
         fontFamily: font, fontSize: 9, color: '#1a1a1a', backgroundColor: '#ffffff',
-        paddingLeft: left, paddingRight: right, paddingTop: 40, paddingBottom: 56,
+        paddingLeft: left, paddingRight: right, paddingTop: PAGE_TOP, paddingBottom: PAGE_BOTTOM,
       },
       // Header (classic)
       header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: sp(20) },
@@ -130,7 +195,7 @@ function makeStyles(t: PaperConfig) {
       // Band
       band: {
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-        marginLeft: -left, marginRight: -right, marginTop: -40, paddingHorizontal: PAD, paddingVertical: sp(24),
+        marginLeft: -left, marginRight: -right, marginTop: -PAGE_TOP, paddingHorizontal: PAD, paddingTop: sp(24) + 10, paddingBottom: sp(24),
         backgroundColor: acc, marginBottom: sp(20),
       },
       bandName: { fontSize: 15, ...bold, color: '#ffffff' },
@@ -201,7 +266,7 @@ function makeStyles(t: PaperConfig) {
       sign: { marginTop: sp(18), width: 180, alignSelf: 'flex-end', alignItems: 'center' },
       signLine: { borderTopWidth: 1, borderTopColor: '#B7C0CC', width: '100%', marginBottom: 5 },
       signLabel: { fontSize: 8, color: '#606C7E', ...bold },
-      fixedHeader: { position: 'absolute', top: 16, left, right },
+      fixedHeader: { position: 'absolute', top: HEADER_TOP, left, right },
       fixedHeaderRow: {
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
         borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 6,
@@ -209,9 +274,23 @@ function makeStyles(t: PaperConfig) {
       fixedHeaderBiz: { fontSize: 7, ...bold, color: '#555' },
       fixedHeaderRef: { fontSize: 7, color: '#666' },
       footer: {
-        position: 'absolute', bottom: 20, left, right,
+        position: 'absolute', bottom: FOOTER_BOTTOM, left, right,
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
         borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 6, gap: 8,
+      },
+      // Bands (Classique, Minimal): the header on the first page and the footer
+      // on every page sit in a light tint across the full width
+      headBand: {
+        marginTop: -PAGE_TOP, marginLeft: -left, marginRight: -right, marginBottom: sp(18),
+        paddingTop: 38, paddingBottom: sp(16), paddingLeft: left, paddingRight: right,
+        backgroundColor: band ?? '#ffffff', borderBottomWidth: 1, borderBottomColor: '#E2E5EA',
+      },
+      headerInBand: { marginBottom: sp(14) },
+      footBand: {
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+        paddingTop: 10, paddingBottom: FOOTER_BOTTOM, paddingLeft: left, paddingRight: right,
+        backgroundColor: band ?? '#ffffff', borderTopWidth: 1, borderTopColor: '#E2E5EA',
       },
       footerSide:   { fontSize: 7, color: '#767676' },
       footerCenter: { fontSize: 7, color: '#767676', flex: 1, textAlign: 'center' },
@@ -245,7 +324,9 @@ export function InvoicePDFDocument({
 }: InvoicePDFProps) {
   registerPdfFonts();
   const t = normalizeConfig(template ?? DEFAULT_CONFIG);
-  const { s } = makeStyles(t);
+  const { s, band } = makeStyles(t);
+  // Cleaned again here: the PDF only draws the formats it knows
+  const notes = cleanRichText(invoice.notes);
 
   const subtotal      = lines.reduce((sum, li) => sum + li.qty * li.price, 0);
   const discountPct   = invoice.discountPct ?? 0;
@@ -431,8 +512,9 @@ export function InvoicePDFDocument({
     <Text style={s.totalWords}>{invoiceTotalMention(total, documentKind ?? (title === 'Devis' ? 'devis' : 'facture'))}</Text>
   );
 
+  // Kept on one page, unless notes make it too long for one: then it may continue
   const payment = (
-    <View style={s.paySection} wrap={false}>
+    <View style={s.paySection} wrap={!!notes}>
       <View style={s.payCol}>
         <Text style={s.blockLabel}>Modes de paiement</Text>
         {paymentMethods.length > 0
@@ -440,10 +522,10 @@ export function InvoicePDFDocument({
           : <Text style={s.payMethod}>Contactez-nous pour les modalit{'é'}s de paiement.</Text>}
       </View>
       <View style={s.payCol}>
-        <Text style={s.blockLabel}>Notes</Text>
-        <Text style={s.notesText}>
-          Merci pour votre confiance. Conditions de paiement : {paymentTerms}.
-        </Text>
+        <Text style={s.blockLabel}>{notes ? 'Notes et conditions' : 'Notes'}</Text>
+        {notes
+          ? <PdfRichText doc={notes} style={s.notesText} />
+          : <Text style={s.notesText}>Merci pour votre confiance. Conditions de paiement : {paymentTerms}.</Text>}
       </View>
     </View>
   );
@@ -492,11 +574,18 @@ export function InvoicePDFDocument({
     case 'minimal':
       top = (
         <>
-          <View style={s.minTop}>
-            <Text style={s.minTitle}>{title}</Text>
-            <Text style={s.minNum}>#{invoiceRef(invoice)}</Text>
-          </View>
-          <View style={s.minRule} />
+          {band ? (
+            <View style={[s.headBand, s.minTop]}>
+              <Text style={s.minTitle}>{title}</Text>
+              <Text style={s.minNum}>#{invoiceRef(invoice)}</Text>
+            </View>
+          ) : (<>
+            <View style={s.minTop}>
+              <Text style={s.minTitle}>{title}</Text>
+              <Text style={s.minNum}>#{invoiceRef(invoice)}</Text>
+            </View>
+            <View style={s.minRule} />
+          </>)}
           <View style={s.parties}>
             <View style={s.partiesLeft}>{sellerBlock}</View>
             <View style={s.partiesLeft}>{clientBlock}</View>
@@ -539,7 +628,7 @@ export function InvoicePDFDocument({
     default:
       top = (
         <>
-          <View style={s.header}>
+          <View style={band ? [s.headBand, s.header, s.headerInBand] : s.header}>
             <View style={{ flex: 1, paddingRight: 16 }}>{sellerBlock}</View>
             <View>
               <Text style={s.docTitle}>{title}</Text>
@@ -593,7 +682,7 @@ export function InvoicePDFDocument({
         } />
 
         {/* ── Fixed footer — repeats on every page ── */}
-        <View fixed style={s.footer}>
+        <View fixed style={band ? s.footBand : s.footer}>
           <Text style={s.footerSide}>{bizName}</Text>
           <Text style={s.footerCenter}>{t.footer.trim() || 'Facture générée via Billio'}</Text>
           <Text style={s.footerSide} render={({ pageNumber, totalPages }) =>

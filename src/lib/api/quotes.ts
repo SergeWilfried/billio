@@ -71,6 +71,8 @@ export async function updateQuote(
   orgId: string,
   id: string,
   patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount'>> & { invoiceId?: string | null },
+  /** Only when the quote still links to this invoice (clearing a link that may have changed meanwhile) */
+  opts: { onlyIfInvoiceId?: string } = {},
 ): Promise<void> {
   if (MOCK) return;
   const dbPatch: Record<string, unknown> = {};
@@ -81,7 +83,9 @@ export async function updateQuote(
   if (patch.valid   !== undefined) dbPatch.valid_until  = patch.valid;
   if (patch.amount  !== undefined) dbPatch.amount       = patch.amount;
   if (patch.invoiceId !== undefined) dbPatch.invoice_id = patch.invoiceId;
-  const { error } = await supabase.from('quotes').update(dbPatch).eq('org_id', orgId).eq('id', id);
+  let query = supabase.from('quotes').update(dbPatch).eq('org_id', orgId).eq('id', id);
+  if (opts.onlyIfInvoiceId) query = query.eq('invoice_id', opts.onlyIfInvoiceId);
+  const { error } = await query;
   if (error) throw error;
 }
 

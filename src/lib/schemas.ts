@@ -1,3 +1,4 @@
+import type { RichDoc } from '@/lib/rich-text';
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +45,8 @@ export const invoiceSchema = z.object({
   /** « Responsable »: the team member in charge (PRO-172), set and named by the database */
   ownerId:     z.string().optional(),
   ownerName:   z.string().optional(),
+  /** Notes and conditions (PRO-167): rich text, cleaned by cleanRichText; frozen once issued */
+  notes:       z.custom<RichDoc>().optional(),
 });
 
 export const serviceWithholdingScenarioSchema = z.enum([

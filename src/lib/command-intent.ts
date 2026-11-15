@@ -27,7 +27,12 @@ export const withIntent = (intent: CommandIntent) => ({ state: { intent } });
  * `ready` (e.g. once the page's data has loaded). Return false from `handle`
  * to leave an intent this page doesn't take.
  */
-export function useCommandIntent(handle: (intent: CommandIntent) => boolean | void, ready = true) {
+/**
+ * `handle` returns false when it can't act yet (the intent stays), or
+ * 'navigated' when it moved to another page: then the intent's state is not
+ * cleared here, which would navigate back.
+ */
+export function useCommandIntent(handle: (intent: CommandIntent) => boolean | void | 'navigated', ready = true) {
   const location = useLocation();
   const navigate = useNavigate();
   const seen = useRef<string | null>(null);
@@ -46,7 +51,8 @@ export function useCommandIntent(handle: (intent: CommandIntent) => boolean | vo
     if (!ready || !pending.current) return;
     const todo = pending.current;
     pending.current = null;
-    if (handleRef.current(todo) === false) return;
+    const result = handleRef.current(todo);
+    if (result === false || result === 'navigated') return;
     // Same page, no state: Back won't reopen the panel
     if (readIntent(location.state)) navigate(location.pathname + location.search, { replace: true, state: null });
   }, [location, navigate, ready]);
