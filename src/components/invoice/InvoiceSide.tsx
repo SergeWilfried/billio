@@ -61,6 +61,8 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
   useEffect(() => {
     if (!orgId) return;
     let live = true;
+    // Back to « … » while it reloads, rather than the previous balance
+    setClientCredits(null);
     fetchClientCreditNotes(orgId, invoice.client)
       .then(c => { if (live) setClientCredits(c); })
       .catch(err => { console.error('[fetchClientCreditNotes]', err); if (live) setClientCredits('error'); });

@@ -15,6 +15,7 @@ import type { Feature } from '@/lib/plans';
 // first visit, so subsequent navigations are instant.
 const LandingPage            = lazy(() => import('./pages/LandingPage'));
 const InvoiceGeneratorPage   = lazy(() => import('./pages/InvoiceGeneratorPage'));
+const InvoiceEditorPage      = lazy(() => import('./pages/InvoiceEditorPage'));
 const AuthPage               = lazy(() => import('./pages/AuthPage'));
 const ResetPasswordPage      = lazy(() => import('./pages/ResetPasswordPage'));
 const InvitePage             = lazy(() => import('./pages/InvitePage'));
@@ -109,6 +110,8 @@ export default function App() {
           <Route element={<OnboardingGuard />}>
             <Route path="/dashboard" element={UI_V2 ? <DashboardV2Page /> : <DashboardPage />} />
             <Route path="/invoices" element={<SalesPage />} />
+            {UI_V2 && <Route path="/invoices/new" element={<InvoiceEditorPage />} />}
+            {UI_V2 && <Route path="/invoices/:id/edit" element={<InvoiceEditorPage />} />}
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/clients"  element={<Navigate to="/contacts" replace />} />

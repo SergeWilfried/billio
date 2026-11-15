@@ -13,6 +13,7 @@ import { creditNoteRef, invoiceRef, isIssuedLockedError } from '@/lib/invoice-nu
 import { createActivity } from '@/lib/api/activities';
 import { deleteInvoiceEntries, updateInvoiceIssuanceEntry, recordCreditNoteEntry, recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { settleInvoicePayment } from '@/lib/api/payments';
+import { updateQuote } from '@/lib/api/quotes';
 import { invoiceBalance, daysOverdue, todayISO } from '@/lib/invoice-status';
 import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import { filledLines, lineItemsError } from '@/lib/line-validation';
@@ -83,7 +84,7 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, quotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
+  const { invoices, quotes, setQuotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
   const writable = canWrite(userRole);
   const compliance = useComplianceGuard();
   const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
@@ -317,6 +318,12 @@ export default function InvoicePage() {
       return;
     }
     deleteInvoiceEntries(orgId, invoice.id).catch(err => console.error('[deleteInvoiceEntries] failed:', err));
+    // A draft started from a quote (PRO-167): the quote can be invoiced again
+    for (const q of quotes.filter(q => q.invoiceId === invoice.id && q.status !== 'invoiced')) {
+      updateQuote(orgId, q.id, { invoiceId: null })
+        .then(() => setQuotes(prev => prev.map(x => x.id === q.id ? { ...x, invoiceId: undefined } : x)))
+        .catch(err => console.error('[updateQuote] unlink failed:', err));
+    }
     setInvoices(prev => prev.filter(i => i.id !== invoice.id));
     showToast('Facture supprimée');
     navigate('/invoices');
@@ -503,7 +510,7 @@ export default function InvoicePage() {
         </button>
         {writable && invoice.status === 'draft' && (<>
           {canEdit && (
-            <button className="btn" onClick={openEdit}>
+            <button className="btn" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
               <Icon name="edit" ariaHidden /> Modifier
             </button>
           )}
