@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
+import { amountOnlyVat, amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
 import { documentAmounts } from '@/lib/document-amounts';
 import { docRows, invoiceRows } from '@/lib/sales-tables';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
@@ -108,5 +108,17 @@ describe('vatFromSalesEntry', () => {
     expect(vatFromSalesEntry([entry('VE-F-1', [{ acct: '411', d: 100, c: 0 }, { acct: '706', d: 0, c: 100 }])], 'F-1')).toBe(false);
     // A credit note's own entry or another invoice's doesn't count; none found: unknown
     expect(vatFromSalesEntry([entry('AV-AV-1', [{ acct: '443', d: 18, c: 0 }]), entry('VE-F-2', [{ acct: '443', d: 0, c: 18 }])], 'F-1')).toBeNull();
+  });
+});
+
+describe('amountOnlyVat', () => {
+  it('never falls back to today’s regime: unknown until the user says, when the sales entry is missing or unreadable', () => {
+    // Regime changed since the invoice: the entry still decides
+    expect(amountOnlyVat(true, null)).toBe(true);
+    expect(amountOnlyVat(false, true)).toBe(false);
+    // Entry missing or unreadable: unknown until chosen
+    expect(amountOnlyVat(null, null)).toBeNull();
+    expect(amountOnlyVat(null, false)).toBe(false);
+    expect(amountOnlyVat(null, true)).toBe(true);
   });
 });

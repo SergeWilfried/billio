@@ -27,7 +27,7 @@ import { fetchInvoiceEntries, recordCreditNoteEntry } from '@/lib/api/accounting
 import { createActivity } from '@/lib/api/activities';
 import {
   CREDIT_NATURES, amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, natureLabel,
-  reconcileFinalCredit, vatFromSalesEntry,
+  amountOnlyVat, reconcileFinalCredit, vatFromSalesEntry,
   type CreditNature,
 } from '@/lib/credit-note';
 import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
@@ -64,6 +64,8 @@ export default function CreditNoteEditorPage() {
   const [amt, setAmt] = useState(0);
   // Its VAT, from its sales entry (null: not found, or not readable for this role)
   const [entryVat, setEntryVat] = useState<boolean | null>(null);
+  // ...and when that entry can't be read, the user says (null: not said yet)
+  const [vatChoice, setVatChoice] = useState<boolean | null>(null);
   const [nature, setNature] = useState<CreditNature | ''>('');
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(() => isoDay(new Date()));
@@ -71,9 +73,9 @@ export default function CreditNoteEditorPage() {
   const [baseline, setBaselineState] = useState('');
   const baselineRef = useRef('');
   const setBaseline = (v: string) => { baselineRef.current = v; setBaselineState(v); };
-  const snapOf = (v: { qty: Record<string, number>; amt: number; nature: string; reason: string; date: string }) =>
-    JSON.stringify({ qty: Object.entries(v.qty).filter(([, q]) => q > 0).sort(), amt: v.amt, nature: v.nature, reason: v.reason.trim(), date: v.date });
-  const snapshot = snapOf({ qty, amt, nature, reason, date });
+  const snapOf = (v: { qty: Record<string, number>; amt: number; vat: boolean | null; nature: string; reason: string; date: string }) =>
+    JSON.stringify({ qty: Object.entries(v.qty).filter(([, q]) => q > 0).sort(), amt: v.amt, vat: v.vat, nature: v.nature, reason: v.reason.trim(), date: v.date });
+  const snapshot = snapOf({ qty, amt, vat: vatChoice, nature, reason, date });
   const dirty = ready && snapshot !== baseline;
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -121,9 +123,14 @@ export default function CreditNoteEditorPage() {
         q[l.sourceId] = Math.min(want, cap);
       }
       if (reduced) showToast('Certaines quantités dépassaient ce qui reste à créditer et ont été réduites.', true);
-      const a = cn && cn.lines.length === 0 ? cn.amount : 0;
+      // Invoice without lines: the draft's amount, and the VAT it was written with
+      // (its one line holds the amount before tax)
+      const noLines = filledLines(ls).length === 0;
+      const a = cn && noLines ? cn.amount : 0;
+      const vc = cn && noLines && cn.lines.length > 0 ? cn.lines[0].price !== cn.amount : null;
       setDraft(cn);
       setAmt(a);
+      setVatChoice(vc);
       setInvoiceId(inv.id);
       setInvLines(filledLines(ls));
       setIssuedNotes(notes.filter(n => n.id !== cn?.id));
@@ -136,7 +143,7 @@ export default function CreditNoteEditorPage() {
       // What the draft holds as saved; a reduced quantity counts as a change to save
       const savedQty: Record<string, number> = {};
       for (const l of cn?.lines ?? []) if (l.sourceId) savedQty[l.sourceId] = (savedQty[l.sourceId] ?? 0) + l.qty;
-      setBaseline(snapOf({ qty: savedQty, amt: a, nature: cn?.nature ?? '', reason: cn?.reason ?? '', date: d }));
+      setBaseline(snapOf({ qty: savedQty, amt: a, vat: vc, nature: cn?.nature ?? '', reason: cn?.reason ?? '', date: d }));
       loadedFor.current = loadKey;
       leaveOk.current = false;
       setReady(true);
@@ -155,10 +162,14 @@ export default function CreditNoteEditorPage() {
   // ── What can be credited, and the totals ───────────────────────────────────
   const left = useMemo(() => creditableQty(invLines, issuedNotes), [invLines, issuedNotes]);
   const lines = useMemo(() => creditLines(invLines, qty), [invLines, qty]);
-  const vatCharged = invoice
-    ? (invLines.length === 0 && entryVat !== null ? entryVat : invoiceChargedVat(invoice, invLines, chargesVat(orgSettings.taxRegime)))
-    : false;
   const amountOnly = invLines.length === 0;
+  // Without lines, the invoice's VAT can't be read from its lines and total:
+  // its sales entry says, or the user does (never today's regime alone)
+  const amountVat = amountOnlyVat(entryVat, vatChoice);
+  const vatUnknown = amountOnly && amountVat === null;
+  const vatCharged = invoice
+    ? (amountOnly ? amountVat === true : invoiceChargedVat(invoice, invLines, chargesVat(orgSettings.taxRegime)))
+    : false;
   const max = invoice ? creditableAmount(invoice, issuedNotes) : 0;
   // The credit that empties every line takes exactly what is left (rounding)
   const emptiesInvoice = !amountOnly && lines.length > 0 && invLines.every(l => (qty[l.id] ?? 0) >= (left[l.id] ?? 0));
@@ -168,7 +179,9 @@ export default function CreditNoteEditorPage() {
       { emptiesInvoice, left: max, chargedVat: vatCharged, tolerance: 2 * (issuedNotes.length + 1) });
   const bal = invoice ? invoiceBalance(invoice, payments, issuedNotes) : { paid: 0, credited: 0, balance: 0 };
   const dueAfter = Math.max(0, bal.balance - totals.total);
-  const problem = creditIssueProblem({ nature, reason, total: totals.total, max, paid: bal.paid });
+  const problem = vatUnknown
+    ? 'Précisez si la facture d’origine portait la TVA.'
+    : creditIssueProblem({ nature, reason, total: totals.total, max, paid: bal.paid });
   const setLineQty = (lid: string, raw: string) => {
     const v = Math.max(0, Math.min(left[lid] ?? 0, parseFloat(raw) || 0));
     setQty(prev => ({ ...prev, [lid]: v }));
@@ -184,6 +197,7 @@ export default function CreditNoteEditorPage() {
       ? { ok: true, text: amountOnly ? `Montant : ${fmt(totals.total)} F CFA` : `${lines.length} ligne${lines.length > 1 ? 's' : ''} créditée${lines.length > 1 ? 's' : ''}` }
       : { ok: false, text: amountOnly ? 'Indiquez le montant à créditer' : 'Indiquez au moins une quantité à créditer' },
     totals.total > max ? { ok: false, text: `Dépasse ce qui reste à créditer (${fmt(max)} F CFA)` } : { ok: true, text: `Reste à créditer sur la facture : ${fmt(max)} F CFA` },
+    ...(vatUnknown ? [{ ok: false, text: 'Précisez si la facture d’origine portait la TVA' }] : []),
   ];
   const blocking = checks.filter(c => !c.ok).length;
 
@@ -192,7 +206,11 @@ export default function CreditNoteEditorPage() {
   const busyRef = useRef(false);
   const fields = (): CreditNoteFields | null => invoice ? {
     invoiceId: invoice.id, subject: `Avoir sur ${invoiceRef(invoice)}`, client: invoice.client, issued: date,
-    amount: totals.total, reason: reason.trim(), nature: nature || undefined, lines, discountPct: amountOnly ? 0 : invoice.discountPct ?? 0,
+    amount: totals.total, reason: reason.trim(), nature: nature || undefined, discountPct: amountOnly ? 0 : invoice.discountPct ?? 0,
+    // An amount-only note keeps its amount before tax as one line (no source line): its PDF and VAT stay as issued
+    lines: amountOnly
+      ? (totals.total > 0 ? [{ id: 'montant', desc: `Montant crédité sur ${invoiceRef(invoice)}`, unit: 'forfait', qty: 1, price: totals.net }] : [])
+      : lines,
   } : null;
 
   async function run(kind: 'save' | 'issue' | 'pdf' | 'delete', fn: () => Promise<void>) {
@@ -466,6 +484,17 @@ export default function CreditNoteEditorPage() {
                   <td colSpan={5}>
                     <label htmlFor="cn-amount" className="cn-desc">Montant TTC à créditer</label>
                     <div className="cn-sub">Cette facture n’a pas de lignes enregistrées : l’avoir porte sur un montant (au plus {fmt(max)} F CFA).</div>
+                    {entryVat === null && (
+                      <label className="cn-vat">
+                        <span>La facture d’origine portait-elle la TVA ?</span>
+                        <select className={`ie-field${vatChoice === null ? ' empty' : ''}`} value={vatChoice === null ? '' : vatChoice ? 'yes' : 'no'} disabled={locked}
+                          onChange={e => setVatChoice(e.target.value === '' ? null : e.target.value === 'yes')}>
+                          <option value="">À préciser</option>
+                          <option value="yes">Oui ({Math.round(VAT_RATE * 100)} %)</option>
+                          <option value="no">Non</option>
+                        </select>
+                      </label>
+                    )}
                   </td>
                   <td className="r">
                     <input id="cn-amount" className="ie-field num ie-price" type="number" min="0" max={max} step="1" value={amt || ''} placeholder="0" disabled={locked}

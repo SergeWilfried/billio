@@ -64,6 +64,15 @@ export function vatFromSalesEntry(entries: Pick<JournalEntry, 'piece' | 'lines'>
   return sale.lines.some(l => l.acct.startsWith('443') && l.c > 0);
 }
 
+/**
+ * The VAT of an amount-only credit note: the invoice's sales entry when it
+ * can be read, else what the user said; null while unknown (the note can't be
+ * issued: today's regime may not be the one the invoice was issued under).
+ */
+export function amountOnlyVat(entryVat: boolean | null, choice: boolean | null): boolean | null {
+  return entryVat ?? choice;
+}
+
 /** Totals of the credit note: the invoice's discount and VAT applied to the credited lines. */
 export function creditTotals(lines: CreditLine[], invoice: { discountPct?: number }, chargedVat: boolean): EditorTotals {
   return editorTotals(lines, invoice.discountPct ?? 0, chargedVat);

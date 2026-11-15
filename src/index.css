@@ -2551,6 +2551,7 @@ html[data-ui="v2"] .page-section { display: none; }
 .cn-situation .due dt { color: var(--color-text-primary); }
 .cn-note { margin: 4px 0 0; font-size: 12px; color: var(--color-text-secondary); }
 .cn-entry { width: 360px; }
+.cn-vat { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); }
 .cn-entry .iv-lines { width: 100%; }
 .iv-credits { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; }
 .iv-credits li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: baseline; }

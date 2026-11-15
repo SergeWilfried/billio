@@ -109,10 +109,22 @@ begin
       using errcode = 'P0001', hint = 'exceeds_invoice_total';
   end if;
 
-  -- Per line, still under the invoice lock: what this note credits on each
-  -- source line, plus what issued notes already credited, stays within the
-  -- line's quantity. A source line no longer on the invoice (its lines were
-  -- replaced) is left to the amount check above.
+  -- Per line, still under the invoice lock: every credited line must still be
+  -- on the invoice (a note written before the invoice's lines were replaced
+  -- is refused: reopen it)...
+  if exists (
+    select 1
+      from jsonb_array_elements(new.lines) l
+     where l ->> 'sourceId' is not null
+       and not exists (select 1 from line_items li
+                        where li.org_id = new.org_id and li.invoice_id = new.invoice_id and li.id::text = l ->> 'sourceId')
+  ) then
+    raise exception 'A credited line is no longer on the invoice'
+      using errcode = 'P0001', hint = 'stale_line';
+  end if;
+
+  -- ...and what this note credits on each line, plus what issued notes
+  -- already credited, stays within the line's quantity.
   if exists (
     select 1
       from (select l ->> 'sourceId' as src, sum((l ->> 'qty')::numeric) as qty
@@ -269,6 +281,9 @@ begin
   if coalesce(auth.role(), '') not in ('authenticated', 'anon') or v_inv is null then
     return coalesce(new, old);
   end if;
+  -- The invoice lock that issuing a credit note takes: a line change and an
+  -- issue on the same invoice happen one after the other, never interleaved
+  perform 1 from invoices where org_id = v_org and id = v_inv for update;
   if exists (select 1 from credit_notes c where c.org_id = v_org and c.invoice_id = v_inv and c.status = 'issued')
      or (tg_op = 'UPDATE' and old.invoice_id is not null and old.invoice_id is distinct from new.invoice_id
          and exists (select 1 from credit_notes c where c.org_id = old.org_id and c.invoice_id = old.invoice_id and c.status = 'issued')) then

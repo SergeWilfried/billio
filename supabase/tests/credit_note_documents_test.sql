@@ -190,6 +190,29 @@ begin
     failures := failures + 1; raise warning 'line added to a credited invoice';
   exception when sqlstate 'BL002' then null;
   end;
+  -- A note written before the invoice's lines were replaced (stale editor): refused at issue
+  insert into invoices (id, org_id, amount) values ('F-5', a, 200);
+  insert into line_items values ('00000000-0000-0000-0000-0000000000e1', a, 'F-5', 1), ('00000000-0000-0000-0000-0000000000e2', a, 'F-5', 1);
+  insert into credit_notes (id, org_id, invoice_id, amount, status, nature, reason, lines)
+    values ('AV-S1', a, 'F-5', 100, 'draft', 'COR', 'ligne A', '[{"desc":"A","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-0000000000e1"}]');
+  -- Corrected meanwhile (no credit note issued yet): line A gets a new id
+  delete from line_items where id = '00000000-0000-0000-0000-0000000000e1';
+  insert into line_items values ('00000000-0000-0000-0000-0000000000e3', a, 'F-5', 1);
+  begin
+    update credit_notes set status = 'issued' where id = 'AV-S1';
+    failures := failures + 1; raise warning 'a note on a replaced line was issued';
+  exception when raise_exception then null;
+  end;
+  -- Written again on the new line: issued, and line A can't be credited a second time
+  update credit_notes set lines = '[{"desc":"A","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-0000000000e3"}]' where id = 'AV-S1';
+  update credit_notes set status = 'issued' where id = 'AV-S1';
+  begin
+    insert into credit_notes (id, org_id, invoice_id, amount, status, nature, reason, lines)
+      values ('AV-S2', a, 'F-5', 100, 'issued', 'COR', 'ligne A encore', '[{"desc":"A","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-0000000000e3"}]');
+    failures := failures + 1; raise warning 'replacement line credited twice';
+  exception when raise_exception then null;
+  end;
+
   -- An invoice without credit notes can still be corrected
   insert into invoices (id, org_id, amount) values ('F-4', a, 50);
   insert into line_items values ('00000000-0000-0000-0000-00000000000d', a, 'F-4', 1);
