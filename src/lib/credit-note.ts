@@ -73,6 +73,33 @@ export function amountOnlyVat(entryVat: boolean | null, choice: boolean | null):
   return entryVat ?? choice;
 }
 
+/**
+ * The one line an amount-only note keeps: its amount before tax. Only once
+ * its VAT is known; while « À préciser » it keeps none, so a reopened draft is
+ * still « À préciser » rather than read as « Non ».
+ */
+export function amountOnlyLines(opts: { total: number; net: number; vatKnown: boolean; desc: string }): CreditLine[] {
+  if (opts.total <= 0 || !opts.vatKnown) return [];
+  return [{ id: 'montant', desc: opts.desc, unit: 'forfait', qty: 1, price: opts.net }];
+}
+
+/** What a reopened amount-only draft said about VAT: its line holds the amount before tax; none, unknown. */
+export function vatChoiceFromDraft(cn: Pick<CreditNote, 'lines' | 'amount'>): boolean | null {
+  const l = cn.lines.find(x => !x.sourceId);
+  return l ? l.price * l.qty !== cn.amount : null;
+}
+
+/**
+ * Whether a credit note carried VAT, from its own accounting entry (piece
+ * AV-<id>, 443 debited); null when not found. For older amount-only notes,
+ * issued with the regime of their day.
+ */
+export function vatFromCreditEntry(entries: Pick<JournalEntry, 'piece' | 'lines'>[], creditNoteId: string): boolean | null {
+  const e = entries.find(x => x.piece === `AV-${creditNoteId}`);
+  if (!e) return null;
+  return e.lines.some(l => l.acct.startsWith('443') && l.d > 0);
+}
+
 /** Totals of the credit note: the invoice's discount and VAT applied to the credited lines. */
 export function creditTotals(lines: CreditLine[], invoice: { discountPct?: number }, chargedVat: boolean): EditorTotals {
   return editorTotals(lines, invoice.discountPct ?? 0, chargedVat);

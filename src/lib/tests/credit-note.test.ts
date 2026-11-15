@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { amountOnlyVat, amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
+import { amountOnlyLines, amountOnlyVat, amountTotals, vatChoiceFromDraft, vatFromCreditEntry, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
 import { documentAmounts } from '@/lib/document-amounts';
 import { docRows, invoiceRows } from '@/lib/sales-tables';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
@@ -120,5 +120,27 @@ describe('amountOnlyVat', () => {
     expect(amountOnlyVat(null, null)).toBeNull();
     expect(amountOnlyVat(null, false)).toBe(false);
     expect(amountOnlyVat(null, true)).toBe(true);
+  });
+});
+
+describe('amount-only drafts keep « À préciser »', () => {
+  it('stores no line while the VAT is unknown, so a reopened draft is still unknown', () => {
+    const lines = amountOnlyLines({ total: 10_000, net: 10_000, vatKnown: false, desc: 'Montant' });
+    expect(lines).toEqual([]);
+    expect(vatChoiceFromDraft({ lines, amount: 10_000 })).toBeNull();
+  });
+  it('reopens a known choice as it was', () => {
+    const yes = amountOnlyLines({ total: 10_000, net: 8_475, vatKnown: true, desc: 'Montant' });
+    expect(vatChoiceFromDraft({ lines: yes, amount: 10_000 })).toBe(true);
+    const no = amountOnlyLines({ total: 10_000, net: 10_000, vatKnown: true, desc: 'Montant' });
+    expect(vatChoiceFromDraft({ lines: no, amount: 10_000 })).toBe(false);
+  });
+});
+
+describe('vatFromCreditEntry', () => {
+  it('reads an older note’s VAT from its own entry (the regime of its day)', () => {
+    expect(vatFromCreditEntry([{ piece: 'AV-AV-0003', lines: [{ acct: '706', d: 8_475, c: 0 }, { acct: '443', d: 1_525, c: 0 }, { acct: '411', d: 0, c: 10_000 }] }], 'AV-0003')).toBe(true);
+    expect(vatFromCreditEntry([{ piece: 'AV-AV-0003', lines: [{ acct: '706', d: 10_000, c: 0 }, { acct: '411', d: 0, c: 10_000 }] }], 'AV-0003')).toBe(false);
+    expect(vatFromCreditEntry([{ piece: 'VE-F-1', lines: [{ acct: '443', d: 0, c: 18 }] }], 'AV-0003')).toBeNull();
   });
 });

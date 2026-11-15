@@ -27,7 +27,7 @@ import { fetchInvoiceEntries, recordCreditNoteEntry } from '@/lib/api/accounting
 import { createActivity } from '@/lib/api/activities';
 import {
   CREDIT_NATURES, amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, natureLabel,
-  amountOnlyVat, reconcileFinalCredit, vatFromSalesEntry,
+  amountOnlyLines, amountOnlyVat, reconcileFinalCredit, vatChoiceFromDraft, vatFromSalesEntry,
   type CreditNature,
 } from '@/lib/credit-note';
 import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
@@ -127,7 +127,7 @@ export default function CreditNoteEditorPage() {
       // (its one line holds the amount before tax)
       const noLines = filledLines(ls).length === 0;
       const a = cn && noLines ? cn.amount : 0;
-      const vc = cn && noLines && cn.lines.length > 0 ? cn.lines[0].price !== cn.amount : null;
+      const vc = cn && noLines ? vatChoiceFromDraft(cn) : null;
       setDraft(cn);
       setAmt(a);
       setVatChoice(vc);
@@ -209,7 +209,7 @@ export default function CreditNoteEditorPage() {
     amount: totals.total, reason: reason.trim(), nature: nature || undefined, discountPct: amountOnly ? 0 : invoice.discountPct ?? 0,
     // An amount-only note keeps its amount before tax as one line (no source line): its PDF and VAT stay as issued
     lines: amountOnly
-      ? (totals.total > 0 ? [{ id: 'montant', desc: `Montant crédité sur ${invoiceRef(invoice)}`, unit: 'forfait', qty: 1, price: totals.net }] : [])
+      ? amountOnlyLines({ total: totals.total, net: totals.net, vatKnown: amountVat !== null, desc: `Montant crédité sur ${invoiceRef(invoice)}` })
       : lines,
   } : null;
 
