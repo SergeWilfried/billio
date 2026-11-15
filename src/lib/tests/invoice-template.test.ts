@@ -117,6 +117,21 @@ describe('invoice PDF', () => {
     expect(buf.length).toBeGreaterThan(plain.length);
   }, 30000);
 
+  // Long notes continue on the next page instead of disappearing
+  it('lets long notes run onto more pages', async () => {
+    const pages = (b: Buffer) => (b.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length;
+    const para = (text: string) => ({ type: 'paragraph' as const, content: [{ type: 'text' as const, text }] });
+    const long = { type: 'doc' as const, content: [
+      ...Array.from({ length: 80 }, (_, i) => para(`Condition ${i + 1} : paiement par virement, référence de la facture rappelée.`)),
+      { type: 'bulletList' as const, content: [{ type: 'listItem' as const, content: [{ type: 'paragraph' as const, content: Array.from({ length: 40 }, (_, i) => i % 2 ? { type: 'hardBreak' as const } : { type: 'text' as const, text: `Ligne ${i}` }) }] }] },
+    ] };
+    const short = { ...props, lines: props.lines.slice(0, 3) };
+    const withNotes = await renderToBuffer(createElement(InvoicePDFDocument, { ...short, invoice: { ...short.invoice, notes: long } }) as Parameters<typeof renderToBuffer>[0]);
+    const without = await renderToBuffer(createElement(InvoicePDFDocument, short) as Parameters<typeof renderToBuffer>[0]);
+    expect(pages(without)).toBe(1);
+    expect(pages(withNotes)).toBeGreaterThan(1);
+  }, 30000);
+
   // Bands change the drawing (a filled header and footer), on every page
   it('draws the bands only when they are on', async () => {
     const classic = PRESETS[0].config;

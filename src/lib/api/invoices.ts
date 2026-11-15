@@ -72,7 +72,12 @@ export async function createInvoice(
 }
 
 /** Returns the invoice's first issue time and legal number, as the database set them. */
-export async function updateInvoice(orgId: string, id: string, patch: Partial<Pick<Invoice, 'status' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'discountPct'>> & { notes?: RichDoc | null }): Promise<{ firstIssuedAt?: string; number?: string; issuedByName?: string }> {
+export async function updateInvoice(
+  orgId: string, id: string,
+  patch: Partial<Pick<Invoice, 'status' | 'subject' | 'client' | 'issued' | 'due' | 'amount' | 'discountPct'>> & { notes?: RichDoc | null },
+  /** Only while the stored invoice is still a draft (the editor's saves): no row otherwise, and it throws */
+  opts: { onlyDraft?: boolean } = {},
+): Promise<{ firstIssuedAt?: string; number?: string; issuedByName?: string }> {
   if (MOCK) return patch.status && patch.status !== 'draft' ? { number: mockNumber() } : {};
   const dbPatch: Record<string, unknown> = {};
   if (patch.status      !== undefined) dbPatch.status       = patch.status;
@@ -83,8 +88,9 @@ export async function updateInvoice(orgId: string, id: string, patch: Partial<Pi
   if (patch.amount      !== undefined) dbPatch.amount       = patch.amount;
   if (patch.discountPct !== undefined) dbPatch.discount_pct = patch.discountPct;
   if (patch.notes       !== undefined) dbPatch.notes        = patch.notes;
-  const { data, error } = await supabase.from('invoices').update(dbPatch).eq('org_id', orgId).eq('id', id)
-    .select('first_issued_at, number, issued_by_name').maybeSingle();
+  let query = supabase.from('invoices').update(dbPatch).eq('org_id', orgId).eq('id', id);
+  if (opts.onlyDraft) query = query.eq('status', 'draft');
+  const { data, error } = await query.select('first_issued_at, number, issued_by_name').maybeSingle();
   if (error) throw error;
   // No row: the invoice was deleted meanwhile, or this user can't change it
   if (!data) throw new Error(`invoice ${id} not found or not writable`);

@@ -322,8 +322,8 @@ export default function InvoicePage() {
     deleteInvoiceEntries(orgId, invoice.id).catch(err => console.error('[deleteInvoiceEntries] failed:', err));
     // A draft started from a quote (PRO-167): the quote can be invoiced again
     for (const q of quotes.filter(q => q.invoiceId === invoice.id && q.status !== 'invoiced')) {
-      updateQuote(orgId, q.id, { invoiceId: null })
-        .then(() => setQuotes(prev => prev.map(x => x.id === q.id ? { ...x, invoiceId: undefined } : x)))
+      updateQuote(orgId, q.id, { invoiceId: null }, { onlyIfInvoiceId: invoice.id })
+        .then(() => setQuotes(prev => prev.map(x => x.id === q.id && x.invoiceId === invoice.id ? { ...x, invoiceId: undefined } : x)))
         .catch(err => console.error('[updateQuote] unlink failed:', err));
     }
     setInvoices(prev => prev.filter(i => i.id !== invoice.id));

@@ -7,6 +7,18 @@ import { safeHref } from '@/lib/rich-text';
 
 export const NOTES_MAX_CHARS = 2000;
 
+/**
+ * The database keeps notes up to 20 000 characters of JSON (invoices_notes_shape).
+ * Its text form adds a space after each « : » and « , », so the editor keeps a
+ * margin and counts those spaces too.
+ */
+export const NOTES_MAX_BYTES = 19000;
+export function notesStoredSize(doc: unknown): number {
+  const json = JSON.stringify(doc);
+  const separators = (json.match(/[:,]/g) ?? []).length;
+  return new TextEncoder().encode(json).length + separators;
+}
+
 export const notesExtensions = [
   StarterKit.configure({
     heading: { levels: [3] },

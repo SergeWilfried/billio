@@ -49,7 +49,7 @@ function PdfRichBlocks({ blocks, style, linkColor }: { blocks: RichBlock[]; styl
           return (
             <View key={i}>
               {b.content.map((item, j) => (
-                <View key={j} style={{ flexDirection: 'row' }} wrap={false}>
+                <View key={j} style={{ flexDirection: 'row' }}>
                   <Text style={[style, { width: 10 }]}>{b.type === 'orderedList' ? `${j + 1}.` : '•'}</Text>
                   <View style={{ flex: 1 }}><PdfRichBlocks blocks={item.content} style={style} linkColor={linkColor} /></View>
                 </View>
@@ -512,8 +512,9 @@ export function InvoicePDFDocument({
     <Text style={s.totalWords}>{invoiceTotalMention(total, documentKind ?? (title === 'Devis' ? 'devis' : 'facture'))}</Text>
   );
 
+  // Kept on one page, unless notes make it too long for one: then it may continue
   const payment = (
-    <View style={s.paySection} wrap={false}>
+    <View style={s.paySection} wrap={!!notes}>
       <View style={s.payCol}>
         <Text style={s.blockLabel}>Modes de paiement</Text>
         {paymentMethods.length > 0

@@ -9,6 +9,12 @@ import { filledLines } from '@/lib/line-validation';
 import type { Invoice, LineItem } from '@/lib/schemas';
 import type { RichDoc } from '@/lib/rich-text';
 
+/** The draft was issued meanwhile (elsewhere): the editor's changes were not saved. */
+export class DraftIssuedError extends Error {
+  readonly invoiceId: string;
+  constructor(invoiceId: string) { super(`invoice ${invoiceId} is no longer a draft`); this.name = 'DraftIssuedError'; this.invoiceId = invoiceId; }
+}
+
 export interface DraftFields {
   client: string;
   subject: string;
@@ -48,7 +54,14 @@ export async function saveInvoiceDraft(orgId: string, opts: {
     }
     return { ...draft, ownerId: stored.ownerId, ownerName: stored.ownerName };
   }
-  await updateInvoice(orgId, opts.id, { subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, discountPct: fields.discountPct, notes: fields.notes });
+  // Only while it is still a draft: issued meanwhile (another tab or person), nothing is written
+  try {
+    await updateInvoice(orgId, opts.id, { subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, discountPct: fields.discountPct, notes: fields.notes }, { onlyDraft: true });
+  } catch (err) {
+    const stored = await fetchInvoiceIssue(orgId, opts.id).catch(() => null);
+    if (stored && stored.status !== 'draft') throw new DraftIssuedError(opts.id);
+    throw err;
+  }
   await deleteLineItems(orgId, { invoiceId: opts.id });
   await saveLineItems(orgId, lines, { invoiceId: opts.id });
   return { id: opts.id, subject, client: fields.client, issued: fields.issued, due: fields.due, amount: fields.amount, status: 'draft', discountPct: fields.discountPct, notes: fields.notes ?? undefined };

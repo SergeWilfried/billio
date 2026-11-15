@@ -131,7 +131,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
     if (intent.command === 'show-late') { setShowLate(n => n + 1); return; }
     if (intent.command !== 'new-invoice' || !writable) return false;
     // The ERP look edits invoices on their own page (PRO-167)
-    if (UI_V2) { navigate(intent.client ? `/invoices/new?client=${encodeURIComponent(intent.client)}` : '/invoices/new'); return; }
+    if (UI_V2) { navigate(intent.client ? `/invoices/new?client=${encodeURIComponent(intent.client)}` : '/invoices/new', { replace: true }); return 'navigated'; }
     openPanel();
     if (intent.client) setFClient(intent.client);
   }, !loading);

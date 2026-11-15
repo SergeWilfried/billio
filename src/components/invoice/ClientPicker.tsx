@@ -2,7 +2,7 @@
 // organisation's clients. The block on the invoice is built from the chosen
 // client's record; it isn't typed on the invoice.
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useDismiss } from '@/lib/use-dismiss';
 import { CASH_CHOICE, CASH_CLIENT_NAME, useClientChoice } from '@/lib/use-client-choice';
@@ -29,7 +29,9 @@ export default function ClientPicker({ value, onChange, disabled, kybLabel }: {
     const q = query.trim().toLowerCase();
     return clients.filter(c => !q || `${c.name} ${c.ifu ?? ''} ${c.city}`.toLowerCase().includes(q)).slice(0, 8);
   }, [clients, query]);
-  const choose = (code: string) => { close(); void pick(code); };
+  // Locked (saving, issuing): no change of client, and the search closes
+  const choose = (code: string) => { if (disabled || creating) return; close(); void pick(code); };
+  useEffect(() => { if (disabled) close(); }, [disabled, close]);
   const current = value ? clientsMap[value] : undefined;
 
   return (

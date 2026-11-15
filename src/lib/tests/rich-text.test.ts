@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cleanRichText, richTextPlain, safeHref } from '@/lib/rich-text';
+import { notesStoredSize } from '@/lib/notes-editor';
 
 const p = (text: string, marks?: unknown[]) => ({ type: 'paragraph', content: [{ type: 'text', text, ...(marks ? { marks } : {}) }] });
 
@@ -56,5 +57,14 @@ describe('safeHref', () => {
     expect(safeHref('mailto:a@b.bf')).toBe('mailto:a@b.bf');
     expect(safeHref('javascript:x')).toBeNull();
     expect(safeHref('data:text/html,x')).toBeNull();
+  });
+});
+
+describe('notesStoredSize', () => {
+  it('counts at least what the database stores (jsonb text adds spaces)', () => {
+    const doc = { type: 'doc', content: [p('Payé à 30 jours', [{ type: 'bold' }])] };
+    // jsonb::text writes ": " and ", ": one more byte per separator than JSON.stringify
+    const jsonbText = JSON.stringify(doc).replace(/([:,])/g, '$1 ');
+    expect(notesStoredSize(doc)).toBeGreaterThanOrEqual(new TextEncoder().encode(jsonbText).length);
   });
 });
