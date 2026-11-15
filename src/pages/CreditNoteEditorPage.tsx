@@ -23,11 +23,11 @@ import {
   createCreditNote, creditNoteIssueError, fetchCreditNote, fetchCreditNotes, nextCreditNoteId,
   removeCreditNoteDraft, updateCreditNoteDraft, type CreditNoteFields,
 } from '@/lib/api/credit-notes';
-import { recordCreditNoteEntry } from '@/lib/api/accounting';
+import { fetchInvoiceEntries, recordCreditNoteEntry } from '@/lib/api/accounting';
 import { createActivity } from '@/lib/api/activities';
 import {
   CREDIT_NATURES, amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, natureLabel,
-  reconcileFinalCredit,
+  reconcileFinalCredit, vatFromSalesEntry,
   type CreditNature,
 } from '@/lib/credit-note';
 import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
@@ -62,6 +62,8 @@ export default function CreditNoteEditorPage() {
   const [qty, setQty] = useState<Record<string, number>>({});
   // An invoice without stored lines is credited by amount (TTC), as the old dialog did
   const [amt, setAmt] = useState(0);
+  // Its VAT, from its sales entry (null: not found, or not readable for this role)
+  const [entryVat, setEntryVat] = useState<boolean | null>(null);
   const [nature, setNature] = useState<CreditNature | ''>('');
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(() => isoDay(new Date()));
@@ -100,6 +102,12 @@ export default function CreditNoteEditorPage() {
       if (inv.status === 'draft') return fail('Un avoir se crée sur une facture émise.', `/invoices/${inv.id}/edit`);
       const [ls, notes] = await Promise.all([fetchLineItems(orgId, { invoiceId: inv.id }), fetchCreditNotes(orgId, inv.id)]);
       if (!live) return;
+      // No lines: the VAT comes from the invoice's sales entry, not today's regime
+      const ev = filledLines(ls).length === 0
+        ? await fetchInvoiceEntries(orgId, inv.id).then(e => vatFromSalesEntry(e, inv.id)).catch(() => null)
+        : null;
+      if (!live) return;
+      setEntryVat(ev);
       // A draft keeps its quantities, but never more than what is left on each
       // line now (a credit note may have been issued since it was saved)
       const remaining = creditableQty(filledLines(ls), notes.filter(n => n.id !== cn?.id));
@@ -147,7 +155,9 @@ export default function CreditNoteEditorPage() {
   // ── What can be credited, and the totals ───────────────────────────────────
   const left = useMemo(() => creditableQty(invLines, issuedNotes), [invLines, issuedNotes]);
   const lines = useMemo(() => creditLines(invLines, qty), [invLines, qty]);
-  const vatCharged = invoice ? invoiceChargedVat(invoice, invLines, chargesVat(orgSettings.taxRegime)) : false;
+  const vatCharged = invoice
+    ? (invLines.length === 0 && entryVat !== null ? entryVat : invoiceChargedVat(invoice, invLines, chargesVat(orgSettings.taxRegime)))
+    : false;
   const amountOnly = invLines.length === 0;
   const max = invoice ? creditableAmount(invoice, issuedNotes) : 0;
   // The credit that empties every line takes exactly what is left (rounding)
@@ -231,15 +241,16 @@ export default function CreditNoteEditorPage() {
         // Posted before leaving, so the invoice page reads the entry with the others
         try {
           await recordCreditNoteEntry(orgId, { creditNoteId: cn.id, invoiceId: invoice.id, htAmount: totals.net, tvaAmount: totals.tax, date: cn.issued, clientName });
+          showToast(`Avoir ${ref} émis`);
         } catch (err) {
           console.error('[recordCreditNoteEntry]', err);
+          // Only this message: a success toast after it would replace it
           showToast(`Avoir ${ref} émis, mais l’écriture comptable n’a pas pu être enregistrée. Signalez-le à votre comptable.`, true);
         }
         const act = { kind: 'avoir' as const, parts: [{ text: 'Avoir ' }, { text: ref, bold: true as const }, { text: ` (${cn.nature}) sur ` }, { text: `#${invoiceRef(invoice)}`, bold: true as const }, { text: ` · ${clientName}` }] };
         setActivity((prev: Activity[]) => [{ ...act, time: "À l'instant" }, ...prev]);
         createActivity(orgId, act).catch(err => console.error('[createActivity] failed:', err));
         posthog.capture('credit_note_issued', { nature: cn.nature, line_count: cn.lines.length, amount: cn.amount, currency: 'XOF' });
-        showToast(`Avoir ${ref} émis`);
         leaveOk.current = true;
         navigate(`/invoices/${invoice.id}`, { replace: true });
       } catch (err) {

@@ -252,6 +252,38 @@ begin
 end;
 $$;
 
+-- ── Lines of a credited invoice: kept as credited ───────────────────────────
+-- Credited lines point to their invoice line (lines[].sourceId). Correcting an
+-- issued invoice replaces its lines with new ids, which would let a line be
+-- credited again: once an issued credit note exists, the invoice's lines can't
+-- change from the app (corrections go through credit notes).
+create or replace function public.protect_credited_invoice_lines()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_org uuid := coalesce(new.org_id, old.org_id);
+  v_inv text := coalesce(new.invoice_id, old.invoice_id);
+begin
+  if coalesce(auth.role(), '') not in ('authenticated', 'anon') or v_inv is null then
+    return coalesce(new, old);
+  end if;
+  if exists (select 1 from credit_notes c where c.org_id = v_org and c.invoice_id = v_inv and c.status = 'issued')
+     or (tg_op = 'UPDATE' and old.invoice_id is not null and old.invoice_id is distinct from new.invoice_id
+         and exists (select 1 from credit_notes c where c.org_id = old.org_id and c.invoice_id = old.invoice_id and c.status = 'issued')) then
+    raise exception 'credited_invoice_lines_locked'
+      using errcode = 'BL002', detail = 'This invoice has a credit note: its lines can no longer change.';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists protect_credited_invoice_lines on public.line_items;
+create trigger protect_credited_invoice_lines
+  before insert or update or delete on public.line_items
+  for each row execute function public.protect_credited_invoice_lines();
+
 -- Writers delete their drafts (issued ones are refused above); admins already may
 drop policy if exists "credit_notes: writers delete drafts" on public.credit_notes;
 create policy "credit_notes: writers delete drafts" on public.credit_notes for delete

@@ -398,7 +398,8 @@ export default function InvoicePage() {
     cheque: 'Chèque',
   };
 
-  const canEdit = writable && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
+  // Once a credit note was issued on it, its lines stay as credited (PRO-168): corrections go through credit notes
+  const canEdit = writable && creditNotes.length === 0 && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
   // Header and footer bands of the organisation's template (PRO-167), in the new look
   const pageBand = UI_V2 ? paperBands(invoiceTemplate) : null;
 

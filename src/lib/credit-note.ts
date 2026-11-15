@@ -6,6 +6,7 @@ import { filledLines } from '@/lib/line-validation';
 import { documentHasVat, splitTtc } from '@/lib/vat';
 import { editorTotals, type EditorTotals } from '@/lib/invoice-editor';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
+import type { JournalEntry } from '@/lib/accounting-data';
 
 export type CreditNature = NonNullable<CreditNote['nature']>;
 export type CreditLine = CreditNote['lines'][number];
@@ -49,6 +50,18 @@ export function invoiceChargedVat(invoice: Pick<Invoice, 'amount' | 'discountPct
   const sub = filledLines(invoiceLines).reduce((s, l) => s + l.qty * l.price, 0);
   const net = sub - Math.round(sub * ((invoice.discountPct ?? 0) / 100));
   return documentHasVat(invoice.amount, net, regimeChargesVat);
+}
+
+/**
+ * Whether the invoice's sales entry (piece VE-<id>) carried VAT (account 443
+ * credited); null when it isn't found. For an invoice without stored lines,
+ * whose VAT can't be read from its lines and total: the regime may have
+ * changed since it was issued.
+ */
+export function vatFromSalesEntry(entries: Pick<JournalEntry, 'piece' | 'lines'>[], invoiceId: string): boolean | null {
+  const sale = entries.find(e => e.piece === `VE-${invoiceId}`);
+  if (!sale) return null;
+  return sale.lines.some(l => l.acct.startsWith('443') && l.c > 0);
 }
 
 /** Totals of the credit note: the invoice's discount and VAT applied to the credited lines. */

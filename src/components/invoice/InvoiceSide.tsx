@@ -10,6 +10,7 @@ import { fetchInvoiceEntries } from '@/lib/api/accounting';
 import { fetchClientCreditNotes, fetchCreditNoteDrafts } from '@/lib/api/credit-notes';
 import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
 import { creditNoteRef } from '@/lib/invoice-number';
+import { vatFromSalesEntry } from '@/lib/credit-note';
 import { withIntent } from '@/lib/command-intent';
 import { clientBalance, expectedSalesEntry, invoiceActivity, fmtDateTime } from '@/lib/invoice-view';
 import { contactValue } from '@/lib/share-links';
@@ -88,7 +89,9 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
     const tab = window.open('', '_blank');
     setPdfFor(cn.id);
     try {
-      showPdf(await renderCreditNotePdf({ creditNote: cn, invoice, chargedVat: vatOnInvoice, client: rec, biz: orgSettings, template: invoiceTemplate }), tab);
+      // An amount-only note: the invoice's sales entry says whether it carried VAT, when it can be read
+      const chargedVat = (Array.isArray(entries) ? vatFromSalesEntry(entries, invoice.id) : null) ?? vatOnInvoice;
+      showPdf(await renderCreditNotePdf({ creditNote: cn, invoice, chargedVat, client: rec, biz: orgSettings, template: invoiceTemplate }), tab);
     } catch (err) {
       tab?.close();
       console.error('[creditNotePdf]', err);

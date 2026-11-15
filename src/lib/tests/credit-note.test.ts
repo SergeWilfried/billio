@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit } from '@/lib/credit-note';
+import { amountTotals, creditIssueProblem, creditLines, creditTotals, creditableAmount, creditableQty, invoiceChargedVat, reconcileFinalCredit, vatFromSalesEntry } from '@/lib/credit-note';
 import { documentAmounts } from '@/lib/document-amounts';
 import { docRows, invoiceRows } from '@/lib/sales-tables';
 import type { CreditNote, Invoice, LineItem } from '@/lib/schemas';
@@ -98,5 +98,15 @@ describe('credit note amounts on the PDF', () => {
     expect([a.discountAmt, a.total]).toEqual([501, 9_504]);
     // Without a stored total, the usual rounding
     expect(documentAmounts(10_005, 5, false).total).toBe(9_505);
+  });
+});
+
+describe('vatFromSalesEntry', () => {
+  const entry = (piece: string, lines: { acct: string; d: number; c: number }[]) => ({ piece, lines });
+  it('reads the VAT of an invoice without lines from its sales entry, whatever the regime today', () => {
+    expect(vatFromSalesEntry([entry('VE-F-1', [{ acct: '411', d: 118, c: 0 }, { acct: '706', d: 0, c: 100 }, { acct: '443', d: 0, c: 18 }])], 'F-1')).toBe(true);
+    expect(vatFromSalesEntry([entry('VE-F-1', [{ acct: '411', d: 100, c: 0 }, { acct: '706', d: 0, c: 100 }])], 'F-1')).toBe(false);
+    // A credit note's own entry or another invoice's doesn't count; none found: unknown
+    expect(vatFromSalesEntry([entry('AV-AV-1', [{ acct: '443', d: 18, c: 0 }]), entry('VE-F-2', [{ acct: '443', d: 0, c: 18 }])], 'F-1')).toBeNull();
   });
 });

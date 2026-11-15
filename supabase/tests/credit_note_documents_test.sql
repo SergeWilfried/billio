@@ -178,6 +178,23 @@ begin
   insert into credit_notes (id, org_id, invoice_id, amount, status, nature, reason, lines)
     values ('AV-L3', a, 'F-3', 100, 'issued', 'COR', 'ligne B', '[{"desc":"B","qty":1,"price":100,"sourceId":"00000000-0000-0000-0000-00000000000b"}]');
 
+  -- A credited invoice keeps its lines: replacing them (new ids) is refused,
+  -- so line A can't be credited again under a new id
+  begin
+    delete from line_items where invoice_id = 'F-3';
+    failures := failures + 1; raise warning 'lines of a credited invoice deleted';
+  exception when sqlstate 'BL002' then null;
+  end;
+  begin
+    insert into line_items values ('00000000-0000-0000-0000-00000000000c', a, 'F-3', 1);
+    failures := failures + 1; raise warning 'line added to a credited invoice';
+  exception when sqlstate 'BL002' then null;
+  end;
+  -- An invoice without credit notes can still be corrected
+  insert into invoices (id, org_id, amount) values ('F-4', a, 50);
+  insert into line_items values ('00000000-0000-0000-0000-00000000000d', a, 'F-4', 1);
+  delete from line_items where id = '00000000-0000-0000-0000-00000000000d';
+
   -- Shape of the lines
   begin
     insert into credit_notes (id, org_id, invoice_id, status, lines) values ('AV-L', a, 'F-1', 'draft', '{"a":1}');
