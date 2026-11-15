@@ -2375,3 +2375,85 @@ html[data-ui="v2"] .page-section { display: none; }
 .kyb-foot { margin: 8px -20px -20px; }
 .form-hint { margin: 4px 0 0; font-size: 12px; color: var(--color-text-tertiary); }
 .form-error { margin: 4px 0 0; font-size: 12px; color: var(--status-late, #B42318); font-weight: 600; }
+.doc-link { margin: 8px 0 0; font-size: 13px; color: var(--color-text-secondary); }
+
+/* ── Dashboard of the ERP look (PRO-164) ──────────────────────────────────── */
+:root { --chart-bar: #1A5C9E; --chart-bar-current: #5E8FC8; --chart-grid: #E6E9EE; }
+.dash-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; margin-bottom: 16px; }
+.dash-panel { background: var(--color-background-primary); border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 14px 16px; min-width: 0; }
+.dash-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.dash-title { margin: 0; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.dash-panel > .dash-title { margin-bottom: 10px; }
+.dash-latest { margin-top: 4px; }
+.dash-empty { margin: 16px 0; display: flex; align-items: center; gap: 6px; color: var(--status-paid, #1E6B3A); font-size: 13px; font-weight: 600; }
+.chase-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.chase-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--color-border-tertiary); font-size: 13px; }
+.chase-list li:first-child { border-top: 0; }
+.chase-open { border: 0; background: none; padding: 0; font: inherit; text-align: left; cursor: pointer; display: grid; min-width: 0; color: var(--color-text-primary); }
+.chase-open b { font-variant-numeric: tabular-nums; }
+.chase-open span { font-size: 12px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chase-open:hover b, .chase-open:focus-visible b { color: var(--brand); text-decoration: underline; }
+.chase-late { font-size: 12px; font-weight: 600; color: var(--status-late, #B42318); white-space: nowrap; }
+.chase-amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Cash chart: one series, thin columns from one baseline, recessive grid */
+.cash-chart { margin: 0; }
+.cash-plot { position: relative; height: 170px; margin-left: 44px; }
+.cash-grid { position: absolute; inset: 0; }
+.cash-tick { position: absolute; left: 0; right: 0; border-top: 1px solid var(--chart-grid); }
+.cash-tick span { position: absolute; right: calc(100% + 8px); top: -8px; font-size: 11px; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cash-bars { position: absolute; inset: 0; display: flex; align-items: flex-end; }
+.cash-slot { position: relative; flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; outline: none; border-radius: 3px; }
+.cash-slot:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); }
+.cash-slot.on { background: color-mix(in srgb, var(--brand) 6%, transparent); }
+.cash-bar { width: min(24px, 60%); background: var(--chart-bar); border-radius: 4px 4px 0 0; }
+.cash-bar.current { background: var(--chart-bar-current); }
+.cash-cap { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
+.cash-tip { position: absolute; bottom: calc(100% - 6px); left: 50%; transform: translateX(-50%); z-index: 5; display: grid; gap: 1px; padding: 6px 9px; background: var(--color-background-primary); border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-md); box-shadow: 0 8px 20px -10px rgba(16,33,58,0.35); font-size: 12px; white-space: nowrap; pointer-events: none; }
+.cash-tip span { color: var(--color-text-secondary); }
+.cash-axis { display: flex; margin: 6px 0 0 44px; }
+.cash-axis span { flex: 1; text-align: center; font-size: 11.5px; color: var(--color-text-secondary); }
+.cash-axis span.current { font-weight: 700; color: var(--color-text-primary); }
+.cash-empty { margin: 8px 0 0; font-size: 12.5px; color: var(--color-text-tertiary); text-align: center; }
+.dash-head .dt-linkcell { font-size: 13px; }
+/* Invoice page in the ERP look (PRO-166): header, DGI mentions, side panels */
+.crumb-stack { display: grid; gap: 2px; min-width: 0; }
+.crumb-stack .page-sub { margin: 0; font-size: 12.5px; }
+.iv-title { font-size: 17px; font-weight: 700; color: var(--color-text-primary); }
+.iv-title { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.iv-title .dt-status { font-size: 12px; font-weight: 600; }
+.iv-sub { display: inline-flex; flex-wrap: wrap; gap: 4px 0; }
+.iv-sub > span + span::before { content: '·'; margin: 0 8px; color: var(--color-text-tertiary); }
+.more-btn { padding-left: 9px; padding-right: 9px; }
+.pp-words { margin: 10px 0 0; font-size: 12px; font-style: italic; color: var(--color-text-secondary); text-align: right; }
+.pp-mentions { margin-top: 18px; padding: 10px 12px; border: 1px dashed var(--color-border-secondary); border-radius: var(--border-radius-md); font-size: 11.5px; color: var(--color-text-secondary); }
+.pp-mentions ul { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 2px; }
+.iv-rail { gap: 12px; }
+.iv-card { padding: 14px 16px; }
+.iv-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.iv-card-head h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--color-text-secondary); }
+.iv-card-head .dt-linkcell { font-size: 12.5px; }
+.iv-rows { margin: 0; display: grid; gap: 5px; font-size: 13px; }
+.iv-rows > div { display: flex; justify-content: space-between; gap: 12px; }
+.iv-rows dt { color: var(--color-text-secondary); }
+.iv-rows dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.iv-due { margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--color-border-tertiary); font-weight: 700; }
+.iv-due dt { color: var(--color-text-primary); }
+.iv-strong { font-weight: 700; }
+.iv-client { margin: 0 0 6px; font-weight: 600; }
+.iv-note { margin: 0 0 6px; font-size: 12px; }
+.iv-entry + .iv-entry { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-tertiary); }
+.iv-entry-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+.iv-entry-head span { color: var(--color-text-tertiary); white-space: nowrap; }
+.iv-lines { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.iv-lines th { text-align: left; font-weight: 600; color: var(--color-text-tertiary); padding: 2px 0; border-bottom: 1px solid var(--color-border-tertiary); }
+.iv-lines td { padding: 3px 0; border-bottom: 1px solid var(--color-border-tertiary); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iv-lines .num { text-align: right; padding-left: 8px; }
+.iv-activity { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; font-size: 12.5px; }
+.iv-sends { margin-bottom: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--color-border-tertiary); }
+.iv-act { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 8px; align-items: start; }
+.iv-act small { color: var(--color-text-tertiary); font-size: 11.5px; }
+.iv-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--color-border-secondary); }
+.iv-act.paid .iv-dot, .iv-act.payment .iv-dot { background: var(--status-paid, #1E6B3A); }
+.iv-act.late .iv-dot, .iv-act.overdue .iv-dot { background: var(--status-late, #B42318); }
+.iv-act.issued .iv-dot, .iv-act.sent .iv-dot { background: var(--brand); }
+.iv-act.credit .iv-dot { background: var(--status-partial, #B54708); }
