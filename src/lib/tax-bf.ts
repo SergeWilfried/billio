@@ -218,6 +218,14 @@ export type ServiceWithholdingScenario =
 
 export const SERVICE_WITHHOLDING_THRESHOLD = 50_000; // Art.208.3
 
+/** The rate of each scenario, as printed next to « Retenue à la source » */
+export const SERVICE_WITHHOLDING_RATE_LABEL: Record<ServiceWithholdingScenario, string> = {
+  'resident-with-ifu':    '5 %',
+  'resident-without-ifu': '25 %',
+  'construction':         '1 %',
+  'non-resident':         '20 %',
+};
+
 export function calculateServiceWithholding(
   amountHT: number,
   scenario: ServiceWithholdingScenario,

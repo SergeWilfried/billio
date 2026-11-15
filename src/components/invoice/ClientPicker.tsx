@@ -1,6 +1,7 @@
 // « Facturé à » in the invoice editor (PRO-167): a search over the
 // organisation's clients. The block on the invoice is built from the chosen
-// client's record; it isn't typed on the invoice.
+// client's record; it isn't typed on the invoice. « + Nouveau client » creates
+// one in place (PRO-184).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
@@ -8,6 +9,7 @@ import { useDismiss } from '@/lib/use-dismiss';
 import { CASH_CHOICE, CASH_CLIENT_NAME, useClientChoice } from '@/lib/use-client-choice';
 import { clientTypeOf, clientTypeDef } from '@/lib/client-type';
 import { contactValue } from '@/lib/share-links';
+import ClientQuickCreate from '@/components/invoice/ClientQuickCreate';
 
 export default function ClientPicker({ value, onChange, disabled, kybLabel }: {
   value: string;
@@ -21,8 +23,9 @@ export default function ClientPicker({ value, onChange, disabled, kybLabel }: {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [hi, setHi] = useState(0);
+  const [adding, setAdding] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => { setOpen(false); setQuery(''); }, []);
+  const close = useCallback(() => { setOpen(false); setQuery(''); setAdding(false); }, []);
   useDismiss(ref, open, close);
 
   const shown = useMemo(() => {
@@ -40,7 +43,13 @@ export default function ClientPicker({ value, onChange, disabled, kybLabel }: {
         disabled={disabled || creating} onClick={() => { setOpen(o => !o); setHi(0); }}>
         {creating ? 'Création du client comptant…' : current?.name ?? 'Choisir un client'} <span aria-hidden="true">▾</span>
       </button>
-      {open && (
+      {open && adding && (
+        <div className="ie-pop ie-client-pop" role="dialog" aria-label="Nouveau client">
+          <ClientQuickCreate initialName={query.trim()} onCancel={() => setAdding(false)}
+            onCreated={c => { if (disabled) return; close(); void pick(c.code); }} />
+        </div>
+      )}
+      {open && !adding && (
         <div className="ie-pop ie-client-pop" role="dialog" aria-label="Choisir un client">
           <input
             autoFocus type="search" className="form-input" placeholder="Nom, IFU ou ville…" aria-label="Rechercher un client"
@@ -70,6 +79,9 @@ export default function ClientPicker({ value, onChange, disabled, kybLabel }: {
               );
             })}
           </div>
+          <button type="button" className="ie-pop-foot" onClick={() => setAdding(true)}>
+            + Nouveau client{query.trim() && <small> « {query.trim()} »</small>}
+          </button>
           {!cash && (
             <button type="button" className="ie-pop-foot" onClick={() => choose(CASH_CHOICE)}>
               {CASH_CLIENT_NAME} <small>(vente sans client identifié)</small>
