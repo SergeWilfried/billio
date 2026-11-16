@@ -8,7 +8,9 @@ import type { PaperConfig, PaperLayout, PaperDensity, TableStyle, TotalStyle, Bi
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
 import { usePermissions } from '@/lib/use-permissions';
-import { BAND_COLORS, BANDED_LAYOUTS, DEFAULT_CONFIG, FONT_FAMILIES, PRESETS } from '@/lib/invoice-template';
+import { BAND_COLORS, BANDED_LAYOUTS, DEFAULT_CONFIG, FONT_FAMILIES, PRESETS, normalizeConfig } from '@/lib/invoice-template';
+import { UI_V2 } from '@/lib/features';
+import { useBlocker } from 'react-router-dom';
 import { createTemplate, fetchTemplates, setDefaultTemplate, updateTemplate, type SavedTemplate } from '@/lib/api/invoice-templates';
 import { fetchPaymentSettings } from '@/lib/api/payment-settings';
 import { paymentMethodLines, type PaymentMethodLine } from '@/lib/payment-methods';
@@ -241,7 +243,49 @@ function TemplateCard({
 // ---------------------------------------------------------------------------
 // Editor controls panel
 // ---------------------------------------------------------------------------
-function EditorControls({ cfg, onChange }: { cfg: PaperConfig; onChange: (c: PaperConfig) => void }) {
+/**
+ * Sections every invoice prints, whatever the template (CGI art. 562): shown
+ * locked so it is clear they can't be hidden. The SECeF block only once the
+ * organisation's invoices are certified.
+ */
+const LOCKED_SECTIONS: { label: string; badge: 'Obligatoire' | 'Si certifiée'; from: string }[] = [
+  { label: 'Total en lettres',              badge: 'Obligatoire',  from: 'Calculé à partir du total' },
+  { label: 'Date, heure et opérateur',      badge: 'Obligatoire',  from: 'Ajoutés à l’émission de la facture' },
+  { label: 'Référence cadastrale',          badge: 'Obligatoire',  from: 'Paramètres › Entreprise' },
+  { label: 'Coordonnées bancaires',         badge: 'Obligatoire',  from: 'Paramètres › Moyens de paiement' },
+  { label: 'Bloc SECeF (code et QR)',       badge: 'Si certifiée', from: 'Ajouté à la certification de la facture' },
+];
+
+function LockedSections({ cfg, set }: { cfg: PaperConfig; set: <K extends keyof PaperConfig>(k: K, v: PaperConfig[K]) => void }) {
+  return (
+    <div className="ed-group">
+      <div className="ed-group-title"><Icon name="eye" size={14} ariaHidden />Sections</div>
+      <ul className="tpl-locked">
+        {LOCKED_SECTIONS.map(s => (
+          <li key={s.label} title={s.from}>
+            <Icon name="lock" size={14} ariaHidden />
+            <span className="tpl-locked-label">{s.label}<small>{s.from}</small></span>
+            <span className={`tpl-lock-badge${s.badge === 'Si certifiée' ? ' muted' : ''}`}>{s.badge}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="tog-row">
+        <div className="row-label">Signature<small>Ligne de signature</small></div>
+        <button className={`tp-toggle${cfg.showSignature ? ' on' : ''}`} onClick={() => set('showSignature', !cfg.showSignature)} aria-pressed={cfg.showSignature} aria-label="Signature" />
+      </div>
+      <div className="tog-row">
+        <div className="row-label">
+          QR code de paiement
+          <small>Petit, à côté des modes de paiement. Il ouvrira la page de paiement de la facture, avec le reste dû : imprimé dès que le paiement en ligne des factures sera disponible. Jamais sur un devis, un avoir ou une facture payée.</small>
+        </div>
+        <button className={`tp-toggle${cfg.showPaymentQr ? ' on' : ''}`} onClick={() => set('showPaymentQr', !cfg.showPaymentQr)} aria-pressed={cfg.showPaymentQr} aria-label="QR code de paiement" />
+      </div>
+      <p className="tpl-locked-note">Les sections verrouillées viennent des Paramètres et de l’émission : un modèle ne peut pas les masquer.</p>
+    </div>
+  );
+}
+
+function EditorControls({ cfg, onChange, locked = false }: { cfg: PaperConfig; onChange: (c: PaperConfig) => void; locked?: boolean }) {
   function set<K extends keyof PaperConfig>(k: K, v: PaperConfig[K]) {
     onChange({ ...cfg, [k]: v });
   }
@@ -250,6 +294,7 @@ function EditorControls({ cfg, onChange }: { cfg: PaperConfig; onChange: (c: Pap
   // mentions an invoice must carry, so a template can't hide them
   const SEC_OPTS: { key: keyof PaperConfig; label: string; sub: string }[] = [
     { key: 'showSignature', label: 'Signature',          sub: 'Ligne de signature' },
+    { key: 'showPaymentQr', label: 'QR code de paiement', sub: 'Imprimé avec le paiement en ligne des factures' },
   ];
 
   return (
@@ -361,7 +406,7 @@ function EditorControls({ cfg, onChange }: { cfg: PaperConfig; onChange: (c: Pap
       </div>
 
       {/* Sections */}
-      <div className="ed-group">
+      {locked ? <LockedSections cfg={cfg} set={set} /> : <div className="ed-group">
         <div className="ed-group-title"><Icon name="eye" size={14} ariaHidden />Sections</div>
         {SEC_OPTS.map(o => (
           <div key={o.key} className="tog-row">
@@ -377,7 +422,7 @@ function EditorControls({ cfg, onChange }: { cfg: PaperConfig; onChange: (c: Pap
             />
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* Header and footer bands (Classique, Minimal) */}
       {BANDED_LAYOUTS.includes(cfg.layout) && (
@@ -471,6 +516,28 @@ export default function TemplatesPage() {
 
   const templates = useMemo(() => galleryTemplates(saved ?? []), [saved]);
 
+  // New interface (PRO-171): no gallery, the template in use opens straight away
+  const editingId = view === 'gallery' ? null : view.id;
+  const defaultId = templates.find(t => t.isDefault)?.id ?? templates[0]?.id;
+  useEffect(() => {
+    if (UI_V2 && saved !== null && view === 'gallery' && defaultId) openEditor(defaultId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open once the list is there
+  }, [saved, defaultId, view]);
+
+  const editedTpl = editingId && editingId !== 'new' ? templates.find(t => t.id === editingId) : null;
+  const dirty = UI_V2 && editingId !== null && (
+    editingId === 'new' || !editedTpl
+      ? true
+      : edName !== editedTpl.name || JSON.stringify(normalizeConfig(edConfig)) !== JSON.stringify(normalizeConfig(editedTpl.config))
+  );
+  // Leaving with unsaved changes asks first, as in the invoice editor
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && managesOrg && currentLocation.pathname !== nextLocation.pathname);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (window.confirm('Ce modèle a des modifications non enregistrées. Quitter sans enregistrer ?')) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+
   if (loading || saved === null) return <PageSkeleton title="Modèles de facture" subtitle="Choisissez un design prêt à l'emploi ou créez le vôtre" variant="table-only" rows={4} />;
 
   function openEditor(id: string) {
@@ -531,10 +598,12 @@ export default function TemplatesPage() {
     const config = { ...edConfig };
     void run(async () => {
       if (id === 'new') {
-        await createTemplate(orgId, { name, config });
+        const row = await createTemplate(orgId, { name, config });
+        if (UI_V2) setView({ kind: 'editor', id: row.id });
       } else {
         const tpl = templates.find(t => t.id === id)!;
         const row = await ensureSaved(tpl, { name, config });
+        if (UI_V2) setView({ kind: 'editor', id: row.id });
         // Editing the template in use changes the next PDFs straight away.
         // The standard template is only implicitly in use: save it as the
         // default, or PDFs would fall back to the unedited one after a reload.
@@ -544,7 +613,7 @@ export default function TemplatesPage() {
         }
       }
       showToast('Modèle enregistré');
-      setView('gallery');
+      if (!UI_V2) setView('gallery');
     }, "Le modèle n'a pas pu être enregistré. Réessayez.");
   }
 
@@ -572,6 +641,80 @@ export default function TemplatesPage() {
 
   const editorId = view !== 'gallery' ? view.id : null;
   const editorTpl = editorId && editorId !== 'new' ? templates.find(t => t.id === editorId) : null;
+
+  /** Another template, or a new one: unsaved changes are confirmed first. */
+  function select(id: string) {
+    if (id === editorId) return;
+    if (dirty && managesOrg && !window.confirm('Ce modèle a des modifications non enregistrées. Les abandonner ?')) return;
+    openEditor(id);
+  }
+
+  if (UI_V2) return (
+    <Page
+      title="Modèles de facture"
+      subtitle="Le modèle par défaut s’applique aux PDF de vos factures, avoirs et devis."
+      actions={managesOrg && (
+        <button className="btn" onClick={() => select('new')} disabled={busy}>
+          <Icon name="plus" size={16} ariaHidden />
+          Nouveau modèle
+        </button>
+      )}
+    >
+      {loadError && <div className="gi-sub" role="alert" style={{ marginBottom: 12, color: 'var(--color-danger, #B42318)' }}>Vos modèles enregistrés n'ont pas pu être chargés. <button className="btn btn-sm" onClick={() => void load()}>Réessayer</button></div>}
+      <div className={`tpl-ws${managesOrg ? '' : ' readonly'}`}>
+        <nav className="tpl-ws-list" aria-label="Modèles">
+          {editorId === 'new' && (
+            <button type="button" className="tpl-ws-item active" aria-current="true">
+              <span className="tpl-ws-name">{edName || 'Nouveau modèle'}</span>
+              <small>Pas encore enregistré</small>
+            </button>
+          )}
+          {templates.map(t => (
+            <button type="button" key={t.id} className={`tpl-ws-item${t.id === editorId ? ' active' : ''}`} aria-current={t.id === editorId ? 'true' : undefined} onClick={() => select(t.id)}>
+              <span className="tpl-ws-name">{t.name}</span>
+              <small>{t.isDefault ? 'Par défaut · factures, avoirs et devis' : t.purpose}</small>
+            </button>
+          ))}
+          {!managesOrg && <p className="tpl-ws-note">Seuls les administrateurs peuvent modifier les modèles.</p>}
+        </nav>
+
+        <section className="tpl-ws-preview" aria-label="Aperçu A4">
+          <div className="ed-preview-bar">
+            <span style={{ flex: 1, textAlign: 'left' }}>Aperçu en direct · facture d’exemple</span>
+            <button className="zoom-btn" onClick={() => zoomStep(-1)} aria-label="Zoom arrière">−</button>
+            <span className="zoom-val">{zoom}%</span>
+            <button className="zoom-btn" onClick={() => zoomStep(1)} aria-label="Zoom avant">+</button>
+          </div>
+          <div className="ed-stage">
+            <div className="ed-paper-shadow" style={{ transformOrigin: 'top center', transform: `scale(${zoom / 100})`, transition: 'transform .15s', display: 'inline-block' }}>
+              <InvoicePaper config={edConfig} biz={orgSettings} paymentMethods={payLines} paymentTerms={orgSettings.paymentTerms} />
+            </div>
+          </div>
+        </section>
+
+        {managesOrg && (
+          <aside className="tpl-ws-side" aria-label="Réglages du modèle">
+            <label className="tpl-ws-field">
+              <span>Nom du modèle</span>
+              <input className="form-input" value={edName} onChange={e => setEdName(e.target.value)} maxLength={NAME_MAX} spellCheck={false} />
+            </label>
+            <EditorControls cfg={edConfig} onChange={setEdConfig} locked />
+            <div className="tpl-ws-actions">
+              {editorTpl && !editorTpl.isDefault && (
+                <button className="btn" onClick={() => applyTemplate(editorTpl.id)} disabled={busy || dirty} title={dirty ? 'Enregistrez d’abord vos modifications' : undefined}>
+                  Définir par défaut
+                </button>
+              )}
+              {dirty && editorId !== 'new' && <button className="btn" onClick={resetEditor} disabled={busy}>Annuler les modifications</button>}
+              <button className="btn btn-primary" onClick={saveTemplate} disabled={busy || !dirty}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </div>
+          </aside>
+        )}
+      </div>
+    </Page>
+  );
 
   if (view !== 'gallery') return (
     <div className="main" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

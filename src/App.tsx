@@ -32,6 +32,7 @@ const ProductsPage           = lazy(() => import('./pages/ProductsPage'));
 const QuotePage              = lazy(() => import('./pages/QuotePage'));
 const TemplatesPage          = lazy(() => import('./pages/TemplatesPage'));
 const SettingsPage           = lazy(() => import('./pages/SettingsPage'));
+const ProfilePage            = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.ProfilePage })));
 const ChartOfAccountsPage    = lazy(() => import('./pages/accounting/ChartOfAccountsPage'));
 const JournalsPage           = lazy(() => import('./pages/accounting/JournalsPage'));
 const TrialBalancePage       = lazy(() => import('./pages/accounting/TrialBalancePage'));
@@ -142,6 +143,7 @@ export default function App() {
             <Route path="/quotes/:id" element={<Gated feature="quotes" title="Devis"><QuotePage /></Gated>} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings"  element={<SettingsPage />} />
+            {UI_V2 && <Route path="/profile" element={<ProfilePage />} />}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>
