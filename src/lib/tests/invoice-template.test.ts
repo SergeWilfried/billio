@@ -108,6 +108,16 @@ describe('invoice PDF', () => {
     expect(buf.length).toBeGreaterThan(5000);
   }, 30000);
 
+  // A credit note (« FACTURE D'AVOIR », PRO-168) renders in every layout
+  it.each(PRESETS.map(p => [p.key, p.config] as const))('renders a credit note in the %s template', async (_key, template) => {
+    const buf = await renderToBuffer(createElement(InvoicePDFDocument, {
+      ...props, template, lines: props.lines.slice(0, 2), title: 'Facture d’avoir', documentKind: 'avoir', clientLabel: 'Avoir au profit de',
+      invoice: { ...props.invoice, id: 'AV-0003', number: 'AV-2026-0001', amount: 6962 },
+      creditNote: { nature: 'RAM · Après paiement ou livraison', originalRef: 'FACT-2026-0012', originalIssued: '2026-11-10', reason: 'Prestation non rendue' },
+    }) as Parameters<typeof renderToBuffer>[0]);
+    expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
+  }, 30000);
+
   // A certified invoice prints its SECeF block in every layout
   it.each(PRESETS.map(p => [p.key, p.config] as const))('prints the SECeF block in the %s template', async (_key, template) => {
     const certification = { secefId: 'SECEF-BF-000123', transactionCode: 'TX-9F2A-77C1', qrPayload: 'https://example.invalid/verify?c=TX-9F2A-77C1', certifiedAt: '2026-11-10T09:30:00Z' };

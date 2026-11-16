@@ -4,6 +4,7 @@ import { canWrite } from '@/lib/permissions';
 import posthog from 'posthog-js';
 import { useParams, useNavigate } from 'react-router-dom';
 import { UI_V2 } from '@/lib/features';
+import RichTextView from '@/components/RichTextView';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { useApp } from '@/context/AppContext';
@@ -89,9 +90,12 @@ export default function QuotePage() {
 
   const client       = clientsMap[quote.client] ?? { name: quote.client, city: '—', av: 'av-a' };
   const subtotal     = lines.reduce((s, li) => s + li.qty * li.price, 0);
+  // Invoice-level discount, set in the editor (PRO-185); 0 on older quotes
+  const discountPct  = quote.discountPct ?? 0;
+  const discountAmt  = Math.round(subtotal * (discountPct / 100));
   const canInvoiceTVA = chargesVat(orgSettings.taxRegime);
-  const tax          = vatOn(subtotal, canInvoiceTVA);
-  const total        = subtotal + tax;
+  const tax          = vatOn(subtotal - discountAmt, canInvoiceTVA);
+  const total        = subtotal - discountAmt + tax;
 
   const quoteUrl    = window.location.href;
   const isTerminal  = ['invoiced', 'declined', 'expired'].includes(quote.status);
@@ -99,12 +103,15 @@ export default function QuotePage() {
   const canEdit     = !isTerminal && canWrite(userRole);
 
   const eSubtotal = eLines.reduce((s, l) => s + l.qty * l.price, 0);
-  const eTax      = vatOn(eSubtotal, canInvoiceTVA);
-  const eTotal    = eSubtotal + eTax;
+  const eDiscount = Math.round(eSubtotal * (discountPct / 100));
+  const eTax      = vatOn(eSubtotal - eDiscount, canInvoiceTVA);
+  const eTotal    = eSubtotal - eDiscount + eTax;
 
   const filteredProducts = products.filter(p => !pickerQuery || p.name.toLowerCase().includes(pickerQuery.toLowerCase()));
 
   const openEdit = () => {
+    // The ERP look edits quotes in the invoice editor (PRO-185)
+    if (UI_V2) { navigate(`/quotes/${quote.id}/edit`); return; }
     setEClient(quote.client);
     setESubject(quote.subject);
     setEDate(quote.issued);
@@ -185,7 +192,7 @@ export default function QuotePage() {
     try {
       const blob = await renderInvoicePdf({
         template: invoiceTemplate,
-        invoice: { id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct: 0 },
+        invoice: { id: quote.id, subject: pdfSubject, client: quote.client, issued: pdfIssued, due: pdfValid, amount: pdfAmount, status: 'pending', discountPct, notes: quote.notes },
         lines: pdfLines,
         client,
         biz: orgSettings,
@@ -353,12 +360,21 @@ export default function QuotePage() {
             <div className="pp-totals">
               <div className="pp-totals-inner">
                 <div className="tot-row"><span>Sous-total</span><span className="tv">{fmt(subtotal)} F CFA</span></div>
+                {discountAmt > 0 && <div className="tot-row"><span>Remise ({discountPct} %)</span><span className="tv">− {fmt(discountAmt)} F CFA</span></div>}
                 {canInvoiceTVA && (
                   <div className="tot-row"><span>{VAT_LABEL}</span><span className="tv">{fmt(tax)} F CFA</span></div>
                 )}
                 <div className="tot-row grand"><span>Total estimé</span><span className="tv">{fmt(total)} F CFA</span></div>
               </div>
             </div>
+            {quote.notes && (
+              <div className="pp-pay">
+                <div>
+                  <div className="pp-block-label">Notes et conditions</div>
+                  <RichTextView doc={quote.notes} className="pp-note rich-text" />
+                </div>
+              </div>
+            )}
 
             <div className="pp-foot">{orgSettings.name || 'Mon entreprise'} · Devis généré via Billio · Ce document n'est pas une facture</div>
           </div>

@@ -10,6 +10,7 @@ import BillioMark from '@/components/BillioMark';
 import UpgradeModal from '@/components/UpgradeModal';
 import CommandBox from '@/components/CommandBox';
 import { useApp } from '@/context/AppContext';
+import { usePermissions } from '@/lib/use-permissions';
 import { ACCOUNTING_ENABLED } from '@/lib/features';
 import { PLAN_LABELS, minPlanForFeature, type Feature } from '@/lib/plans';
 import { ACCOUNTING_MENU, SALES_MENU, isLinkActive, type MenuGroup, type MenuLink } from '@/lib/nav';
@@ -189,6 +190,7 @@ function AreaMenu({ label, to, active, badge, groups, wide, hasFeature, onLocked
 
 function AccountMenu({ onLogout }: { onLogout: () => void }) {
   const { userLabel, userInitials, plan } = useApp();
+  const { managesOrg } = usePermissions();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -232,12 +234,18 @@ function AccountMenu({ onLogout }: { onLogout: () => void }) {
             <b>{userLabel || '…'}</b>
             <small>Plan {PLAN_LABELS[plan]}</small>
           </div>
-          <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/settings')}>
-            <span className="tn-mi-label"><Icon name="settings" size={15} ariaHidden /> Paramètres</span>
+          <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/profile')}>
+            <span className="tn-mi-label"><Icon name="user" size={15} ariaHidden /> Mon profil</span>
           </button>
-          <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/templates')}>
-            <span className="tn-mi-label"><Icon name="layout-grid" size={15} ariaHidden /> Modèles de facture</span>
-          </button>
+          {/* The organisation's settings and templates: admins (PRO-171) */}
+          {managesOrg && <>
+            <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/settings')}>
+              <span className="tn-mi-label"><Icon name="settings" size={15} ariaHidden /> Paramètres</span>
+            </button>
+            <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/templates')}>
+              <span className="tn-mi-label"><Icon name="layout-grid" size={15} ariaHidden /> Modèles de facture</span>
+            </button>
+          </>}
           <div className="tn-sep" role="separator" />
           <button type="button" role="menuitem" className="tn-mi danger" onClick={() => { setOpen(false); onLogout(); }}>
             <span className="tn-mi-label"><Icon name="logout" size={15} ariaHidden /> Se déconnecter</span>

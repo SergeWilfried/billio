@@ -1,6 +1,9 @@
 import { cadastralRequired, formatCadastralRef, parseCadastralRef } from '@/lib/cadastral';
-import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Navigate, useBlocker, useSearchParams } from 'react-router-dom';
+import { UI_V2 } from '@/lib/features';
+import { SaveBarContext, useSaveBar, type SaveBarActions, type SaveBarApi, type SaveBarState } from '@/lib/use-save-bar';
+import { FIELD_IDS, cadastralProblem, checklistMissing, complianceChecklist, ifuProblem, type ChecklistFix, type ChecklistRow } from '@/lib/settings-checks';
 import { canManageOrg } from '@/lib/permissions';
 import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
@@ -233,8 +236,29 @@ function ComplianceChecklist({ seller, orgId }: { seller: SellerInfo; orgId: str
   );
 }
 
-function BusinessSection() {
+/** A section whose values couldn't be read: its fields stay disabled until a retry works. */
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="s-load-failed">
+      <span>Ces informations n’ont pas pu être chargées : impossible de les modifier pour l’instant.</span>
+      <button type="button" className="btn btn-sm" onClick={onRetry}>Réessayer</button>
+    </div>
+  );
+}
+
+interface BizFields {
+  name: string; ifu: string; rccm: string; taxRegime: string; divisionFiscale: string; cadastralRef: string;
+  businessCreationDate: string; address: string; city: string; country: string; currency: string; email: string; phone: string;
+}
+
+/**
+ * `onDraft`: the seller as typed, for the DGI checklist beside the form (new
+ * interface); there the page's save bar replaces the card's button.
+ */
+function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void } = {}) {
   const { orgId, showToast, setOrgSettings } = useApp();
+  const [snapshot, setSnapshot] = useState<BizFields | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const [name,     setName]    = useState('');
   const [ifu,             setIfu]            = useState('');
@@ -251,6 +275,9 @@ function BusinessSection() {
   const [phone,    setPhone]   = useState('');
   const [loading,  setLoading] = useState(true);
   const [saving,   setSaving]  = useState(false);
+  // Not loaded: the form stays disabled (edits couldn't be saved or tracked) until a retry works
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt,    setAttempt]    = useState(0);
 
   useEffect(() => {
     if (!orgId) return;
@@ -260,44 +287,68 @@ function BusinessSection() {
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
-        if (error) { console.warn('[settings] org fetch:', error.message); setLoading(false); return; }
-        if (!data) return;
-        setName(data.name     ?? '');
-        setIfu(data.ifu               ?? '');
-        setRccm(data.rccm             ?? '');
-        setTaxRegime(data.tax_regime             ?? '');
-        setDivisionFiscale(data.division_fiscale ?? '');
-        setCadastralRef(formatCadastralRef(data.cadastral_ref));
-        setBusinessCreationDate(data.business_creation_date ?? '');
-        setAddress(data.address ?? '');
-        setCity(data.city     ?? '');
-        setCountry(data.country  ?? 'Burkina Faso');
-        setCurrency(data.currency ?? 'F CFA');
-        setEmail(data.email   ?? '');
-        setPhone(data.phone   ?? '');
+        if (error || !data) { console.warn('[settings] org fetch:', error?.message ?? 'no row'); setLoadFailed(true); return; }
+        const loaded: BizFields = {
+          name: data.name ?? '', ifu: data.ifu ?? '', rccm: data.rccm ?? '',
+          taxRegime: data.tax_regime ?? '', divisionFiscale: data.division_fiscale ?? '',
+          cadastralRef: formatCadastralRef(data.cadastral_ref), businessCreationDate: data.business_creation_date ?? '',
+          address: data.address ?? '', city: data.city ?? '', country: data.country ?? 'Burkina Faso',
+          currency: data.currency ?? 'F CFA', email: data.email ?? '', phone: data.phone ?? '',
+        };
+        apply(loaded);
+        setSnapshot(loaded);
         setLoading(false);
       });
-  }, [orgId]);
+  }, [orgId, attempt]);
 
-  async function handleSave() {
-    if (!orgId) return;
+  function apply(f: BizFields) {
+    setName(f.name); setIfu(f.ifu); setRccm(f.rccm); setTaxRegime(f.taxRegime); setDivisionFiscale(f.divisionFiscale);
+    setCadastralRef(f.cadastralRef); setBusinessCreationDate(f.businessCreationDate); setAddress(f.address);
+    setCity(f.city); setCountry(f.country); setCurrency(f.currency); setEmail(f.email); setPhone(f.phone);
+  }
+
+  const current: BizFields = { name, ifu, rccm, taxRegime, divisionFiscale, cadastralRef, businessCreationDate, address, city, country, currency, email, phone };
+  const dirty = snapshot !== null && (Object.keys(current) as (keyof BizFields)[]).some(k => current[k] !== snapshot[k]);
+  const ifuError = ifuProblem(country, ifu);
+  const cadastralError = cadastralProblem(cadastralRef);
+  // An error shows once the field is left, or straight away on a value already saved
+  const showIfuError = !!ifuError && (touched.ifu || ifu === snapshot?.ifu);
+  const showCadastralError = !!cadastralError && (touched.cadastre || cadastralRef === snapshot?.cadastralRef);
+
+  async function handleSave(): Promise<boolean> {
+    if (!orgId) return false;
     const cadastral = cadastralRef.trim() ? parseCadastralRef(cadastralRef) : '';
-    if (cadastral === null) { showToast('Référence cadastrale : 11 chiffres (section, îlot, parcelle), ex. 0123 456 7890.', true); return; }
+    if (cadastral === null) { showToast('Référence cadastrale : 11 chiffres (section, îlot, parcelle), ex. 0123 456 7890.', true); return false; }
     setSaving(true);
     const { error } = await supabase
       .from('organizations')
       .update({ name, ifu, rccm, tax_regime: taxRegime, division_fiscale: divisionFiscale, cadastral_ref: cadastral || null, business_creation_date: businessCreationDate || null, address, city, country, currency, email, phone })
       .eq('id', orgId);
     setSaving(false);
-    if (error) { showToast(error.message, true); return; }
+    if (error) { showToast(error.message, true); return false; }
     setOrgSettings(prev => ({ ...prev, name, ifu, rccm, taxRegime, divisionFiscale, cadastralRef: cadastral, businessCreationDate, address, city, country, email, phone }));
+    const saved = { ...current, cadastralRef: formatCadastralRef(cadastral) };
+    // Shown as « SSSS LLL PPPP », unless it was changed again while saving
+    const submitted = cadastralRef;
+    setCadastralRef(v => (v === submitted ? saved.cadastralRef : v));
+    setSnapshot(saved);
+    setTouched({});
     posthog.capture('settings_saved', { section: 'business' });
     showToast('Entreprise enregistrée');
+    return true;
   }
+
+  const inBar = useSaveBar(
+    { dirty, problem: ifuError ?? cadastralError, saving },
+    { save: handleSave, reset: () => { if (snapshot) { apply(snapshot); setTouched({}); } } },
+  );
+  useEffect(() => {
+    if (!loading) onDraft?.({ name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef });
+  }, [onDraft, loading, name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef]);
 
   return (
     <>
-    {!loading && (
+    {!loading && !inBar && (
       <ComplianceChecklist
         seller={{ name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef }}
         orgId={orgId}
@@ -309,24 +360,27 @@ function BusinessSection() {
         <div className="s-card-desc">Affichées sur chaque facture et devis que vous envoyez.</div>
       </div>
       <div className="s-card-body">
+        {loadFailed && <LoadFailed onRetry={() => { setLoadFailed(false); setAttempt(a => a + 1); }} />}
         <div className="s-field">
-          <label className="s-label">Raison sociale</label>
-          <input className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={loading} />
+          <label className="s-label" htmlFor={FIELD_IDS.name}>Raison sociale</label>
+          <input id={FIELD_IDS.name} className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={loading} />
         </div>
         <div className="s-field-row">
           <div className="s-field">
-            <label className="s-label">{getFiscalIdLabel(country)}</label>
-            <input className="form-input" value={ifu} onChange={e => setIfu(e.target.value)} disabled={loading} placeholder="00012345 B" />
+            <label className="s-label" htmlFor={FIELD_IDS.ifu}>{getFiscalIdLabel(country)}</label>
+            <input id={FIELD_IDS.ifu} className="form-input" value={ifu} onChange={e => setIfu(e.target.value)} onBlur={() => setTouched(t => ({ ...t, ifu: true }))} disabled={loading} placeholder="00012345 B"
+              aria-invalid={showIfuError || undefined} aria-describedby={showIfuError ? 'set-ifu-error' : undefined} />
+            {showIfuError && <div id="set-ifu-error" className="s-field-error">{ifuError}</div>}
           </div>
           <div className="s-field">
-            <label className="s-label">RCCM</label>
-            <input className="form-input" value={rccm} onChange={e => setRccm(e.target.value)} disabled={loading} placeholder="BF-OUA-2021-B-1234" />
+            <label className="s-label" htmlFor={FIELD_IDS.rccm}>RCCM</label>
+            <input id={FIELD_IDS.rccm} className="form-input" value={rccm} onChange={e => setRccm(e.target.value)} disabled={loading} placeholder="BF-OUA-2021-B-1234" />
           </div>
         </div>
         <div className="s-field-row">
           <div className="s-field">
-            <label className="s-label">Régime fiscal</label>
-            <select className="form-input" value={taxRegime} onChange={e => setTaxRegime(e.target.value)} disabled={loading}>
+            <label className="s-label" htmlFor={FIELD_IDS.regime}>Régime fiscal</label>
+            <select id={FIELD_IDS.regime} className="form-input" value={taxRegime} onChange={e => setTaxRegime(e.target.value)} disabled={loading}>
               <option value="">— Sélectionner —</option>
               <option value="RNI">RNI — Régime normal d'imposition (CA ≥ 50M F CFA)</option>
               <option value="RSI">RSI — Régime simplifié d'imposition (CA 15–50M F CFA)</option>
@@ -334,16 +388,19 @@ function BusinessSection() {
             </select>
           </div>
           <div className="s-field">
-            <label className="s-label">Division fiscale</label>
-            <input className="form-input" value={divisionFiscale} onChange={e => setDivisionFiscale(e.target.value)} disabled={loading} placeholder="ex. Ouagadougou I" />
+            <label className="s-label" htmlFor={FIELD_IDS.division}>Division fiscale</label>
+            <input id={FIELD_IDS.division} className="form-input" value={divisionFiscale} onChange={e => setDivisionFiscale(e.target.value)} disabled={loading} placeholder="ex. Ouagadougou I" />
           </div>
         </div>
         <div className="s-field">
-          <label className="s-label">Référence cadastrale du lieu de vente</label>
-          <input className="form-input" value={cadastralRef} onChange={e => setCadastralRef(e.target.value)} disabled={loading} placeholder="Section, îlot, parcelle : 0123 456 7890" inputMode="numeric" />
-          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-            Mention obligatoire sur les factures (11 chiffres : section 4, îlot 3, parcelle 4).
-          </div>
+          <label className="s-label" htmlFor={FIELD_IDS.cadastre}>Référence cadastrale du lieu de vente</label>
+          <input id={FIELD_IDS.cadastre} className="form-input" value={cadastralRef} onChange={e => setCadastralRef(e.target.value)} onBlur={() => setTouched(t => ({ ...t, cadastre: true }))} disabled={loading} placeholder="Section, îlot, parcelle : 0123 456 7890" inputMode="numeric"
+            aria-invalid={showCadastralError || undefined} aria-describedby={showCadastralError ? 'set-cadastre-error' : 'set-cadastre-hint'} />
+          {showCadastralError
+            ? <div id="set-cadastre-error" className="s-field-error">{cadastralError}</div>
+            : <div id="set-cadastre-hint" style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+                Mention obligatoire sur les factures, au format SSSS LLL PPPP (section 4 chiffres, îlot 3, parcelle 4).
+              </div>}
         </div>
         <div className="s-field">
           <label className="s-label">Date de création de l'entreprise</label>
@@ -353,8 +410,8 @@ function BusinessSection() {
           </div>
         </div>
         <div className="s-field">
-          <label className="s-label">Adresse</label>
-          <input className="form-input" value={address} onChange={e => setAddress(e.target.value)} disabled={loading} placeholder="Av. Kwame Nkrumah, Immeuble Baobab" />
+          <label className="s-label" htmlFor={FIELD_IDS.address}>Adresse</label>
+          <input id={FIELD_IDS.address} className="form-input" value={address} onChange={e => setAddress(e.target.value)} disabled={loading} placeholder="Av. Kwame Nkrumah, Immeuble Baobab" />
         </div>
         <div className="s-field-row">
           <div className="s-field">
@@ -385,11 +442,13 @@ function BusinessSection() {
           </div>
         </div>
       </div>
-      <div className="s-card-foot">
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-          {saving ? 'Enregistrement…' : 'Enregistrer'}
-        </button>
-      </div>
+      {!inBar && (
+        <div className="s-card-foot">
+          <button className="btn btn-primary" onClick={() => void handleSave()} disabled={saving || loading}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      )}
     </div>
     </>
   );
@@ -398,8 +457,11 @@ function BusinessSection() {
 const TERMS_OPTIONS = ['À réception', 'Net 7 jours', 'Net 14 jours', 'Net 30 jours'];
 
 /* ─── Invoicing ─────────────────────────────────────────────────── */
+interface InvoicingFields { prefix: string; nextNum: string; terms: string; deliveryTerms: string; taxRate: number; footer: string }
+
 function InvoicingSection() {
   const { orgId, showToast, setOrgSettings } = useApp();
+  const [snapshot, setSnapshot] = useState<InvoicingFields | null>(null);
 
   const [prefix,        setPrefix]        = useState('INV-');
   const [nextNum,       setNextNum]        = useState('0001');
@@ -409,6 +471,8 @@ function InvoicingSection() {
   const [footer,        setFooter]        = useState('');
   const [loading,       setLoading]       = useState(true);
   const [saving,        setSaving]        = useState(false);
+  const [loadFailed,    setLoadFailed]    = useState(false);
+  const [attempt,       setAttempt]       = useState(0);
 
   const [autoReminders, setAutoReminders] = useState(true);
   const [attachPdf,     setAttachPdf]     = useState(true);
@@ -422,31 +486,44 @@ function InvoicingSection() {
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
-        if (error) { console.warn('[settings] invoicing fetch:', error.message); setLoading(false); return; }
-        if (!data) return;
-        setPrefix(data.inv_prefix          ?? 'INV-');
-        setNextNum(data.inv_next_number    ?? '0001');
-        setTerms(data.payment_terms        ?? 'Net 14 jours');
-        setDeliveryTerms(data.delivery_terms ?? 'À convenir');
-        setTaxRate(Number(data.default_tax_rate ?? 18));
-        setFooter(data.invoice_footer      ?? '');
+        if (error || !data) { console.warn('[settings] invoicing fetch:', error?.message ?? 'no row'); setLoadFailed(true); return; }
+        const loaded = {
+          prefix: data.inv_prefix ?? 'INV-', nextNum: data.inv_next_number ?? '0001',
+          terms: data.payment_terms ?? 'Net 14 jours', deliveryTerms: data.delivery_terms ?? 'À convenir',
+          taxRate: Number(data.default_tax_rate ?? 18), footer: data.invoice_footer ?? '',
+        };
+        applyInvoicing(loaded);
+        setSnapshot(loaded);
         setLoading(false);
       });
-  }, [orgId]);
+  }, [orgId, attempt]);
 
-  async function handleSave() {
-    if (!orgId) return;
+  function applyInvoicing(f: InvoicingFields) {
+    setPrefix(f.prefix); setNextNum(f.nextNum); setTerms(f.terms); setDeliveryTerms(f.deliveryTerms); setTaxRate(f.taxRate); setFooter(f.footer);
+  }
+  const current: InvoicingFields = { prefix, nextNum, terms, deliveryTerms, taxRate, footer };
+  const dirty = snapshot !== null && (Object.keys(current) as (keyof InvoicingFields)[]).some(k => current[k] !== snapshot[k]);
+
+  async function handleSave(): Promise<boolean> {
+    if (!orgId) return false;
     setSaving(true);
     const { error } = await supabase
       .from('organizations')
       .update({ inv_prefix: prefix, inv_next_number: nextNum, payment_terms: terms, delivery_terms: deliveryTerms, default_tax_rate: taxRate, invoice_footer: footer })
       .eq('id', orgId);
     setSaving(false);
-    if (error) { showToast(error.message, true); return; }
+    if (error) { showToast(error.message, true); return false; }
     setOrgSettings(prev => ({ ...prev, paymentTerms: terms, deliveryTerms }));
+    setSnapshot(current);
     posthog.capture('settings_saved', { section: 'invoicing' });
     showToast('Paramètres de facturation enregistrés');
+    return true;
   }
+
+  const inBar = useSaveBar(
+    { dirty, problem: null, saving },
+    { save: handleSave, reset: () => { if (snapshot) applyInvoicing(snapshot); } },
+  );
 
   return (
     <>
@@ -456,6 +533,7 @@ function InvoicingSection() {
           <div className="s-card-desc">Pré-remplis sur chaque nouvelle facture. Vous pouvez les modifier par facture.</div>
         </div>
         <div className="s-card-body">
+          {loadFailed && <LoadFailed onRetry={() => { setLoadFailed(false); setAttempt(a => a + 1); }} />}
           <div className="s-field-row">
             <div className="s-field">
               <label className="s-label">Préfixe numéro</label>
@@ -493,13 +571,16 @@ function InvoicingSection() {
             <textarea className="form-input" rows={2} value={footer} onChange={e => setFooter(e.target.value)} disabled={loading} />
           </div>
         </div>
-        <div className="s-card-foot">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-            {saving ? 'Enregistrement…' : 'Enregistrer'}
-          </button>
-        </div>
+        {!inBar && (
+          <div className="s-card-foot">
+            <button className="btn btn-primary" onClick={() => void handleSave()} disabled={saving || loading}>
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
       </div>
-      <div className="s-card">
+      {/* New interface: in « Automatisation », where these settings will be saved */}
+      {!inBar && <div className="s-card">
         <div className="s-card-head"><div className="s-card-title">Automatisation</div></div>
         <div className="s-card-body">
           <div className="s-row">
@@ -530,7 +611,7 @@ function InvoicingSection() {
             <div className="s-row-aside"><Toggle on={lateFees} onChange={setLateFees} /></div>
           </div>
         </div>
-      </div>
+      </div>}
     </>
   );
 }
@@ -1701,7 +1782,7 @@ function PlanSection() {
 /* ─── Main component ────────────────────────────────────────────── */
 const ORG_TABS: SettingsTab[] = ['business', 'invoicing', 'payments', 'providers'];
 
-export default function SettingsPage() {
+function LegacySettingsPage() {
   const { showToast } = useApp();
   const { managesOrg } = usePermissions();
   // ?tab= opens a section directly (e.g. links from the invoice compliance warning)
@@ -1767,6 +1848,258 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
+    </Page>
+  );
+}
+
+export default function SettingsPage() {
+  return UI_V2 ? <SettingsPageV2 /> : <LegacySettingsPage />;
+}
+
+/* ─── New interface (PRO-171) ───────────────────────────────────── */
+type SectionV2 = 'business' | 'compliance' | 'invoicing' | 'payments' | 'providers' | 'team' | 'automation' | 'plan';
+
+const SECTIONS_V2: { key: SectionV2; icon: string; label: string }[] = [
+  { key: 'business',   icon: 'building',       label: 'Entreprise' },
+  { key: 'compliance', icon: 'shield-check',   label: 'Conformité DGI' },
+  { key: 'invoicing',  icon: 'file-invoice',   label: 'Facturation par défaut' },
+  { key: 'payments',   icon: 'credit-card',    label: 'Moyens de paiement' },
+  { key: 'providers',  icon: 'plug-connected', label: 'Paiements en ligne' },
+  { key: 'team',       icon: 'users',          label: 'Équipe et accès' },
+  { key: 'automation', icon: 'bell',           label: 'Automatisation' },
+  { key: 'plan',       icon: 'sparkles',       label: 'Abonnement' },
+];
+/** Sections whose fields the DGI checklist reads: it sits beside them */
+const WITH_CHECKLIST: SectionV2[] = ['business', 'invoicing', 'payments', 'providers'];
+const ORG_SECTIONS: SectionV2[] = ['business', 'invoicing', 'payments', 'providers'];
+
+/** Old ?tab= links (from the invoice editor and elsewhere) to the new sections. */
+function sectionFromParam(t: string | null): SectionV2 | 'profile' {
+  if (t === 'profile') return 'profile';
+  if (t === 'reminders' || t === 'notifications') return 'automation';
+  return SECTIONS_V2.some(s => s.key === t) ? (t as SectionV2) : 'business';
+}
+
+function DgiChecklist({ rows, onFix, large = false }: { rows: ChecklistRow[]; onFix: (fix: ChecklistFix) => void; large?: boolean }) {
+  const required = rows.filter(r => r.state !== 'auto' && r.state !== 'info');
+  const done = required.filter(r => r.state === 'ok').length;
+  const missing = checklistMissing(rows);
+  return (
+    <section className={`s2-check${large ? ' large' : ''}`} aria-labelledby="s2-check-title">
+      <div className="s2-check-head">
+        <h2 id="s2-check-title">Conformité DGI</h2>
+        <span className={`s2-count${missing ? ' warn' : ''}`}>{done} / {required.length}</span>
+      </div>
+      <p className="s2-check-intro">
+        {missing === 0
+          ? 'Vos factures portent toutes les mentions obligatoires de l’entreprise.'
+          : 'Il manque des mentions obligatoires : sans elles, vos clients professionnels risquent de ne pas pouvoir déduire la TVA.'}
+      </p>
+      <ul className="s2-check-list">
+        {rows.map(r => (
+          <li key={r.key} className={`s2-row ${r.state}`}>
+            <Icon name={r.state === 'ok' || r.state === 'auto' ? 'circle-check' : r.state === 'missing' ? 'alert-triangle' : 'dots'} size={16} ariaHidden />
+            <span className="s2-row-main">
+              {r.label}
+              <span className="sr-only">{r.state === 'ok' ? ' : renseigné' : r.state === 'auto' ? ' : automatique' : r.state === 'missing' ? ' : manquant' : ' : non vérifié'}</span>
+              {r.state === 'auto' && <small>Automatique</small>}
+              {r.state !== 'ok' && r.state !== 'auto' && r.hint && <small>{r.hint}</small>}
+            </span>
+            {(r.state === 'missing' || r.state === 'unknown') && r.fix && (
+              <button type="button" className="s2-fix" onClick={() => onFix(r.fix!)}>Corriger<span className="sr-only"> : {r.label}</span></button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="s2-secef">
+        <Icon name="shield-check" size={16} ariaHidden />
+        <span className="s2-row-main">
+          Facturation certifiée SECeF
+          <small>Pas encore active. Une fois vos factures certifiées, chacune portera le code et le QR SECeF. N’empêche pas d’émettre.</small>
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function SettingsPageV2() {
+  const { orgId, orgSettings, showToast } = useApp();
+  const { managesOrg } = usePermissions();
+  const [searchParams] = useSearchParams();
+  const initial = sectionFromParam(searchParams.get('tab'));
+  const [section, setSection] = useState<SectionV2>(initial === 'profile' ? 'business' : initial);
+  const [draft, setDraft] = useState<SellerInfo | null>(null);
+  const [payments, setPayments] = useState<PaymentSettings | null | undefined>(undefined);
+  const [bar, setBar] = useState<SaveBarState | null>(null);
+  const actionsRef = useRef<SaveBarActions | null>(null);
+  const [focusField, setFocusField] = useState<string | null>(null);
+
+  const loadPayments = useCallback(() => {
+    if (!orgId) return;
+    fetchPaymentSettings(orgId).then(setPayments, () => setPayments(null));
+  }, [orgId]);
+  useEffect(() => { loadPayments(); }, [loadPayments]);
+
+  const api = useMemo<SaveBarApi>(() => ({
+    report: (state, actions) => {
+      actionsRef.current = actions;
+      setBar(prev => (prev === null && state === null) || (prev && state && prev.dirty === state.dirty && prev.problem === state.problem && prev.saving === state.saving) ? prev : state);
+    },
+  }), []);
+  const dirty = !!bar?.dirty;
+
+  // Leaving with unsaved changes asks first, as in the invoice editor
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (window.confirm('Des modifications ne sont pas enregistrées. Quitter sans enregistrer ?')) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+  useEffect(() => {
+    if (!dirty) return;
+    const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]);
+
+  // The field a « Corriger » link points to, once its section is on screen
+  // (the section may still be loading, its fields disabled: tried again until they can take it)
+  useEffect(() => {
+    if (!focusField) return;
+    let tries = 0;
+    const tryFocus = () => {
+      const el = document.getElementById(focusField) as HTMLInputElement | null;
+      if (el && !el.disabled) {
+        el.scrollIntoView({ block: 'center' });
+        el.focus();
+        setFocusField(null);
+        return true;
+      }
+      return false;
+    };
+    if (tryFocus()) return;
+    const timer = window.setInterval(() => {
+      // Given up after 10 s (the section couldn't load)
+      if (tryFocus() || ++tries >= 100) { window.clearInterval(timer); if (tries >= 100) setFocusField(null); }
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [focusField, section]);
+
+  function go(next: SectionV2): boolean {
+    if (next === section) return true;
+    if (dirty) {
+      if (!window.confirm('Des modifications ne sont pas enregistrées. Les abandonner ?')) return false;
+      actionsRef.current?.reset();
+    }
+    setDraft(null);
+    setSection(next);
+    return true;
+  }
+
+  function fix(f: ChecklistFix) {
+    if (!go(f.tab)) return;
+    if (f.field) setFocusField(f.field);
+  }
+
+  async function save() {
+    if (!actionsRef.current || !bar || bar.problem) return;
+    await actionsRef.current.save();
+  }
+
+  const onPaymentsSaved = () => { showToast('Moyens de paiement enregistrés'); loadPayments(); };
+  const seller: SellerInfo = draft ?? {
+    name: orgSettings.name, address: orgSettings.address, city: orgSettings.city, country: orgSettings.country,
+    ifu: orgSettings.ifu, rccm: orgSettings.rccm, taxRegime: orgSettings.taxRegime, divisionFiscale: orgSettings.divisionFiscale,
+    cadastralRef: orgSettings.cadastralRef,
+  };
+  const rows = payments === undefined ? null : complianceChecklist(seller, payments);
+  const missingBusiness = rows ? rows.filter(r => r.state === 'missing' && r.fix?.tab === 'business').length : 0;
+  const missingPayments = rows ? rows.filter(r => r.state === 'missing' && r.fix?.tab === 'payments').length : 0;
+  const withChecklist = WITH_CHECKLIST.includes(section);
+
+  if (initial === 'profile') return <Navigate to="/profile" replace />;
+
+  return (
+    <Page title="Paramètres" subtitle={managesOrg ? 'Les informations de l’entreprise imprimées sur vos factures, et le fonctionnement de Billio.' : 'Seuls les administrateurs peuvent modifier ces paramètres.'}>
+      <SaveBarContext.Provider value={api}>
+        <div className={`s2-grid${withChecklist ? '' : ' no-aside'}`}>
+          <nav className="s2-nav" aria-label="Sections des paramètres">
+            {SECTIONS_V2.map(s => {
+              const n = s.key === 'business' || s.key === 'compliance' ? missingBusiness + (s.key === 'compliance' ? missingPayments : 0)
+                : s.key === 'payments' ? missingPayments : 0;
+              return (
+                <button key={s.key} type="button" className={`s2-nav-item${section === s.key ? ' active' : ''}`} aria-current={section === s.key ? 'page' : undefined} onClick={() => go(s.key)}>
+                  <Icon name={s.icon} size={16} ariaHidden />
+                  <span>{s.label}</span>
+                  {n > 0 && <span className="s2-nav-count" aria-label={`${n} à corriger`}>{n}</span>}
+                </button>
+              );
+            })}
+            <p className="s2-nav-note">Votre profil : depuis le menu du compte.</p>
+          </nav>
+
+          <div className="s2-main">
+            {ORG_SECTIONS.includes(section) && !managesOrg && (
+              <div className="s-card">
+                <div className="s-card-body" style={{ color: 'var(--color-text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Icon name="lock" size={16} ariaHidden />
+                  Seuls les administrateurs peuvent modifier ces paramètres.
+                </div>
+              </div>
+            )}
+            <fieldset disabled={!managesOrg} style={{ border: 0, margin: 0, padding: 0, minWidth: 0, display: 'contents' }}>
+              {section === 'business'  && <BusinessSection onDraft={setDraft} />}
+              {section === 'invoicing' && <InvoicingSection />}
+              {section === 'payments'  && <PaymentMethodsSection onSave={onPaymentsSaved} />}
+              {section === 'providers' && <ProvidersSection onSave={onPaymentsSaved} />}
+            </fieldset>
+            {section === 'compliance' && (rows
+              ? <DgiChecklist rows={rows} onFix={fix} large />
+              : <div className="s-card"><div className="s-card-body">Chargement…</div></div>)}
+            {section === 'team' && <TeamSection />}
+            {section === 'plan' && <PlanSection />}
+            {section === 'automation' && (
+              <div className="s-card">
+                <div className="s-card-head">
+                  <div className="s-card-title">Automatisation</div>
+                  <div className="s-card-desc">Relances automatiques, PDF joint aux e-mails, pénalités de retard, notifications.</div>
+                </div>
+                <div className="s-card-body" style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: '40px 20px' }}>
+                  <div style={{ fontWeight: 600 }}>Bientôt disponible</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {withChecklist && (
+            <aside className="s2-aside" aria-label="Conformité DGI">
+              {rows ? <DgiChecklist rows={rows} onFix={fix} /> : <div className="s2-check">Chargement…</div>}
+            </aside>
+          )}
+        </div>
+
+        {dirty && (
+          <div className="s2-savebar" role="region" aria-label="Modifications non enregistrées">
+            <span className="s2-savebar-dot" aria-hidden="true" />
+            <span className="s2-savebar-text">{bar?.problem ?? 'Modifications non enregistrées'}</span>
+            <button type="button" className="btn" onClick={() => actionsRef.current?.reset()} disabled={bar?.saving}>Annuler</button>
+            <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={bar?.saving || !!bar?.problem}>
+              {bar?.saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
+      </SaveBarContext.Provider>
+    </Page>
+  );
+}
+
+/** « Mon profil », from the account menu (new interface): every member's own details. */
+export function ProfilePage() {
+  return (
+    <Page title="Mon profil" subtitle="Vos informations personnelles, pour votre compte et le journal d’activité.">
+      <div style={{ maxWidth: 720 }}>
+        <ProfileSection />
+      </div>
     </Page>
   );
 }

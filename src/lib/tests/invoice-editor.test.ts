@@ -40,6 +40,9 @@ describe('draft and issue checks', () => {
     expect(draftProblem('C1', '2026-11-15', '2026-11-01', ok)).toMatch(/échéance/);
     expect(draftProblem('C1', '2026-11-15', '2026-11-29', ok)).toBeNull();
   });
+  it('speaks of the validity date for a quote', () => {
+    expect(draftProblem('C1', '2026-11-15', '2026-11-01', ok, true)).toMatch(/validité/);
+  });
   it('lets a zero line be saved as a draft but not issued', () => {
     const zero = [...ok, line('b', 'Offert', 1, 0)];
     expect(draftProblem('C1', '2026-11-15', '2026-11-29', zero)).toBeNull();

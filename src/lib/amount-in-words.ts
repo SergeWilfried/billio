@@ -52,7 +52,7 @@ export function numberInWords(value: number): string {
  * The total in words: "Arrêtée la présente facture à la somme de cent
  * dix-huit mille francs CFA." (a quote: "Arrêté le présent devis …").
  */
-export function invoiceTotalMention(amount: number, document: 'facture' | 'devis' = 'facture'): string {
-  const doc = document === 'devis' ? 'Arrêté le présent devis' : 'Arrêtée la présente facture';
+export function invoiceTotalMention(amount: number, document: 'facture' | 'devis' | 'avoir' = 'facture'): string {
+  const doc = document === 'devis' ? 'Arrêté le présent devis' : document === 'avoir' ? 'Arrêté le présent avoir' : 'Arrêtée la présente facture';
   return `${doc} à la somme de ${numberInWords(amount)} francs CFA.`;
 }

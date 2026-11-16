@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { INITIAL_QUOTES, mockOwner } from '@/data';
 import type { Quote } from '@/lib/schemas';
+import { cleanRichText } from '@/lib/rich-text';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
@@ -17,9 +18,17 @@ export function dbToQuote(row: Record<string, unknown>): Quote {
     amount:  Number(row.amount),
     status:  (row.status ?? 'draft') as Quote['status'],
     invoiceId: row.invoice_id ? String(row.invoice_id) : undefined,
+    discountPct: Number(row.discount_pct ?? 0),
+    notes: cleanRichText(row.notes) ?? undefined,
     ownerId:     row.owner_id ? String(row.owner_id) : undefined,
     ownerName:   row.owner_name ? String(row.owner_name) : undefined,
   };
+}
+
+/** The quote was invoiced, declined or expired meanwhile: the editor's changes were not saved. */
+export class QuoteLockedError extends Error {
+  readonly quoteId: string;
+  constructor(quoteId: string) { super(`quote ${quoteId} can no longer be edited`); this.name = 'QuoteLockedError'; this.quoteId = quoteId; }
 }
 
 export async function nextQuoteId(orgId: string): Promise<string> {
@@ -42,7 +51,7 @@ export async function fetchQuotes(orgId: string): Promise<Quote[]> {
 
 export async function createQuote(
   orgId: string,
-  payload: Pick<Quote, 'id' | 'subject' | 'client' | 'issued' | 'valid' | 'amount' | 'status'>,
+  payload: Pick<Quote, 'id' | 'subject' | 'client' | 'issued' | 'valid' | 'amount' | 'status'> & Partial<Pick<Quote, 'discountPct' | 'notes'>>,
 ): Promise<Quote> {
   const daysLeft = (new Date(payload.valid).getTime() - Date.now()) / 86_400_000;
   const expSoon  = daysLeft > 0 && daysLeft <= 14;
@@ -59,6 +68,8 @@ export async function createQuote(
       valid_until: payload.valid,
       amount:      payload.amount,
       status:      payload.status,
+      discount_pct: payload.discountPct ?? 0,
+      notes:       payload.notes ?? null,
       created_by:  user?.id ?? null,
     })
     .select()
@@ -70,9 +81,9 @@ export async function createQuote(
 export async function updateQuote(
   orgId: string,
   id: string,
-  patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount'>> & { invoiceId?: string | null },
+  patch: Partial<Pick<Quote, 'status' | 'subject' | 'client' | 'issued' | 'valid' | 'amount' | 'discountPct'>> & { invoiceId?: string | null; notes?: Quote['notes'] | null },
   /** Only when the quote still links to this invoice (clearing a link that may have changed meanwhile) */
-  opts: { onlyIfInvoiceId?: string } = {},
+  opts: { onlyIfInvoiceId?: string; onlyEditable?: boolean } = {},
 ): Promise<void> {
   if (MOCK) return;
   const dbPatch: Record<string, unknown> = {};
@@ -83,8 +94,17 @@ export async function updateQuote(
   if (patch.valid   !== undefined) dbPatch.valid_until  = patch.valid;
   if (patch.amount  !== undefined) dbPatch.amount       = patch.amount;
   if (patch.invoiceId !== undefined) dbPatch.invoice_id = patch.invoiceId;
+  if (patch.discountPct !== undefined) dbPatch.discount_pct = patch.discountPct;
+  if (patch.notes !== undefined) dbPatch.notes = patch.notes;
   let query = supabase.from('quotes').update(dbPatch).eq('org_id', orgId).eq('id', id);
   if (opts.onlyIfInvoiceId) query = query.eq('invoice_id', opts.onlyIfInvoiceId);
+  if (opts.onlyEditable) {
+    // Invoiced, declined or expired meanwhile: nothing is written, and the caller stops
+    const { data, error } = await query.in('status', ['draft', 'sent', 'accepted']).select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) throw new QuoteLockedError(id);
+    return;
+  }
   const { error } = await query;
   if (error) throw error;
 }

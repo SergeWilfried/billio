@@ -19,7 +19,7 @@ describe('invoiceBadge', () => {
 
 describe('invoiceActivity', () => {
   it('lists what happened, newest first', () => {
-    const credit: CreditNote = { id: 'C1', invoiceId: 'I1', subject: '', client: 'KB', issued: '2026-10-20', amount: 8_000, reason: 'Remise', number: 'AV-2026-0001' };
+    const credit: CreditNote = { id: 'C1', invoiceId: 'I1', subject: '', client: 'KB', issued: '2026-10-20', amount: 8_000, reason: 'Remise', number: 'AV-2026-0001', status: 'issued', lines: [], discountPct: 0 };
     const a = invoiceActivity(inv({ firstIssuedAt: '2026-10-01T09:00:00Z', issuedByName: 'Awa', number: 'FACT-2026-0007' }),
       [pay(50_000, '2026-10-15', { createdByName: 'Issa' }), pay(10_000, '2026-11-02', { status: 'pending' })], [credit], n => String(n), today);
     expect(a.map(e => e.text)).toEqual([

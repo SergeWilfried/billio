@@ -39,13 +39,13 @@ export function lineProblems(lines: LineItem[]): Record<string, string> {
   return out;
 }
 
-/** Why the draft can't be saved yet, or null. */
-export function draftProblem(client: string, issued: string, due: string, lines: LineItem[]): string | null {
+/** Why the draft can't be saved yet, or null. `quote`: `due` is the validity date (PRO-185). */
+export function draftProblem(client: string, issued: string, due: string, lines: LineItem[], quote = false): string | null {
   if (!client) return 'Choisissez un client.';
   if (filledLines(lines).length === 0) return 'Ajoutez au moins une ligne.';
   if (filledLines(lines).some(l => l.desc.trim() === '')) return 'Chaque ligne doit avoir une description.';
   if (filledLines(lines).some(l => !(l.qty > 0) || l.price < 0)) return 'Corrigez les lignes signalées.';
-  if (due < issued) return 'L’échéance doit suivre la date de facturation.';
+  if (due < issued) return quote ? 'La date de validité doit suivre la date du devis.' : 'L’échéance doit suivre la date de facturation.';
   return null;
 }
 
