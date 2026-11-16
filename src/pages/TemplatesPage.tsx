@@ -65,6 +65,8 @@ interface Template {
 const PRESET_ID = (key: string) => `preset:${key}`;
 /** invoice_templates.name is limited to 80 characters */
 const NAME_MAX = 80;
+/** The name as it is saved: trimmed, at most NAME_MAX, « Nouveau modèle » when empty */
+const savedName = (name: string) => name.trim().slice(0, NAME_MAX).trim() || 'Nouveau modèle';
 
 function galleryTemplates(saved: SavedTemplate[]): Template[] {
   const hasDefault = saved.some(t => t.isDefault);
@@ -528,7 +530,7 @@ export default function TemplatesPage() {
   const dirty = UI_V2 && editingId !== null && (
     editingId === 'new' || !editedTpl
       ? true
-      : edName !== editedTpl.name || JSON.stringify(normalizeConfig(edConfig)) !== JSON.stringify(normalizeConfig(editedTpl.config))
+      : savedName(edName) !== editedTpl.name || JSON.stringify(normalizeConfig(edConfig)) !== JSON.stringify(normalizeConfig(editedTpl.config))
   );
   // Leaving with unsaved changes asks first, as in the invoice editor
   const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && managesOrg && currentLocation.pathname !== nextLocation.pathname);
@@ -594,7 +596,7 @@ export default function TemplatesPage() {
   function saveTemplate() {
     if (view === 'gallery') return;
     const { id } = view;
-    const name = edName.trim().slice(0, NAME_MAX).trim() || 'Nouveau modèle';
+    const name = savedName(edName);
     const config = { ...edConfig };
     void run(async () => {
       if (id === 'new') {
@@ -628,6 +630,8 @@ export default function TemplatesPage() {
     if (!tpl) return;
     void run(async () => {
       const row = await ensureSaved(tpl);
+      // A preset saved here gets a row of its own: the editor follows it
+      if (UI_V2 && editorId === tpl.id && row.id !== tpl.id) setView({ kind: 'editor', id: row.id });
       await setDefaultTemplate(orgId, row.id);
       setInvoiceTemplate(row.config);
       posthog.capture('template_changed', { template_name: row.name, layout: row.config.layout });
@@ -644,7 +648,8 @@ export default function TemplatesPage() {
 
   /** Another template, or a new one: unsaved changes are confirmed first. */
   function select(id: string) {
-    if (id === editorId) return;
+    // Not while a template is being saved: its completion selects it again
+    if (id === editorId || busy) return;
     if (dirty && managesOrg && !window.confirm('Ce modèle a des modifications non enregistrées. Les abandonner ?')) return;
     openEditor(id);
   }
@@ -670,7 +675,7 @@ export default function TemplatesPage() {
             </button>
           )}
           {templates.map(t => (
-            <button type="button" key={t.id} className={`tpl-ws-item${t.id === editorId ? ' active' : ''}`} aria-current={t.id === editorId ? 'true' : undefined} onClick={() => select(t.id)}>
+            <button type="button" key={t.id} className={`tpl-ws-item${t.id === editorId ? ' active' : ''}`} aria-current={t.id === editorId ? 'true' : undefined} onClick={() => select(t.id)} disabled={busy && t.id !== editorId}>
               <span className="tpl-ws-name">{t.name}</span>
               <small>{t.isDefault ? 'Par défaut · factures, avoirs et devis' : t.purpose}</small>
             </button>

@@ -1276,6 +1276,11 @@ select.form-input {
 .tpl-ws-side .ed-group { padding: 14px 16px; }
 .tpl-ws-field { display: flex; flex-direction: column; gap: 5px; padding: 14px 16px 0; font-size: 12.5px; font-weight: 600; color: var(--color-text-secondary); }
 .tpl-ws-actions { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 16px; background: var(--color-background-primary); border-top: 1px solid var(--color-border-tertiary); }
+/* A narrow window: list, preview and settings one under the other */
+@media (max-width: 1100px) {
+  .tpl-ws, .tpl-ws.readonly { grid-template-columns: minmax(0, 1fr); }
+  .tpl-ws-list, .tpl-ws-side { position: static; max-height: none; }
+}
 .tpl-locked { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; }
 .tpl-locked li { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 13px; color: var(--color-text-primary); }
 .tpl-locked li > i { color: var(--color-text-tertiary); }
@@ -1365,6 +1370,7 @@ select.form-input {
 
 .s-col { min-width: 0; display: flex; flex-direction: column; gap: 18px; }
 .s-field-error { margin-top: 4px; font-size: 12px; font-weight: 600; color: #B42318; }
+.s-load-failed { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding: 10px 12px; border-radius: 6px; background: #FDECEA; color: #8A1C12; font-size: 13px; }
 .s-field .form-input[aria-invalid="true"] { border-color: #B42318; background: #FFF6F5; }
 
 /* Paramètres, new interface (PRO-171): sections, form, DGI checklist, save bar */
@@ -1402,6 +1408,11 @@ select.form-input {
 .s2-savebar-dot { width: 8px; height: 8px; border-radius: 4px; background: #F5A623; flex-shrink: 0; }
 .s2-savebar-text { flex: 1; }
 .s2-savebar .btn:not(.btn-primary) { background: transparent; color: #FFFFFF; border-color: #3B5683; }
+/* A narrow window: the sections, the form and the checklist one under the other */
+@media (max-width: 1100px) {
+  .s2-grid, .s2-grid.no-aside { grid-template-columns: minmax(0, 1fr); }
+  .s2-nav, .s2-aside { position: static; }
+}
 
 .s-card {
   background: var(--color-background-primary);

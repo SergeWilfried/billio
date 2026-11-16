@@ -236,6 +236,16 @@ function ComplianceChecklist({ seller, orgId }: { seller: SellerInfo; orgId: str
   );
 }
 
+/** A section whose values couldn't be read: its fields stay disabled until a retry works. */
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="s-load-failed">
+      <span>Ces informations n’ont pas pu être chargées : impossible de les modifier pour l’instant.</span>
+      <button type="button" className="btn btn-sm" onClick={onRetry}>Réessayer</button>
+    </div>
+  );
+}
+
 interface BizFields {
   name: string; ifu: string; rccm: string; taxRegime: string; divisionFiscale: string; cadastralRef: string;
   businessCreationDate: string; address: string; city: string; country: string; currency: string; email: string; phone: string;
@@ -265,6 +275,9 @@ function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void }
   const [phone,    setPhone]   = useState('');
   const [loading,  setLoading] = useState(true);
   const [saving,   setSaving]  = useState(false);
+  // Not loaded: the form stays disabled (edits couldn't be saved or tracked) until a retry works
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt,    setAttempt]    = useState(0);
 
   useEffect(() => {
     if (!orgId) return;
@@ -274,8 +287,7 @@ function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void }
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
-        if (error) { console.warn('[settings] org fetch:', error.message); setLoading(false); return; }
-        if (!data) return;
+        if (error || !data) { console.warn('[settings] org fetch:', error?.message ?? 'no row'); setLoadFailed(true); return; }
         const loaded: BizFields = {
           name: data.name ?? '', ifu: data.ifu ?? '', rccm: data.rccm ?? '',
           taxRegime: data.tax_regime ?? '', divisionFiscale: data.division_fiscale ?? '',
@@ -287,7 +299,7 @@ function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void }
         setSnapshot(loaded);
         setLoading(false);
       });
-  }, [orgId]);
+  }, [orgId, attempt]);
 
   function apply(f: BizFields) {
     setName(f.name); setIfu(f.ifu); setRccm(f.rccm); setTaxRegime(f.taxRegime); setDivisionFiscale(f.divisionFiscale);
@@ -316,7 +328,9 @@ function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void }
     if (error) { showToast(error.message, true); return false; }
     setOrgSettings(prev => ({ ...prev, name, ifu, rccm, taxRegime, divisionFiscale, cadastralRef: cadastral, businessCreationDate, address, city, country, email, phone }));
     const saved = { ...current, cadastralRef: formatCadastralRef(cadastral) };
-    setCadastralRef(saved.cadastralRef);
+    // Shown as « SSSS LLL PPPP », unless it was changed again while saving
+    const submitted = cadastralRef;
+    setCadastralRef(v => (v === submitted ? saved.cadastralRef : v));
     setSnapshot(saved);
     setTouched({});
     posthog.capture('settings_saved', { section: 'business' });
@@ -346,6 +360,7 @@ function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void }
         <div className="s-card-desc">Affichées sur chaque facture et devis que vous envoyez.</div>
       </div>
       <div className="s-card-body">
+        {loadFailed && <LoadFailed onRetry={() => { setLoadFailed(false); setAttempt(a => a + 1); }} />}
         <div className="s-field">
           <label className="s-label" htmlFor={FIELD_IDS.name}>Raison sociale</label>
           <input id={FIELD_IDS.name} className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={loading} />
@@ -456,6 +471,8 @@ function InvoicingSection() {
   const [footer,        setFooter]        = useState('');
   const [loading,       setLoading]       = useState(true);
   const [saving,        setSaving]        = useState(false);
+  const [loadFailed,    setLoadFailed]    = useState(false);
+  const [attempt,       setAttempt]       = useState(0);
 
   const [autoReminders, setAutoReminders] = useState(true);
   const [attachPdf,     setAttachPdf]     = useState(true);
@@ -469,8 +486,7 @@ function InvoicingSection() {
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
-        if (error) { console.warn('[settings] invoicing fetch:', error.message); setLoading(false); return; }
-        if (!data) return;
+        if (error || !data) { console.warn('[settings] invoicing fetch:', error?.message ?? 'no row'); setLoadFailed(true); return; }
         const loaded = {
           prefix: data.inv_prefix ?? 'INV-', nextNum: data.inv_next_number ?? '0001',
           terms: data.payment_terms ?? 'Net 14 jours', deliveryTerms: data.delivery_terms ?? 'À convenir',
@@ -480,7 +496,7 @@ function InvoicingSection() {
         setSnapshot(loaded);
         setLoading(false);
       });
-  }, [orgId]);
+  }, [orgId, attempt]);
 
   function applyInvoicing(f: InvoicingFields) {
     setPrefix(f.prefix); setNextNum(f.nextNum); setTerms(f.terms); setDeliveryTerms(f.deliveryTerms); setTaxRate(f.taxRate); setFooter(f.footer);
@@ -517,6 +533,7 @@ function InvoicingSection() {
           <div className="s-card-desc">Pré-remplis sur chaque nouvelle facture. Vous pouvez les modifier par facture.</div>
         </div>
         <div className="s-card-body">
+          {loadFailed && <LoadFailed onRetry={() => { setLoadFailed(false); setAttempt(a => a + 1); }} />}
           <div className="s-field-row">
             <div className="s-field">
               <label className="s-label">Préfixe numéro</label>
@@ -1946,13 +1963,26 @@ function SettingsPageV2() {
   }, [dirty]);
 
   // The field a « Corriger » link points to, once its section is on screen
+  // (the section may still be loading, its fields disabled: tried again until they can take it)
   useEffect(() => {
     if (!focusField) return;
-    const el = document.getElementById(focusField);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center' });
-    (el as HTMLInputElement).focus();
-    setFocusField(null);
+    let tries = 0;
+    const tryFocus = () => {
+      const el = document.getElementById(focusField) as HTMLInputElement | null;
+      if (el && !el.disabled) {
+        el.scrollIntoView({ block: 'center' });
+        el.focus();
+        setFocusField(null);
+        return true;
+      }
+      return false;
+    };
+    if (tryFocus()) return;
+    const timer = window.setInterval(() => {
+      // Given up after 10 s (the section couldn't load)
+      if (tryFocus() || ++tries >= 100) { window.clearInterval(timer); if (tries >= 100) setFocusField(null); }
+    }, 100);
+    return () => window.clearInterval(timer);
   }, [focusField, section]);
 
   function go(next: SectionV2): boolean {
