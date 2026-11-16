@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
@@ -6,49 +6,19 @@ import DrawerPanel from '@/components/accounting/DrawerPanel';
 import JournalBadge from '@/components/accounting/JournalBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { AccountMovementsEmptyIllustration } from '@/components/accounting/EmptyIllustrations';
-import type { Account, AccountClass, Journal, LedgerRow } from '@/lib/accounting-data';
-import { fmt, fmtCompact, clsOf, openingOf } from '@/lib/accounting-data';
+import type { Account, AccountClass, Journal } from '@/lib/accounting-data';
+import { fmt, fmtCompact, clsOf } from '@/lib/accounting-data';
+import { accountLedger, exerciseResult, withUnlisted, type LedgerLine } from '@/lib/ledger';
+import { csvBlob } from '@/lib/csv';
+import { downloadBlob } from '@/lib/download';
+import { todayISO } from '@/lib/invoice-status';
 import { useTrialBalance, useBalanceFns } from '@/lib/accounting-hooks';
-import { useApp } from '@/context/AppContext';
-import { supabase } from '@/lib/supabase';
 import { exerciseYear, monthLabel } from '@/lib/period';
 import Page from '@/components/Page';
 
 function LedgerDrawer({
-  account, classes, journals, onClose,
-}: { account: Account; classes: Record<number, AccountClass>; journals: Record<string, Journal>; onClose: () => void }) {
-  const { orgId } = useApp();
-  const [ledger, setLedger] = useState<LedgerRow[]>([]);
-  const [loadingLedger, setLoadingLedger] = useState(true);
-  const opening = openingOf(account.num);
-
-  useEffect(() => {
-    if (!orgId) return;
-    setLoadingLedger(true);
-    supabase
-      .from('journal_entries')
-      .select('id, date, piece, label, posted, journals!inner(code), entry_lines!inner(account_num, debit, credit)')
-      .eq('org_id', orgId)
-      .eq('entry_lines.account_num', account.num)
-      .eq('posted', true)
-      .order('date', { ascending: true })
-      .then(({ data }) => {
-        if (!data) return;
-        let running = openingOf(account.num);
-        const rows: LedgerRow[] = [];
-        for (const e of data as Array<Record<string, unknown>>) {
-          const j = e.journals as Record<string, unknown>;
-          const lines = (e.entry_lines as Array<Record<string, unknown>>) ?? [];
-          for (const l of lines) {
-            const d = Number(l.debit), c = Number(l.credit);
-            running += d - c;
-            rows.push({ entry: { id: String(e.id), date: String(e.date), piece: String(e.piece), label: String(e.label), journal: String(j?.code ?? ''), lines: [], posted: Boolean(e.posted) }, d, c, running });
-          }
-        }
-        setLedger(rows);
-      })
-      .then(() => setLoadingLedger(false), () => setLoadingLedger(false));
-  }, [orgId, account.num]);
+  account, classes, journals, onClose, opening, ledger, year,
+}: { account: Account; classes: Record<number, AccountClass>; journals: Record<string, Journal>; onClose: () => void; opening: number; ledger: LedgerLine[]; year: number }) {
   const cls = clsOf(account.num);
   const clsInfo = classes[cls];
 
@@ -69,27 +39,12 @@ function LedgerDrawer({
     >
       {opening !== 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '0.5px solid var(--color-border-tertiary)', marginBottom: 4 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--color-text-secondary)' }}>À-nouveau (01/06/2026)</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--color-text-secondary)' }}>À-nouveau (01/01/{year})</div>
           <div className="mono" style={{ fontSize: 12.5, fontWeight: 700 }}>{fmt(opening)}</div>
         </div>
       )}
 
-      {loadingLedger ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, padding: '13px 0', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div className="skel" style={{ width: '65%', height: 12, borderRadius: 5 }} />
-                <div className="skel" style={{ width: '40%', height: 10, borderRadius: 5 }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                <div className="skel" style={{ width: 72, height: 12, borderRadius: 5 }} />
-                <div className="skel" style={{ width: 52, height: 10, borderRadius: 5 }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : ledger.length === 0 ? (
+      {ledger.length === 0 ? (
         <EmptyState
           illustration={<AccountMovementsEmptyIllustration />}
           title="Aucun mouvement"
@@ -135,13 +90,15 @@ export default function TrialBalancePage() {
   const classes  = data?.classes  ?? {};
   const journals = data?.journals ?? {};
 
-  const { mvtOf, signedOf, openingOf: openOf } = useBalanceFns(data, showDraft);
+  const { mvtOf, signedOf, openingOf: openOf, accountNums } = useBalanceFns(data, showDraft);
 
+  // Accounts used in the books but missing from the chart are listed too: no amount left out
   const activeAccounts = useMemo(() =>
-    accounts.filter(a => {
+    withUnlisted(accounts, accountNums()).filter(a => {
       const m = mvtOf(a.num);
       return openOf(a.num) !== 0 || m.debit > 0 || m.credit > 0;
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the lookups change with data and showDraft
     [data, showDraft]);
 
   const byClass = useMemo(() => {
@@ -160,7 +117,18 @@ export default function TrialBalancePage() {
   const totalCreditClose = activeAccounts.reduce((s, a) => { const v = signedOf(a.num); return v < 0 ? s - v : s; }, 0);
   const isTied = Math.abs(totalDebitClose - totalCreditClose) < 1;
 
-  const result = totalCreditClose - totalDebitClose;
+  // Income less expenses (classes 6, 7, 8), not the difference of all balances (always 0 when balanced)
+  const result = exerciseResult(signedOf, activeAccounts.map(a => a.num));
+  const year = data?.year ?? exerciseYear();
+
+  function exportCsv() {
+    const rows = activeAccounts.map(a => {
+      const m = mvtOf(a.num); const v = signedOf(a.num);
+      return [a.num, a.label, openOf(a.num) || '', m.debit || '', m.credit || '', v > 0 ? v : '', v < 0 ? -v : ''];
+    });
+    downloadBlob(csvBlob(['Compte', 'Libellé', 'Ouverture', 'Mouvement débit', 'Mouvement crédit', 'Solde débiteur', 'Solde créditeur'], rows),
+      `balance-${year}${showDraft ? '-avec-brouillons' : ''}-${todayISO()}.csv`);
+  }
 
   if (loading) return <PageSkeleton section={{ icon: 'book-2', label: 'Comptabilité' }} title="Balance générale" variant="accounting" rows={8} />;
 
@@ -174,28 +142,30 @@ export default function TrialBalancePage() {
         <button
           className={`btn${showDraft ? ' btn-primary' : ''}`}
           onClick={() => setShowDraft(p => !p)}
+          aria-pressed={showDraft}
         >
           <Icon name="edit" />Inclure brouillons
         </button>
-        <button className="btn"><Icon name="download" />Exporter</button>
+        <button className="btn" onClick={exportCsv} disabled={activeAccounts.length === 0}><Icon name="download" />Exporter (CSV)</button>
       </>}
       mainStyle={{ position: 'relative' }}
       after={<>
 
-        {selected && <LedgerDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} />}
+        {selected && <LedgerDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} year={year}
+          opening={openOf(selected.num)} ledger={accountLedger(data?.entries ?? [], selected.num, year, openOf(selected.num), { includeDraft: showDraft })} />}
       </>}
     >
         <KPIStrip items={[
           { icon: 'trending-up', iconBg: 'var(--brand-tint)', iconColor: 'var(--brand)', label: 'Mouvement total', value: fmtCompact(totalDebitMvt), unit: 'F CFA', sub: 'Débit = Crédit' },
           { icon: 'book-2', iconBg: '#E9F0FA', iconColor: 'var(--brand)', label: 'Comptes actifs', value: activeAccounts.length, sub: `${Object.keys(byClass).length} classes` },
           { icon: 'chart-bar', iconBg: result >= 0 ? '#E7F3E2' : '#FCEBEB', iconColor: result >= 0 ? '#276C2B' : '#A32D2D', label: 'Résultat', value: fmtCompact(Math.abs(result)), unit: 'F CFA', sub: result >= 0 ? 'Bénéfice net' : 'Perte nette' },
-          { icon: isTied ? 'circle-check' : 'alert-triangle', iconBg: isTied ? '#E7F3E2' : '#FCEBEB', iconColor: isTied ? '#276C2B' : '#A32D2D', label: 'Équilibre', value: isTied ? 'Vérifié' : 'Erreur', sub: isTied ? 'Actif = Passif' : 'Déséquilibre détecté' },
+          { icon: isTied ? 'circle-check' : 'alert-triangle', iconBg: isTied ? '#E7F3E2' : '#FCEBEB', iconColor: isTied ? '#276C2B' : '#A32D2D', label: 'Équilibre', value: isTied ? 'Vérifié' : 'Erreur', sub: isTied ? 'Débit = crédit' : 'Déséquilibre détecté' },
         ]} />
 
         {isTied && (
           <div className="tie-banner">
             <Icon name="circle-check" size={16} />
-            Balance équilibrée · Total actif {fmt(totalDebitClose)} F CFA = Total passif {fmt(totalCreditClose)} F CFA
+            Balance équilibrée · soldes débiteurs {fmt(totalDebitClose)} F CFA = soldes créditeurs {fmt(totalCreditClose)} F CFA{showDraft ? ' · brouillons inclus' : ''}
           </div>
         )}
 

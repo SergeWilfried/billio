@@ -1,296 +1,129 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import { fmt } from '@/lib/accounting-data';
 import { usePeriodClosing, useBalanceFns } from '@/lib/accounting-hooks';
-import { currentMonth, exerciseYear, monthEndLabel, monthLabel } from '@/lib/period';
+import { draftsInMonth, exerciseResult, isOpeningEntry, monthState, type MonthState } from '@/lib/ledger';
+import { usePermissions } from '@/lib/use-permissions';
+import { todayISO } from '@/lib/invoice-status';
+import { exerciseYear } from '@/lib/period';
 import Page from '@/components/Page';
 
-const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
+const MONTHS = ['Janv.', 'Févr.', 'Mars', 'Avr.', 'Mai', 'Juin', 'Juil.', 'Août', 'Sept.', 'Oct.', 'Nov.', 'Déc.'];
+const MONTHS_LONG = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const STATE: Record<MonthState, { label: string; bg: string; fg: string }> = {
+  closed:   { label: 'Clôturé',  bg: '#E7F4EC', fg: '#1E6B40' },
+  open:     { label: 'Ouvert',   bg: '#FDF1E3', fg: '#8A4A07' },
+  upcoming: { label: 'À venir',  bg: 'var(--color-background-secondary)', fg: 'var(--color-text-tertiary)' },
+};
 
-const INITIAL_CHECKS = [
-  { t: 'Rapprochement bancaire', s: 'Solde 521 pointé avec le relevé de banque', tag: 'manual', done: true },
-  { t: 'Lettrage clients & fournisseurs', s: 'Comptes 411 / 401 lettrés', tag: 'manual', done: true },
-  { t: 'Dotations aux amortissements', s: 'Dotation de juin postée (681 → 28x)', tag: 'auto', done: true },
-  { t: 'Régularisation de la TVA', s: 'Solder 443/445 vers 4441 — 1 brouillon à poster', tag: 'auto', done: false },
-  { t: 'Écritures de régularisation (OD)', s: 'Charges & produits constatés d\'avance', tag: 'manual', done: true },
-  { t: 'Validation de la balance', s: 'Débit = crédit · contrôlé automatiquement', tag: 'auto', done: true },
-];
-
-function PeriodCell({ m, status }: { m: string; status: string }) {
-  const isClosed = status === 'closed';
-  const isCurrent = status === 'current';
-  return (
-    <div style={{
-      flex: 1, minWidth: 60, border: isCurrent ? '1.5px solid var(--brand)' : '0.5px solid var(--color-border-tertiary)',
-      borderRadius: 'var(--border-radius-md)', padding: '11px 10px', textAlign: 'center' as const,
-      background: isClosed ? 'var(--color-background-secondary)' : 'var(--color-background-primary)',
-      boxShadow: isCurrent ? '0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent)' : 'var(--shadow-sm)',
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 700 }}>{m}</div>
-      <div style={{
-        fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase' as const,
-        marginTop: 5, display: 'inline-flex', alignItems: 'center', gap: 3,
-        color: isClosed ? '#276C2B' : isCurrent ? 'var(--brand)' : 'var(--color-text-tertiary)',
-      }}>
-        {isClosed && <><Icon name="lock" size={10} />Clôturé</>}
-        {isCurrent && <><Icon name="edit" size={10} />Ouvert</>}
-        {status === 'future' && 'À venir'}
-      </div>
-    </div>
-  );
-}
-
-function ProgressRing({ pct }: { pct: number }) {
-  const R = 56;
-  const C = 2 * Math.PI * R;
-  const offset = C * (1 - pct / 100);
-  const color = pct === 100 ? '#276C2B' : 'var(--brand)';
-  return (
-    <div style={{ position: 'relative', width: 132, height: 132, margin: '8px auto 4px' }}>
-      <svg width="132" height="132" viewBox="0 0 132 132">
-        <circle cx="66" cy="66" r={R} fill="none" stroke="var(--color-background-secondary)" strokeWidth="13" />
-        <circle
-          cx="66" cy="66" r={R} fill="none" stroke={color} strokeWidth="13"
-          strokeLinecap="round" strokeDasharray={C} strokeDashoffset={offset}
-          transform="rotate(-90 66 66)" style={{ transition: 'stroke-dashoffset .4s ease' }}
-        />
-      </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: -1, color }}>{pct}%</div>
-        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--color-text-tertiary)', marginTop: 1 }}>Ready</div>
-      </div>
-    </div>
-  );
-}
-
+const CARD: React.CSSProperties = { background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)' };
 
 export default function PeriodClosingPage() {
-  // The month being closed: the current one, read each render so a tab left
-  // open past month-end doesn't close the previous month
-  const TARGET_MONTH = currentMonth();
   const { data, loading, closePeriod } = usePeriodClosing();
-  const [checks, setChecks] = useState(INITIAL_CHECKS.map(c => ({ ...c })));
+  const { postable } = usePermissions();
   const [closing, setClosing] = useState(false);
-  // Optimistic closed flag: set on button click; also syncs from DB status
-  const [justClosed, setJustClosed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { signedOf, openingOf, accountNums } = useBalanceFns(data);
 
-  const entries = data?.entries ?? [];
-  const periods = data?.periods ?? [];
-  const { signedOf } = useBalanceFns(data);
+  if (loading || !data) return <PageSkeleton section={{ icon: 'lock', label: 'Comptabilité' }} title="Clôture" variant="accounting" rows={5} />;
 
-  // Closed = either DB says so (after reload) or user just clicked close (optimistic)
-  const targetDbPeriod = periods.find(p => p.month === TARGET_MONTH);
-  const closed = justClosed || targetDbPeriod?.status === 'closed';
+  const { entries, periods } = data;
+  const year = data.year ?? exerciseYear();
+  const today = todayISO();
+  const states = MONTHS.map((_, i) => monthState(periods.find(p => p.month === i + 1), year, i + 1, today));
+  // Months close in order: the first one not closed that has started
+  const targetIdx = states.findIndex(s => s === 'open');
+  const target = targetIdx >= 0 ? targetIdx + 1 : null;
+  const targetPeriod = target ? periods.find(p => p.month === target) : undefined;
+  const prefix = target ? `${year}-${String(target).padStart(2, '0')}` : '';
 
-  const displayPeriods = MONTH_LABELS.map((m, i) => {
-    const month = i + 1;
-    const dbPeriod = periods.find(p => p.month === month);
-    const isTarget = month === TARGET_MONTH;
-    const s = (dbPeriod?.status === 'closed' || (closed && isTarget)) ? 'closed'
-      : isTarget && !closed ? 'current'
-      : 'future';
-    return { m, s, id: dbPeriod?.id ?? null };
-  });
+  const monthEntries = target ? entries.filter(e => e.date.startsWith(prefix) && !isOpeningEntry(e)) : [];
+  const drafts = target ? draftsInMonth(entries, year, target) : 0;
+  const unbalanced = monthEntries.filter(e => Math.round(e.lines.reduce((s, l) => s + l.d - l.c, 0)) !== 0).length;
+  const vatNet = monthEntries.filter(e => e.posted).reduce((s, e) => s + e.lines.reduce((x, l) =>
+    x + (l.acct.startsWith('443') ? l.c - l.d : l.acct.startsWith('445') ? -(l.d - l.c) : 0), 0), 0);
+  const blocked = drafts > 0 || unbalanced > 0;
 
-  const currentPeriod = !closed ? displayPeriods.find(p => p.s === 'current') : null;
-  const doneCount = checks.filter(c => c.done).length;
-  const pct       = Math.round((doneCount / checks.length) * 100);
-  const drafts    = entries.filter(e => !e.posted).length;
-  const allDone   = doneCount === checks.length;
+  const nums = accountNums();
+  const result = exerciseResult(signedOf, nums);
+  const carriedForward = -nums.filter(n => n.startsWith('11')).reduce((s, n) => s + openingOf(n), 0);
 
-  const toggleCheck = (i: number) => {
-    setChecks(prev => prev.map((c, idx) => idx === i ? { ...c, done: !c.done } : c));
-  };
+  async function close() {
+    if (!targetPeriod || blocked || closing) return;
+    if (!window.confirm(`Clôturer ${MONTHS_LONG[target! - 1]} ${year} ? Le mois n’acceptera plus d’écriture.`)) return;
+    setClosing(true); setError(null);
+    try { await closePeriod(targetPeriod.id); }
+    catch (err) { console.error('[closePeriod]', err); setError('La clôture n’a pas pu être enregistrée. Réessayez.'); }
+    finally { setClosing(false); }
+  }
 
-  const result = useMemo(() => {
-    const produits = -(signedOf('701') + signedOf('706'));
-    const charges = signedOf('601') + signedOf('605') + signedOf('627') +
-      signedOf('661') + signedOf('664') + signedOf('681') + signedOf('671');
-    return produits - charges;
-  }, [data]);
-
-  if (loading) return <PageSkeleton section={{ icon: 'lock', label: 'Comptabilité' }} title="Clôture de période" variant="accounting" rows={5} />;
-
-  const CARD = {
-    background: 'var(--color-background-primary)',
-    border: '0.5px solid var(--color-border-tertiary)',
-    borderRadius: 'var(--border-radius-lg)',
-    boxShadow: 'var(--shadow-sm)',
-  };
+  const check = (ok: boolean | 'warn', text: React.ReactNode) => (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', fontSize: 13.5 }}>
+      <span style={{ fontWeight: 700, width: 14, color: ok === true ? '#276C2B' : ok === 'warn' ? '#8A4A07' : '#B42318' }}>{ok === true ? '✓' : ok === 'warn' ? '!' : '✕'}</span>
+      <span>{text}</span>
+    </div>
+  );
 
   return (
     <Page
       section={{ icon: 'lock', label: 'Comptabilité' }}
-      title="Clôture de période"
-      subtitle={<>Clôture · exercice {exerciseYear()} · arrêté au {monthEndLabel()}</>}
-      actions={<>
-        <span className="period-pill">
-          <span className="dot" style={closed ? { background: '#276C2B' } : {}} />
-          {closed ? `Exercice ${exerciseYear()} · ${monthLabel().toLowerCase()} clôturé` : `Exercice ${exerciseYear()} · ouvert`}
-        </span>
-        <button
-          className="btn"
-          disabled={closed || !allDone || closing || !currentPeriod?.id}
-          onClick={async () => {
-            if (!currentPeriod?.id) return;
-            setClosing(true);
-            setJustClosed(true);
-            try { await closePeriod(currentPeriod.id); } finally { setClosing(false); }
-          }}
-        >
-          <Icon name="lock" />{closing ? 'Clôture…' : closed ? 'Clôturé' : `Clôturer ${currentPeriod?.m ?? ''}`}
-        </button>
-      </>}
+      title="Clôture"
+      subtitle={`Exercice ${year} · les mois se clôturent dans l’ordre ; un mois clôturé n’accepte plus d’écriture.`}
     >
-        {/* Period board */}
-        <div style={{ ...CARD, marginBottom: 16 }}>
-          <div style={{ padding: '16px 20px 13px', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Périodes · exercice {exerciseYear()}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>Verrouillez une période pour figer ses écritures</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 8, marginBottom: 16 }}>
+        {MONTHS.map((m, i) => {
+          const st = STATE[states[i]];
+          return (
+            <div key={m} style={{ borderRadius: 8, padding: '10px 8px', background: st.bg, color: st.fg, outline: target === i + 1 ? '2px solid var(--brand)' : undefined, outlineOffset: 2 }}>
+              <div style={{ fontWeight: 700, color: 'var(--color-text-primary)', fontSize: 13 }}>{m}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {states[i] === 'closed' && <Icon name="lock" size={11} ariaHidden />}{st.label}
+              </div>
             </div>
-          </div>
-          <div style={{ padding: '8px 20px 18px' }}>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {displayPeriods.map((p, i) => (
-                <PeriodCell key={i} m={p.m} status={p.s} />
-              ))}
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 16, alignItems: 'start' }}>
+        <section style={{ ...CARD, padding: '16px 20px' }} aria-labelledby="close-title">
+          {target ? <>
+            <h2 id="close-title" style={{ margin: '0 0 6px', fontSize: 15 }}>Clôturer {MONTHS_LONG[target - 1]} {year}</h2>
+            {check(drafts === 0, drafts === 0 ? 'Aucune écriture en brouillon ce mois-ci'
+              : <><b>{drafts} écriture{drafts > 1 ? 's' : ''} en brouillon</b> ce mois-ci : comptabilisez-les ou supprimez-les. <Link to="/accounting/journals">Voir dans Journaux</Link></>)}
+            {check(unbalanced === 0, unbalanced === 0 ? 'Toutes les écritures du mois sont équilibrées' : <><b>{unbalanced} écriture{unbalanced > 1 ? 's' : ''} déséquilibrée{unbalanced > 1 ? 's' : ''}</b> ce mois-ci : corrigez-les dans Journaux.</>)}
+            {check(vatNet === 0 ? true : 'warn', vatNet === 0
+              ? 'Pas de TVA à reverser sur ce mois'
+              : <>TVA du mois : {vatNet > 0 ? `${fmt(vatNet)} F CFA à reverser` : `crédit de ${fmt(-vatNet)} F CFA`}. Vérifiez qu’elle est déclarée (<Link to="/accounting/tax">Fiscalité</Link>). Ne bloque pas.</>)}
+            {check('warn', <span style={{ color: 'var(--color-text-secondary)' }}>Rapprochement bancaire : pas encore suivi dans Billio, à faire sur le relevé.</span>)}
+            {error && <div role="alert" style={{ marginTop: 8, padding: '8px 12px', borderRadius: 6, background: '#FCEBEB', color: '#A32D2D', fontSize: 12.5 }}>{error}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '0.5px solid var(--color-border-tertiary)', marginTop: 8, paddingTop: 12 }}>
+              {blocked && <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>Bloqué tant qu’il reste des brouillons ou des écritures déséquilibrées dans le mois.</span>}
+              {!postable && <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>Réservé aux admins et comptables.</span>}
+              <button className="btn btn-primary" disabled={blocked || closing || !targetPeriod || !postable} onClick={() => void close()}>
+                <Icon name="lock" />{closing ? 'Clôture…' : `Clôturer ${MONTHS_LONG[target - 1]}`}
+              </button>
             </div>
-          </div>
+            {!targetPeriod && <p style={{ fontSize: 12.5, color: '#A32D2D', margin: '8px 0 0' }}>La période de ce mois n’existe pas dans la base : elle ne peut pas être clôturée.</p>}
+          </> : <>
+            <h2 id="close-title" style={{ margin: '0 0 6px', fontSize: 15 }}>Rien à clôturer</h2>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--color-text-secondary)' }}>Tous les mois commencés de l’exercice {year} sont clôturés.</p>
+          </>}
+        </section>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section style={{ ...CARD, padding: '16px 20px', fontSize: 13.5 }}>
+            <h2 style={{ margin: '0 0 8px', fontSize: 15 }}>Résultat à ce jour</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}><span>Résultat de l’exercice (comptabilisé)</span><b className="mono" style={{ color: result >= 0 ? '#276C2B' : '#A32D2D' }}>{result >= 0 ? '' : '−'}{fmt(Math.abs(result))}</b></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', color: 'var(--color-text-secondary)' }}><span>Report à nouveau d’ouverture (11)</span><span className="mono">{carriedForward < 0 ? '−' : ''}{fmt(Math.abs(carriedForward))}</span></div>
+          </section>
+          <section style={{ ...CARD, padding: '16px 20px', fontSize: 13.5 }}>
+            <h2 style={{ margin: '0 0 6px', fontSize: 15 }}>Fin d’exercice</h2>
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>La clôture de l’année et le report des soldes en à-nouveaux {year + 1} arrivent bientôt. D’ici là, saisissez les à-nouveaux de l’exercice suivant dans <Link to="/accounting/opening-balances">À-nouveaux</Link>.</p>
+          </section>
         </div>
-
-        {/* Two-column layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 1fr', gap: 16, alignItems: 'start' }}>
-          {/* Checklist */}
-          <div style={CARD}>
-            <div style={{ padding: '16px 20px 13px', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Liste de contrôle — {monthLabel().toLowerCase()}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>Complétez chaque étape avant de clôturer la période</div>
-            </div>
-            <div style={{ padding: '8px 20px 18px' }}>
-              {checks.map((c, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 13, padding: '14px 0', borderBottom: i < checks.length - 1 ? '0.5px solid var(--color-border-tertiary)' : 'none' }}>
-                  <button
-                    onClick={() => toggleCheck(i)}
-                    style={{
-                      width: 24, height: 24, borderRadius: 7, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      border: c.done ? '1.5px solid #276C2B' : '1.5px dashed var(--color-border-secondary)',
-                      background: c.done ? '#276C2B' : 'var(--color-background-primary)',
-                      color: c.done ? '#fff' : 'transparent', cursor: 'pointer', transition: 'all .14s', padding: 0,
-                    }}
-                  >
-                    <Icon name="check" size={14} />
-                  </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: c.done ? 'var(--color-text-secondary)' : 'var(--color-text-primary)', textDecoration: c.done ? 'line-through' : 'none', textDecorationColor: 'var(--color-border-secondary)' }}>
-                      {c.t}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2, lineHeight: 1.5 }}>{c.s}</div>
-                  </div>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0, marginTop: 2,
-                    background: c.tag === 'auto' ? 'var(--brand-tint)' : 'var(--color-background-secondary)',
-                    color: c.tag === 'auto' ? 'var(--brand)' : 'var(--color-text-secondary)',
-                  }}>
-                    {c.tag === 'auto' ? 'Auto' : 'Manuel'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Right column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Readiness */}
-            <div style={CARD}>
-              <div style={{ padding: '16px 20px 13px', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>Prêt à clôturer</div>
-              </div>
-              <div style={{ padding: '8px 20px 18px' }}>
-                <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
-                  <ProgressRing pct={pct} />
-                </div>
-
-                {[
-                  { label: 'Étapes complètes', value: `${doneCount} / ${checks.length}` },
-                  { label: 'Écritures à poster', value: drafts ? `${drafts} brouillon` : 'Aucun' },
-                  { label: 'Balance générale', value: 'Équilibrée ✓', color: '#276C2B' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: 12.5 }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
-                    <span style={{ fontWeight: 700, color: color || 'var(--color-text-primary)' }}>{value}</span>
-                  </div>
-                ))}
-
-                <button
-                  className={`btn${allDone ? ' btn-primary' : ''}`}
-                  disabled={closed || !allDone || closing || !currentPeriod?.id}
-                  onClick={async () => {
-                    if (!currentPeriod?.id) return;
-                    setClosing(true);
-                    setJustClosed(true);
-                    try { await closePeriod(currentPeriod.id); } finally { setClosing(false); }
-                  }}
-                  style={{ width: '100%', justifyContent: 'center', marginTop: 16, opacity: allDone ? 1 : 0.5, cursor: allDone ? 'pointer' : 'not-allowed' }}
-                >
-                  <Icon name="lock" />{closing ? 'Clôture en cours…' : closed ? 'Clôturé ✓' : `Clôturer ${currentPeriod?.m ?? 'la période'} & reporter à-nouveaux`}
-                </button>
-
-                {!allDone && (
-                  <div style={{ display: 'flex', gap: 11, padding: '13px 15px', background: '#FCF3E6', border: '0.5px solid #F0D9A8', borderRadius: 'var(--border-radius-md)', marginTop: 14 }}>
-                    <div style={{ color: '#8A5207', flexShrink: 0, marginTop: 1 }}><Icon name="alert-triangle" size={17} /></div>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#8C5207' }}>
-                        {checks.length - doneCount} étape{checks.length - doneCount > 1 ? 's' : ''} incomplète{checks.length - doneCount > 1 ? 's' : ''}
-                      </div>
-                      <div style={{ fontSize: 11.5, color: '#A26A1A', marginTop: 2, lineHeight: 1.5 }}>
-                        Postez ou supprimez l'écriture TVA en brouillon dans les Journaux avant de clôturer.
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {closed && (
-                  <div style={{ display: 'flex', gap: 11, padding: '13px 15px', background: '#E7F3E2', border: '0.5px solid #A5D6A7', borderRadius: 'var(--border-radius-md)', marginTop: 14 }}>
-                    <div style={{ color: '#276C2B', flexShrink: 0, marginTop: 1 }}><Icon name="circle-check" size={17} /></div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1B5E20' }}>
-                      {monthLabel()} clôturé · écritures figées · à-nouveaux reportés
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Result allocation */}
-            <div style={CARD}>
-              <div style={{ padding: '16px 20px 13px', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>Affectation du résultat</div>
-                <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>Au 31 décembre · affectation du résultat</div>
-              </div>
-              <div style={{ padding: '8px 20px 18px' }}>
-                <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '14px 16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '7px 0 9px', fontWeight: 700, borderBottom: '0.5px solid var(--color-border-tertiary)', marginBottom: 3, fontSize: 12.5 }}>
-                    <span>Résultat de l'exercice (à ce jour)</span>
-                    <span className="mono" style={{ fontWeight: 700, color: result >= 0 ? '#276C2B' : '#A32D2D' }}>
-                      {result >= 0 ? '+' : ''}{fmt(result)} F CFA
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '7px 0', fontSize: 12.5 }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>Report à nouveau d'ouverture</span>
-                    <span className="mono" style={{ fontWeight: 700 }}>870 000 F CFA</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--color-border-tertiary)' }}>
-                    <Icon name="arrows-exchange" size={15} />
-                    Vire le résultat vers{' '}
-                    <span className="mono" style={{ fontWeight: 700, color: 'var(--brand)', fontFamily: '"SFMono-Regular", ui-monospace, monospace' }}>110</span>
-                    {' '}Report à nouveau à la clôture annuelle.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      </div>
     </Page>
   );
 }

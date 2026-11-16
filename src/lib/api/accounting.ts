@@ -14,6 +14,8 @@ import type {
 } from '@/lib/accounting-data';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
+/** Entries typed in demo mode, kept in memory */
+const mockEntries: JournalEntry[] = [];
 
 // ─── Type: DB row shapes ────────────────────────────────────────────────────
 
@@ -253,6 +255,11 @@ export async function adoptOpeningBalances(
 ): Promise<void> {
   if (MOCK) return;
 
+  // Adopted once per exercise: a second time would post a second opening entry
+  if (await fetchOpeningBalanceAdopted(orgId, opts.year)) {
+    throw new Error(`Opening balances for ${opts.year} are already adopted`);
+  }
+
   const validLines = opts.lines.filter(l => l.acct && (l.d || l.c));
 
   // Auto-balance with account 110 (Report à nouveau) if the entry is unbalanced
@@ -316,35 +323,47 @@ export async function fetchAccountBalances(orgId: string): Promise<AccountBalanc
 
 // ─── Journal entries ──────────────────────────────────────────────────────────
 
+/** Rows per request: the API returns at most 1000 rows, so longer lists are read page by page. */
+const PAGE = 1000;
+
 export async function fetchJournalEntries(
   orgId: string,
-  opts: { periodId?: string; journalCode?: string; includeDraft?: boolean } = {},
+  /** `year`: only the entries dated in that exercise */
+  opts: { periodId?: string; journalCode?: string; includeDraft?: boolean; year?: number } = {},
 ): Promise<JournalEntry[]> {
   if (MOCK) {
-    let entries = [...ENTRIES];
+    let entries = [...ENTRIES, ...mockEntries];
     if (!opts.includeDraft) entries = entries.filter(e => e.posted);
     if (opts.journalCode)   entries = entries.filter(e => e.journal === opts.journalCode);
+    if (opts.year)          entries = entries.filter(e => e.date.startsWith(String(opts.year)));
     return entries;
   }
 
-  let query = supabase
-    .from('journal_entries')
-    .select(`
-      id, date, piece, label, posted,
-      journals!inner ( code ),
-      entry_lines ( account_num, debit, credit )
-    `)
-    .eq('org_id', orgId)
-    .order('date', { ascending: false });
+  const rows: unknown[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let query = supabase
+      .from('journal_entries')
+      .select(`
+        id, date, piece, label, posted,
+        journals!inner ( code ),
+        entry_lines ( account_num, debit, credit )
+      `)
+      .eq('org_id', orgId)
+      .order('date', { ascending: false })
+      .order('id', { ascending: true });
 
-  if (opts.periodId)    query = query.eq('period_id', opts.periodId);
-  if (opts.journalCode) query = query.eq('journals.code', opts.journalCode);
-  if (!opts.includeDraft) query = query.eq('posted', true);
+    if (opts.periodId)    query = query.eq('period_id', opts.periodId);
+    if (opts.journalCode) query = query.eq('journals.code', opts.journalCode);
+    if (!opts.includeDraft) query = query.eq('posted', true);
+    if (opts.year)        query = query.gte('date', `${opts.year}-01-01`).lte('date', `${opts.year}-12-31`);
 
-  const { data, error } = await query;
-  if (error) throw error;
+    const { data, error } = await query.range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
 
-  return (data ?? []).map(row => {
+  return rows.map(row => {
     const r = row as Record<string, unknown>;
     const lines = (r.entry_lines as Array<Record<string, unknown>>) ?? [];
     const journal = (r.journals as Record<string, unknown>) ?? {};
@@ -412,7 +431,15 @@ export async function createManualJournalEntry(
   },
 ): Promise<string> {
   if (payload.lines.length === 0) throw new Error('A journal entry needs at least one line');
-  if (MOCK) return `MOCK-${Date.now()}`;
+  if (MOCK) {
+    // Demo mode: kept in memory so the new entry shows in Journaux
+    const id = `MOCK-${Date.now()}`;
+    mockEntries.unshift({
+      id, journal: payload.journalCode, date: payload.date, piece: payload.piece, label: payload.label, posted: false,
+      lines: payload.lines.map(l => ({ acct: l.accountNum, d: l.debit, c: l.credit })),
+    });
+    return id;
+  }
   const { journalId, periodId } = await resolveJournalAndPeriod(orgId, payload.journalCode, payload.date);
   return createJournalEntry(orgId, {
     journalId, periodId,
@@ -421,7 +448,11 @@ export async function createManualJournalEntry(
 }
 
 export async function postJournalEntry(entryId: string): Promise<void> {
-  if (MOCK) return;
+  if (MOCK) {
+    const e = mockEntries.find(x => x.id === entryId);
+    if (e) e.posted = true;
+    return;
+  }
   const { error } = await supabase
     .from('journal_entries')
     .update({ posted: true })

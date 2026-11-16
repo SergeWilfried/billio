@@ -313,7 +313,6 @@ export default function TaxPage() {
       </>}
       actions={<>
         <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
-        <button className="btn"><Icon name="download" />Exporter déclaration</button>
       </>}
     >
 
@@ -330,6 +329,38 @@ export default function TaxPage() {
           { icon: 'users', iconBg: '#F3E8FF', iconColor: '#6B21A8', label: 'IUTS + TPA + SP dus', value: fmtCompact(iutsAmount + tpaAmount + spAmount), unit: 'F CFA', sub: `IUTS ${fmtCompact(iutsAmount)} · TPA ${fmtCompact(tpaAmount)}${spAmount > 0 ? ` · SP ${fmtCompact(spAmount)}` : ''}` },
           riskKpi,
         ]} />
+
+        {/* TVA month by month (PRO-180) — only when VAT is charged */}
+        {canInvoiceTVA && (() => {
+          const months = Array.from({ length: 12 }, (_, i) => {
+            const prefix = `${EXERCISE_YEAR}-${String(i + 1).padStart(2, '0')}`;
+            const c = collectedLines.filter(l => l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+            const d = deductibleLines.filter(l => l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+            return { label: MONTH_FR[i], c, d, net: c - d };
+          }).filter((m, i) => m.c || m.d || i < new Date().getMonth() + 1 || EXERCISE_YEAR < new Date().getFullYear());
+          return (
+            <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 20 }}>
+              <div style={{ padding: '13px 18px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="calendar" size={15} />TVA par mois · Exercice {EXERCISE_YEAR}
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead><tr style={{ background: 'var(--color-background-secondary)', color: 'var(--color-text-secondary)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  <th style={{ textAlign: 'left', padding: '8px 18px' }}>Mois</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Collectée (443)</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Déductible (445)</th><th style={{ textAlign: 'right', padding: '8px 18px' }}>Nette</th>
+                </tr></thead>
+                <tbody>
+                  {months.map(m => (
+                    <tr key={m.label} style={{ borderTop: '0.5px solid var(--color-border-tertiary)' }}>
+                      <td style={{ padding: '7px 18px', textTransform: 'capitalize' }}>{m.label}</td>
+                      <td className="mono" style={{ textAlign: 'right', padding: '7px 12px' }}>{m.c ? fmt(m.c) : '—'}</td>
+                      <td className="mono" style={{ textAlign: 'right', padding: '7px 12px' }}>{m.d ? fmt(m.d) : '—'}</td>
+                      <td className="mono" style={{ textAlign: 'right', padding: '7px 18px', fontWeight: 700, color: m.net < 0 ? '#276C2B' : undefined }}>{m.net ? `${m.net < 0 ? 'crédit ' : ''}${fmt(Math.abs(m.net))}` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
 
         {/* TVA section — only for RNI */}
         {canInvoiceTVA ? (

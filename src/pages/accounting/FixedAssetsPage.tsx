@@ -6,11 +6,17 @@ import KPIStrip from '@/components/accounting/KPIStrip';
 import DrawerPanel from '@/components/accounting/DrawerPanel';
 import { EmptyState } from '@/components/EmptyState';
 import type { FixedAsset } from '@/lib/accounting-data';
-import { fmt, fmtCompact, amortSchedule, netValueOf } from '@/lib/accounting-data';
+import { fmt, fmtCompact, amortSchedule } from '@/lib/accounting-data';
+import { plannedDepreciation } from '@/lib/ledger';
+import { todayISO } from '@/lib/invoice-status';
+
 import { useFixedAssets } from '@/lib/accounting-hooks';
 import { FixedAssetsEmptyIllustration } from '@/components/accounting/EmptyIllustrations';
 import { exerciseYear } from '@/lib/period';
 import Page from '@/components/Page';
+
+/** Net book value under the asset's plan, to date (depreciation isn't posted month by month yet) */
+const netValueOf = (a: FixedAsset) => plannedDepreciation(a, todayISO()).net;
 
 const ASSET_METHODS = ['Linéaire', 'Dégressif'];
 const ASSET_ICONS = ['building-warehouse', 'device-laptop', 'car', 'tool', 'server', 'printer'] as const;
@@ -136,7 +142,7 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
           <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--brand-dark)', marginBottom: 8 }}>Valeur nette comptable</div>
           <DepreciationProgress pct={pct} />
           <div className="mono" style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, marginTop: 8, color: 'var(--brand-dark)' }}>{fmt(netValue)} <span style={{ fontSize: 13, opacity: 0.7 }}>F CFA</span></div>
-          <div style={{ fontSize: 11.5, color: 'var(--brand)', marginTop: 3 }}>Amort. cumulé {fmt(amortCumul)} F CFA</div>
+          <div style={{ fontSize: 11.5, color: 'var(--brand)', marginTop: 3 }}>Amort. cumulé {fmt(amortCumul)} F CFA · selon le plan, au {new Date().toLocaleDateString('fr-FR')}</div>
         </div>
       </div>
 
@@ -189,7 +195,7 @@ export default function FixedAssetsPage() {
     <Page
       section={{ icon: 'building-warehouse', label: 'Comptabilité' }}
       title="Immobilisations"
-      subtitle="Registre des actifs et plan d'amortissement"
+      subtitle="Registre des actifs et plan d'amortissement. Amortissements calculés selon le plan à ce jour : les dotations ne sont pas encore comptabilisées automatiquement."
       actions={<>
         <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
         {writable && <button className="btn btn-primary" onClick={() => setShowForm(true)}><Icon name="plus" />Nouvelle immobilisation</button>}

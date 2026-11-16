@@ -12,7 +12,6 @@ import {
   fetchJournals,
   fetchFiscalPeriods,
   fetchOpeningBalances,
-  fetchAccountBalances,
   fetchJournalEntries,
   fetchFixedAssets,
   fetchSupplierBills,
@@ -37,6 +36,7 @@ import type {
   AccountClass, Account, Journal, JournalEntry, FixedAsset, SupplierBill,
 } from '@/lib/accounting-data';
 import { exerciseYear } from '@/lib/period';
+import { balanceFns, exerciseMovements } from '@/lib/ledger';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
@@ -95,7 +95,9 @@ export interface ChartData {
   accounts: Account[];
   journals: Record<string, Journal>;
   opening:  Record<string, number>;
-  balances: AccountBalance[]; // empty in MOCK — computed in-memory instead
+  /** Every entry of the exercise, drafts included: balances are computed from them (see ledger.ts) */
+  entries:  JournalEntry[];
+  year:     number;
 }
 
 export function useChartOfAccounts() {
@@ -103,14 +105,14 @@ export function useChartOfAccounts() {
   // Per load, so a tab left open across 31 December fetches the new exercise
   const year = exerciseYear();
   const result = useAsyncData<ChartData>(`chart:${orgId}:${year}`, async () => {
-    const [classes, accounts, journals, opening, balances] = await Promise.all([
+    const [classes, accounts, journals, opening, entries] = await Promise.all([
       fetchAccountClasses(),
       fetchAccounts(orgId),
       fetchJournals(orgId),
       fetchOpeningBalances(orgId, year),
-      fetchAccountBalances(orgId),
+      fetchJournalEntries(orgId, { includeDraft: true, year }),
     ]);
-    return { classes, accounts, journals, opening, balances };
+    return { classes, accounts, journals, opening, entries, year };
   }, [orgId, year]);
 
   const addAccount = useCallback(async (account: Account) => {
@@ -127,18 +129,25 @@ export interface JournalsData {
   journals: Record<string, Journal>;
   accounts: Account[];
   entries:  JournalEntry[];
+  /** The current exercise's opening balances and months, for the entry composer */
+  opening:  Record<string, number>;
+  periods:  FiscalPeriod[];
+  year:     number;
 }
 
 export function useJournalsData(includeDraft = true) {
   const { orgId } = useApp();
+  const year = exerciseYear();
   const load = useCallback(async (): Promise<JournalsData> => {
-    const [journals, accounts, entries] = await Promise.all([
+    const [journals, accounts, entries, opening, periods] = await Promise.all([
       fetchJournals(orgId),
       fetchAccounts(orgId),
       fetchJournalEntries(orgId, { includeDraft }),
+      fetchOpeningBalances(orgId, year),
+      fetchFiscalPeriods(orgId, year),
     ]);
-    return { journals, accounts, entries };
-  }, [orgId, includeDraft]);
+    return { journals, accounts, entries, opening, periods, year };
+  }, [orgId, includeDraft, year]);
 
   const result = useAsyncData<JournalsData>(`journals:${orgId}:${includeDraft}`, load, [orgId, includeDraft]);
 
@@ -168,9 +177,15 @@ export function useJournalsData(includeDraft = true) {
     }
   }, [result]);
 
-  const saveEntry = useCallback(async (payload: Parameters<typeof createManualJournalEntry>[1]) => {
-    await createManualJournalEntry(orgId, payload);
-    result.reload();
+  /** Saves a typed entry as a draft, and posts it when `post` (admins and accountants). */
+  const saveEntry = useCallback(async (payload: Parameters<typeof createManualJournalEntry>[1], post = false): Promise<string> => {
+    try {
+      const id = await createManualJournalEntry(orgId, payload);
+      if (post) await postJournalEntry(id);
+      return id;
+    } finally {
+      result.reload();
+    }
   }, [orgId, result]);
 
   // Realtime: reload on any journal_entries change for this org
@@ -194,9 +209,8 @@ export interface TrialBalanceData {
   accounts: Account[];
   journals: Record<string, Journal>;
   opening:  Record<string, number>;
-  balances: AccountBalance[];
-  // In MOCK mode, movementsOf / closingSigned / ledgerOf are still the mock functions.
-  // In real mode the page derives the same numbers from opening + balances.
+  entries:  JournalEntry[];
+  year:     number;
 }
 
 export function useTrialBalance() {
@@ -204,14 +218,14 @@ export function useTrialBalance() {
   // Per load, so a tab left open across 31 December fetches the new exercise
   const year = exerciseYear();
   return useAsyncData<TrialBalanceData>(`trial:${orgId}:${year}`, async () => {
-    const [classes, accounts, journals, opening, balances] = await Promise.all([
+    const [classes, accounts, journals, opening, entries] = await Promise.all([
       fetchAccountClasses(),
       fetchAccounts(orgId),
       fetchJournals(orgId),
       fetchOpeningBalances(orgId, year),
-      fetchAccountBalances(orgId),
+      fetchJournalEntries(orgId, { includeDraft: true, year }),
     ]);
-    return { classes, accounts, journals, opening, balances };
+    return { classes, accounts, journals, opening, entries, year };
   }, [orgId, year]);
 }
 
@@ -219,7 +233,9 @@ export function useTrialBalance() {
 
 export interface FinancialStatementsData {
   opening:  Record<string, number>;
-  balances: AccountBalance[];
+  entries:  JournalEntry[];
+  year:     number;
+  accounts: Account[];
 }
 
 export function useFinancialStatements() {
@@ -227,11 +243,12 @@ export function useFinancialStatements() {
   // Per load, so a tab left open across 31 December fetches the new exercise
   const year = exerciseYear();
   return useAsyncData<FinancialStatementsData>(`fin-stmt:${orgId}:${year}`, async () => {
-    const [opening, balances] = await Promise.all([
+    const [opening, entries, accounts] = await Promise.all([
       fetchOpeningBalances(orgId, year),
-      fetchAccountBalances(orgId),
+      fetchJournalEntries(orgId, { includeDraft: false, year }),
+      fetchAccounts(orgId),
     ]);
-    return { opening, balances };
+    return { opening, entries, year, accounts };
   }, [orgId, year]);
 }
 
@@ -331,6 +348,7 @@ export interface TaxData {
 
 export function useTaxData() {
   const { orgId } = useApp();
+  // Every year: the deadlines early in the year are for the previous exercise
   const result = useAsyncData<TaxData>(`tax:${orgId}`, async () => {
     const [journals, entries] = await Promise.all([
       fetchJournals(orgId),
@@ -357,9 +375,9 @@ export function useTaxData() {
 
 export interface PeriodClosingData {
   periods:  FiscalPeriod[];
-  entries:  JournalEntry[]; // all (need draft count)
+  entries:  JournalEntry[]; // the exercise's, drafts included (they block closing a month)
   opening:  Record<string, number>;
-  balances: AccountBalance[];
+  year:     number;
 }
 
 export function usePeriodClosing() {
@@ -367,13 +385,12 @@ export function usePeriodClosing() {
   // Per load, so a tab left open across 31 December fetches the new exercise
   const year = exerciseYear();
   const result = useAsyncData<PeriodClosingData>(`period-closing:${orgId}:${year}`, async () => {
-    const [periods, entries, opening, balances] = await Promise.all([
+    const [periods, entries, opening] = await Promise.all([
       fetchFiscalPeriods(orgId, year),
-      fetchJournalEntries(orgId, { includeDraft: true }),
+      fetchJournalEntries(orgId, { includeDraft: true, year }),
       fetchOpeningBalances(orgId, year),
-      fetchAccountBalances(orgId),
     ]);
-    return { periods, entries, opening, balances };
+    return { periods, entries, opening, year };
   }, [orgId, year]);
 
   const closePeriod = useCallback(async (periodId: string) => {
@@ -385,24 +402,17 @@ export function usePeriodClosing() {
 }
 
 // ─── Balance helpers ──────────────────────────────────────────────────────────
-// Builds O(1) lookup fns from the data returned by any hook with { balances, opening }.
-// When data is null (still loading) or an account has no row, all values are 0.
+// Opening, movements and closing per account over the exercise, from its
+// entries (ledger.ts). `includeDraft`: drafts count in the movements too.
 
 export function useBalanceFns(
-  data: { balances: AccountBalance[]; opening: Record<string, number> } | null,
-  _showDraft = false,
+  data: { entries: JournalEntry[]; opening: Record<string, number>; year: number } | null,
+  includeDraft = false,
 ) {
   return useMemo(() => {
-    const map = new Map((data?.balances ?? []).map(b => [b.accountNum, { debit: b.totalDebit, credit: b.totalCredit }]));
-    const openMap = data?.opening ?? {};
-    const mvtOf = (num: string) => map.get(num) ?? { debit: 0, credit: 0 };
-    const openFn = (num: string) => openMap[num] ?? 0;
-    return {
-      mvtOf,
-      signedOf: (num: string) => { const m = mvtOf(num); return openFn(num) + m.debit - m.credit; },
-      openingOf: openFn,
-    };
-  }, [data]);
+    const movements = exerciseMovements(data?.entries ?? [], data?.year ?? exerciseYear(), { includeDraft });
+    return balanceFns(movements, data?.opening ?? {});
+  }, [data, includeDraft]);
 }
 
 // ─── Re-export computed helpers so pages import from one place ────────────────
