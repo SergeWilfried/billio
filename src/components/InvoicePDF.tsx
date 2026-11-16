@@ -12,7 +12,7 @@ import type { Invoice, LineItem, ServiceWithholdingScenario } from '@/lib/schema
 import type { BizInfo, PaperConfig } from '@/components/InvoicePaper';
 import type { PaymentMethodLine } from '@/lib/payment-methods';
 import { VAT_LABEL, chargesVat, documentHasVat } from '@/lib/vat';
-import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, paperBands, pdfFont } from '@/lib/invoice-template';
+import { DEFAULT_CONFIG, accentDark, accentTint, densityScale, normalizeConfig, paperBands, paymentQrTarget, pdfFont } from '@/lib/invoice-template';
 import { registerPdfFonts } from '@/lib/pdf-fonts';
 import { qrMatrix, qrRuns, type InvoiceCertification } from '@/lib/certification';
 
@@ -128,6 +128,12 @@ export interface InvoicePDFProps {
   paymentMethods?: PaymentMethodLine[];
   /** SECeF elements of a certified invoice (PRO-137); printed in a fixed area of every layout. */
   certification?: InvoiceCertification;
+  /**
+   * The invoice's payment page, for the « Scanner pour payer » QR code; it
+   * shows what is left to pay when scanned. See paymentQrTarget: none is
+   * printed without one (PRO-187).
+   */
+  paymentUrl?: string | null;
 }
 
 // Page frame in points (1 mm ≈ 2.83 pt). 15 mm sides; content starts 18 mm down
@@ -261,6 +267,8 @@ function makeStyles(t: PaperConfig) {
       },
       payCol: isReceipt ? {} : { flex: 1 },
       payMethod: { fontSize: 8, color: '#444', marginBottom: 2 },
+      payQr: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: isReceipt ? 'flex-start' : 'center' },
+      payQrCaption: { fontSize: 6.5, color: '#666', width: 34, lineHeight: 1.3 },
       notesText: { fontSize: 8, color: '#666', lineHeight: 1.5 },
       totalWords: { fontSize: 8, color: '#444', marginTop: -sp(10), marginBottom: sp(14), textAlign: isReceipt ? 'left' : 'right' },
       certBox: {
@@ -326,7 +334,7 @@ const pdfFmtDateTime = (iso: string): string => {
 
 export function InvoicePDFDocument({
   invoice, lines, client, biz, template, title = 'Facture', documentKind, clientLabel = 'Facturé à',
-  paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [], certification, creditNote,
+  paymentTerms = 'Net 14 jours', deliveryTerms = 'À convenir', paymentMethods = [], certification, creditNote, paymentUrl,
 }: InvoicePDFProps) {
   registerPdfFonts();
   const t = normalizeConfig(template ?? DEFAULT_CONFIG);
@@ -518,10 +526,20 @@ export function InvoicePDFDocument({
     </View>
   );
 
+  const kind = documentKind ?? (creditNote ? 'avoir' : title === 'Devis' ? 'devis' : 'facture');
   // DGI mention t: the total in words, in every layout
   const totalInWords = (
-    <Text style={s.totalWords}>{invoiceTotalMention(total, documentKind ?? (creditNote ? 'avoir' : title === 'Devis' ? 'devis' : 'facture'))}</Text>
+    <Text style={s.totalWords}>{invoiceTotalMention(total, kind)}</Text>
   );
+
+  // Compact, beside the payment methods: about as tall as three of their lines
+  const payQrUrl = paymentQrTarget({ config: t, kind, amountDue, paymentUrl });
+  const payQr = payQrUrl ? (
+    <View style={s.payQr}>
+      <PdfQr text={payQrUrl} size={40} />
+      <Text style={s.payQrCaption}>Scanner pour payer</Text>
+    </View>
+  ) : null;
 
   // Kept on one page, unless notes make it too long for one: then it may continue
   const payment = creditNote ? (
@@ -539,6 +557,7 @@ export function InvoicePDFDocument({
           ? paymentMethods.map(m => <Text key={m.label} style={s.payMethod}>{m.label} {'—'} {m.value}</Text>)
           : <Text style={s.payMethod}>Contactez-nous pour les modalit{'é'}s de paiement.</Text>}
       </View>
+      {payQr}
       <View style={s.payCol}>
         <Text style={s.blockLabel}>{notes ? 'Notes et conditions' : 'Notes'}</Text>
         {notes
