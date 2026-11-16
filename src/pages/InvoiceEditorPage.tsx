@@ -2,6 +2,9 @@
 // /invoices/new           a new invoice (?client=CODE to start with a client,
 //                         ?quote=ID to start from a quote, or a copy passed by « Dupliquer »)
 // /invoices/:id/edit      a draft
+// /quotes/new, /quotes/:id/edit   the same editor for a quote (PRO-185): « Devis »,
+//                         a validity date instead of the due date, no DGI checks;
+//                         its notes and discount are carried into the invoice
 // Dates, subject, lines and discount are typed on the page. Seller and client
 // blocks come from Paramètres and the client's record (CGI art. 562), never
 // typed here. « Notes et conditions » is rich text (Tiptap), formatted from the
@@ -30,7 +33,8 @@ import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { filledLines } from '@/lib/line-validation';
 import { fetchLineItems } from '@/lib/api/line-items';
 import { removeInvoice } from '@/lib/api/invoices';
-import { updateQuote } from '@/lib/api/quotes';
+import { QuoteLockedError, removeQuote, updateQuote } from '@/lib/api/quotes';
+import { saveQuoteDraft } from '@/lib/api/quote-drafts';
 import { createProduct } from '@/lib/api/products';
 import { recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { createActivity } from '@/lib/api/activities';
@@ -53,7 +57,7 @@ import { paperBands } from '@/lib/invoice-template';
 import { VAT_LABEL, VAT_RATE, chargesVat } from '@/lib/vat';
 import { SERVICE_WITHHOLDING_RATE_LABEL } from '@/lib/tax-bf';
 import { fmt, newLineItem } from '@/data';
-import type { Activity, Invoice, LineItem, Product } from '@/lib/schemas';
+import type { Activity, Invoice, LineItem, Product, Quote } from '@/lib/schemas';
 
 const UNITS = ['unité', 'heure', 'jour', 'mois', 'an', 'projet', 'article', 'licence'];
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
@@ -66,7 +70,8 @@ const AUTOSAVE_MS = 3000;
 /** An invoice copied by « Dupliquer », opened as a new invoice. */
 interface CopyState { copy?: { client: string; subject: string; discountPct: number; notes?: RichDoc; lines: LineItem[] } }
 
-export default function InvoiceEditorPage() {
+export default function InvoiceEditorPage({ doc = 'invoice' }: { doc?: 'invoice' | 'quote' }) {
+  const isQuote = doc === 'quote';
   const { id: routeId } = useParams();
   const [params] = useSearchParams();
   const location = useLocation();
@@ -80,12 +85,13 @@ export default function InvoiceEditorPage() {
   const compliance = useComplianceGuard();
   const vatOn = chargesVat(orgSettings.taxRegime);
 
-  const quoteId = routeId ? undefined : params.get('quote') ?? undefined;
+  // The quote a new invoice starts from (not when writing a quote)
+  const quoteId = routeId || isQuote ? undefined : params.get('quote') ?? undefined;
   const quote = quoteId ? quotes.find(q => q.id === quoteId) : undefined;
   const copy = (location.state as CopyState | null)?.copy;
 
-  // The draft once saved (its id), or null while new
-  const [saved, setSaved] = useState<Invoice | null>(null);
+  // The draft (or quote) once saved, or null while new
+  const [saved, setSaved] = useState<Invoice | Quote | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [ready, setReady] = useState(false);
   const [client, setClient] = useState('');
@@ -133,7 +139,7 @@ export default function InvoiceEditorPage() {
   const loadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (loading || !orgId) return;
-    const key = routeId ?? `new:${quoteId ?? ''}:${params.get('client') ?? ''}:${copy ? location.key : ''}`;
+    const key = `${doc}:` + (routeId ?? `new:${quoteId ?? ''}:${params.get('client') ?? ''}:${copy ? location.key : ''}`);
     if (loadedFor.current === key) return;
     let live = true;
     // Another draft or a new invoice: don't show (or save into) the previous one meanwhile
@@ -151,7 +157,22 @@ export default function InvoiceEditorPage() {
       setReady(true);
     };
 
-    if (routeId) {
+    if (routeId && isQuote) {
+      const q = quotes.find(x => x.id === routeId);
+      if (!q) { showToast('Devis introuvable.', true); navigate('/quotes', { replace: true }); return; }
+      // Invoiced, declined or expired: read-only, on its own page
+      if (['invoiced', 'declined', 'expired'].includes(q.status)) { navigate(`/quotes/${q.id}`, { replace: true }); return; }
+      fetchLineItems(orgId, { quoteId: q.id }).then(ls => {
+        if (!live) return;
+        setSaved(q);
+        start({ client: q.client, issued: q.issued, due: q.valid, subject: q.subject, discountPct: q.discountPct ?? 0, lines: ls, notes: q.notes ?? null }, true);
+      }).catch(err => {
+        if (!live) return;
+        console.error('[fetchLineItems]', err);
+        showToast('Les lignes du devis n’ont pas pu être chargées. Réessayez.', true);
+        navigate(`/quotes/${q.id}`, { replace: true });
+      });
+    } else if (routeId) {
       const inv = invoices.find(i => i.id === routeId);
       if (!inv) { showToast('Facture introuvable.', true); navigate('/invoices', { replace: true }); return; }
       // Issued invoices keep their own page (and its corrections)
@@ -173,7 +194,8 @@ export default function InvoiceEditorPage() {
       if (linked) { navigate(linked.status === 'draft' ? `/invoices/${linked.id}/edit` : `/invoices/${linked.id}`, { replace: true }); return; }
       fetchLineItems(orgId, { quoteId: quote.id }).then(ls => {
         // Fresh ids: these lines become the invoice's own
-        start({ client: quote.client, issued, due, subject: quote.subject, discountPct: 0, lines: ls.map(l => ({ ...l, id: crypto.randomUUID() })), notes: null }, false);
+        // The quote's discount and notes go with it (PRO-185)
+        start({ client: quote.client, issued, due, subject: quote.subject, discountPct: quote.discountPct ?? 0, lines: ls.map(l => ({ ...l, id: crypto.randomUUID() })), notes: quote.notes ?? null }, false);
       }).catch(err => {
         if (!live) return;
         console.error('[fetchLineItems]', err);
@@ -189,7 +211,7 @@ export default function InvoiceEditorPage() {
     return () => { live = false; };
     // Loads once per draft / quote / copy / start; later edits are the user's
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, orgId, routeId, quoteId, quote, invoices, copy, location.key]);
+  }, [loading, orgId, doc, routeId, quoteId, quote, invoices, quotes, copy, location.key]);
 
   // ── Client details: type, IFU and KYB file ─────────────────────────────────
   const clientRec = client ? clientsMap[client] : undefined;
@@ -288,6 +310,14 @@ export default function InvoiceEditorPage() {
   // ── Checks before issuing (the same ones « Émettre » runs) ─────────────────
   const checks = useMemo(() => {
     const out: { ok: boolean; warn?: boolean; text: string; lineId?: string }[] = [];
+    // A quote is not a tax document: only its own content is checked
+    if (isQuote) {
+      out.push(clientRec ? { ok: true, text: `Client : ${clientRec.name}` } : { ok: false, text: 'Choisissez un client' });
+      lines.forEach((l, i) => { if (problems[l.id]) out.push({ ok: false, text: `Ligne ${i + 1} : ${problems[l.id]}`, lineId: l.id }); });
+      if (filledLines(lines).length === 0) out.push({ ok: false, text: 'Ajoutez au moins une ligne' });
+      if (due < issued) out.push({ ok: false, text: 'La date de validité doit suivre la date du devis' });
+      return out;
+    }
     const seller = sellerIssues(orgSettings, paySettings);
     out.push(seller.length ? { ok: false, text: `Mentions du vendeur à compléter : ${seller.map(i => i.label).join(', ')}` } : { ok: true, text: 'Mentions du vendeur complètes' });
     if (!clientRec) out.push({ ok: false, text: 'Choisissez un client' });
@@ -300,7 +330,7 @@ export default function InvoiceEditorPage() {
     if (due < issued) out.push({ ok: false, text: 'L’échéance doit suivre la date de facturation' });
     if (kyb?.needsAttention) out.push({ ok: false, warn: true, text: `Dossier KYB : ${kybSummaryLabel(kyb)} (n’empêche pas l’émission)` });
     return out;
-  }, [orgSettings, paySettings, clientRec, lines, problems, due, issued, kyb]);
+  }, [isQuote, orgSettings, paySettings, clientRec, lines, problems, due, issued, kyb]);
   const blocking = checks.filter(c => !c.ok && !c.warn).length;
 
   // ── Save, issue, preview, duplicate, delete ────────────────────────────────
@@ -309,17 +339,42 @@ export default function InvoiceEditorPage() {
 
   /** Why the draft can't be saved as it is, or null */
   const saveProblem = (): string | null =>
-    draftProblem(client, issued, due, lines)
+    draftProblem(client, issued, due, lines, isQuote)
     ?? (notesLength > NOTES_MAX_CHARS ? `Les notes sont trop longues (${NOTES_MAX_CHARS} caractères au plus).` : null)
     ?? (notes && notesStoredSize(notes) > NOTES_MAX_BYTES ? 'Les notes ont trop de mises en forme pour être enregistrées. Simplifiez-les (moins de passages en gras, italique ou liens).' : null);
 
+  /** Saves the quote (PRO-185); its status is kept. */
+  async function saveQuote(): Promise<Quote> {
+    const isNew = !saved;
+    const prev = saved as Quote | null;
+    const stored = await saveQuoteDraft(orgId, {
+      id: prev?.id, status: prev?.status,
+      fields: { client, subject, issued, valid: due, discountPct, amount: totals.total, notes }, lines,
+    });
+    const merged: Quote = { ...prev, ...stored, ownerId: stored.ownerId ?? prev?.ownerId, ownerName: stored.ownerName ?? prev?.ownerName, invoiceId: prev?.invoiceId };
+    setQuotes(list => list.some(q => q.id === merged.id) ? list.map(q => q.id === merged.id ? { ...q, ...merged } : q) : [merged, ...list]);
+    if (isNew) {
+      posthog.capture('quote_created', { item_count: filledLines(lines).length, total_amount: totals.total, status: 'draft', from: copy ? 'copy' : 'editor' });
+      window.history.replaceState(window.history.state, '', `/quotes/${merged.id}/edit`);
+    }
+    return merged;
+  }
+
   /** Saves the draft; returns it, or null when it wasn't saved (the reason is shown unless `quiet`). */
-  async function save(opts?: { quiet?: boolean }): Promise<Invoice | null> {
+  async function save(opts?: { quiet?: boolean }): Promise<Invoice | Quote | null> {
     const problem = saveProblem();
     if (problem) { if (!opts?.quiet) showToast(problem, true); return null; }
+    if (isQuote) {
+      const q = await saveQuote();
+      setSaved(q);
+      setSavedAt(new Date());
+      setBaseline(snapshot);
+      return q;
+    }
     const isNew = !saved;
     const draft = await saveInvoiceDraft(orgId, { id: saved?.id, fields, lines, ownerId: isNew ? quote?.ownerId : undefined });
-    const merged: Invoice = { ...saved, ...draft, ownerId: draft.ownerId ?? saved?.ownerId, ownerName: draft.ownerName ?? saved?.ownerName };
+    const prevInv = saved as Invoice | null;
+    const merged: Invoice = { ...prevInv, ...draft, ownerId: draft.ownerId ?? prevInv?.ownerId, ownerName: draft.ownerName ?? prevInv?.ownerName };
     setInvoices(prev => prev.some(i => i.id === merged.id) ? prev.map(i => i.id === merged.id ? { ...i, ...merged } : i) : [merged, ...prev]);
     if (isNew && quote) {
       // The quote links to its invoice from now on (it is marked invoiced at issue)
@@ -344,14 +399,20 @@ export default function InvoiceEditorPage() {
   const saveRef = useRef(save);
   saveRef.current = save;
   const queue = useRef<Promise<unknown>>(Promise.resolve());
-  function queuedSave(opts?: { quiet?: boolean }): Promise<Invoice | null> {
+  function queuedSave(opts?: { quiet?: boolean }): Promise<Invoice | Quote | null> {
     const run = queue.current.catch(() => {}).then(() => saveRef.current(opts));
     queue.current = run;
     return run;
   }
 
-  /** The draft was issued in another tab or by someone else: nothing was written; open it as issued. */
+  /** The draft was issued (or the quote invoiced, declined, expired) elsewhere: nothing was written; open it. */
   function onIssuedElsewhere(err: unknown): boolean {
+    if (err instanceof QuoteLockedError) {
+      showToast('Ce devis a été facturé, refusé ou a expiré entre-temps : vos modifications n’ont pas été enregistrées.', true);
+      leaveOk.current = true;
+      navigate(`/quotes/${err.quoteId}`, { replace: true });
+      return true;
+    }
     if (!(err instanceof DraftIssuedError)) return false;
     showToast('Cette facture a été émise entre-temps : vos modifications n’ont pas été enregistrées.', true);
     leaveOk.current = true;
@@ -400,7 +461,7 @@ export default function InvoiceEditorPage() {
       if (!live) return;
       if (kept || window.confirm(saved
         ? 'Les modifications n’ont pas pu être enregistrées. Quitter quand même ? Elles seront perdues.'
-        : 'Quitter sans enregistrer ? La facture n’a pas encore été enregistrée : ce qui est saisi sera perdu.')) blocker.proceed();
+        : `Quitter sans enregistrer ? ${isQuote ? 'Le devis n’a' : 'La facture n’a'} pas encore été enregistré${isQuote ? '' : 'e'} : ce qui est saisi sera perdu.`)) blocker.proceed();
       else blocker.reset();
     })();
     return () => { live = false; };
@@ -412,7 +473,7 @@ export default function InvoiceEditorPage() {
     if (busyRef.current) return;
     busyRef.current = true; setBusy('save');
     try {
-      if (await queuedSave()) { setAutoState(null); showToast('Brouillon enregistré'); }
+      if (await queuedSave()) { setAutoState(null); showToast(isQuote ? 'Devis enregistré' : 'Brouillon enregistré'); }
     } catch (err) {
       if (onIssuedElsewhere(err)) return;
       console.error('[saveInvoiceDraft]', err);
@@ -427,7 +488,8 @@ export default function InvoiceEditorPage() {
     busyRef.current = true; setBusy('issue');
     let draft: Invoice | null = null;
     try {
-      draft = await queuedSave();
+      // Invoices only: save() returns the invoice draft here
+      draft = await queuedSave() as Invoice | null;
       if (!draft) return;
       const res = await issueSavedDraft(orgId, draft.id, totals.total);
       const issuedInv: Invoice = { ...draft, status: 'pending', number: res.number, firstIssuedAt: res.firstIssuedAt ?? new Date().toISOString(), issuedByName: res.issuedByName ?? userLabel };
@@ -464,8 +526,28 @@ export default function InvoiceEditorPage() {
     }
   }
 
+  // A quote: « Enregistrer et fermer » saves it and opens its page (send, PDF, invoice)
+  async function onFinishQuote() {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy('issue');
+    try {
+      const q = await queuedSave();
+      if (!q) { setChecksOpen(true); return; }
+      showToast(`Devis ${q.id} enregistré`);
+      leaveOk.current = true;
+      navigate(`/quotes/${q.id}`, { replace: true });
+    } catch (err) {
+      if (onIssuedElsewhere(err)) return;
+      console.error('[saveQuote]', err);
+      showToast('Le devis n’a pas pu être enregistré. Réessayez.', true);
+    } finally {
+      busyRef.current = false; setBusy(null);
+    }
+  }
+
   // « Émettre »: the editor's checks, then the plan limit and the DGI mentions (PRO-133)
   function onIssue() {
+    if (isQuote) { void onFinishQuote(); return; }
     const problem = issueProblem(client, issued, due, lines);
     if (problem) { showToast(problem, true); setChecksOpen(true); return; }
     void compliance.guard(client, () => void issue(), {
@@ -484,10 +566,12 @@ export default function InvoiceEditorPage() {
     const tab = window.open('', '_blank');
     busyRef.current = true; setBusy('pdf');
     try {
-      const inv: Invoice = { id: saved?.id ?? 'brouillon', subject: subject.trim() || 'Facture sans titre', client, issued, due, amount: totals.total, status: 'draft', discountPct, notes: notes ?? undefined };
+      const inv: Invoice = { id: saved?.id ?? 'brouillon', subject: subject.trim() || (isQuote ? 'Devis sans titre' : 'Facture sans titre'), client, issued, due, amount: totals.total, status: isQuote ? 'pending' : 'draft', discountPct, notes: notes ?? undefined };
       const blob = await renderInvoicePdf({
         template: invoiceTemplate, invoice: inv, lines: filledLines(lines), client: clientRec, biz: orgSettings,
         paymentTerms: orgSettings.paymentTerms || 'Net 14 jours', deliveryTerms: orgSettings.deliveryTerms || 'À convenir', paymentMethods,
+        // As the quote's own page prints it
+        ...(isQuote ? { title: 'Facture Proforma', documentKind: 'devis' as const, clientLabel: 'Adressé à' } : {}),
       });
       const url = URL.createObjectURL(blob);
       if (tab) tab.location.href = url; else window.open(url, '_blank');
@@ -504,12 +588,30 @@ export default function InvoiceEditorPage() {
   function onDuplicate() {
     // Leaving this draft: the guard saves it (or asks, for a new invoice)
     const state: CopyState = { copy: { client, subject, discountPct, notes: notes ?? undefined, lines: filledLines(lines) } };
-    navigate('/invoices/new', { state });
+    navigate(isQuote ? '/quotes/new' : '/invoices/new', { state });
     showToast('Copie ouverte : enregistrez-la pour la garder.');
   }
 
   async function onDeleteDraft() {
     if (!saved || busyRef.current) return;
+    if (isQuote) {
+      if (!window.confirm(`Supprimer le devis ${saved.id} ?`)) return;
+      busyRef.current = true; setBusy('delete');
+      try {
+        // Its lines go with it (on delete cascade)
+        await removeQuote(orgId, saved.id);
+        setQuotes(prev => prev.filter(q => q.id !== saved.id));
+        showToast('Devis supprimé');
+        leaveOk.current = true;
+        navigate('/quotes', { replace: true });
+      } catch (err) {
+        console.error('[removeQuote]', err);
+        showToast('Le devis n’a pas pu être supprimé. Réessayez.', true);
+      } finally {
+        busyRef.current = false; setBusy(null);
+      }
+      return;
+    }
     if (!window.confirm('Supprimer ce brouillon ? Il n’a pas de numéro : rien n’est perdu dans la numérotation.')) return;
     busyRef.current = true; setBusy('delete');
     try {
@@ -535,6 +637,7 @@ export default function InvoiceEditorPage() {
   function onCancel() {
     if (busy || compliance.checking) return;
     // The leave guard saves a draft's changes, or asks for a new invoice
+    if (isQuote) { navigate(saved ? `/quotes/${saved.id}` : '/quotes'); return; }
     navigate(saved ? `/invoices/${saved.id}` : quote ? `/quotes/${quote.id}` : '/invoices');
   }
 
@@ -548,14 +651,21 @@ export default function InvoiceEditorPage() {
   useDismiss(checksRef, checksOpen, closeChecks);
   useDismiss(moreRef, moreOpen, closeMore);
 
-  if (loading || !ready) return <PageSkeleton title="Facture" variant="document" rows={4} />;
+  if (loading || !ready) return <PageSkeleton title={isQuote ? 'Devis' : 'Facture'} variant="document" rows={4} />;
   if (!writable) {
-    return <Page title="Facture" back={{ label: 'Retour aux factures', onClick: () => navigate('/invoices') }}><p className="dt-muted">Votre rôle ne permet pas de créer ou modifier des factures.</p></Page>;
+    return isQuote
+      ? <Page title="Devis" back={{ label: 'Retour aux devis', onClick: () => navigate('/quotes') }}><p className="dt-muted">Votre rôle ne permet pas de créer ou modifier des devis.</p></Page>
+      : <Page title="Facture" back={{ label: 'Retour aux factures', onClick: () => navigate('/invoices') }}><p className="dt-muted">Votre rôle ne permet pas de créer ou modifier des factures.</p></Page>;
   }
 
   const locked = busy !== null || compliance.checking;
   const pageBand = paperBands(invoiceTemplate);
-  const live = saved ? invoices.find(i => i.id === saved.id) ?? saved : null;
+  const live = saved ? (isQuote ? quotes.find(q => q.id === saved.id) : invoices.find(i => i.id === saved.id)) ?? saved : null;
+  const savedQuote = isQuote ? saved as Quote | null : null;
+  const heading = isQuote
+    ? (savedQuote ? `Devis ${savedQuote.id}` : 'Nouveau devis')
+    : (saved ? 'Brouillon de facture' : 'Nouvelle facture');
+  const quoteStatusLabel: Record<Quote['status'], string> = { draft: 'Brouillon', sent: 'Envoyé', accepted: 'Accepté', declined: 'Refusé', expired: 'Expiré', invoiced: 'Facturé' };
   const ownerName = live?.ownerName ?? (quote?.ownerName ? quote.ownerName : 'vous');
   const sellerIds = [
     orgSettings.ifu && `${getFiscalIdLabel(orgSettings.country)} ${orgSettings.ifu}`,
@@ -575,30 +685,32 @@ export default function InvoiceEditorPage() {
     <>
       <Page
         back={{ label: saved ? 'Fermer' : 'Annuler', onClick: onCancel }}
-        title={<span className="iv-title"><span>{saved ? 'Brouillon de facture' : 'Nouvelle facture'}</span><StatusPill tone="draft" label="Brouillon" /></span>}
+        title={<span className="iv-title"><span>{heading}</span><StatusPill tone={savedQuote && savedQuote.status !== 'draft' ? 'wait' : 'draft'} label={savedQuote ? quoteStatusLabel[savedQuote.status] : 'Brouillon'} /></span>}
         subtitle={
           <span className="iv-sub">
-            <span>N° attribué à l’émission</span>
+            {isQuote ? (!saved && <span>N° attribué à l’enregistrement</span>) : <span>N° attribué à l’émission</span>}
             {quote && <span>Depuis le devis {quote.id}</span>}
             {saved
-              ? <span><OwnerLine table="invoices" id={saved.id} ownerId={live?.ownerId} ownerName={live?.ownerName} className="ie-owner" /></span>
+              ? <span><OwnerLine table={isQuote ? 'quotes' : 'invoices'} id={saved.id} ownerId={live?.ownerId} ownerName={live?.ownerName} className="ie-owner" /></span>
               : <span>Responsable : {ownerName}</span>}
             <span aria-live="polite">
               {autoState === 'saving' ? 'Enregistrement…'
-                : autoState === 'failed' ? <span className="ie-save-failed">Enregistrement automatique impossible{savable ? '' : ' : corrigez la facture'} · <button type="button" className="ie-link" onClick={() => void onSave()}>Enregistrer</button></span>
+                : autoState === 'failed' ? <span className="ie-save-failed">Enregistrement automatique impossible{savable ? '' : isQuote ? ' : corrigez le devis' : ' : corrigez la facture'} · <button type="button" className="ie-link" onClick={() => void onSave()}>Enregistrer</button></span>
                 : savedAt ? `Enregistré à ${timeOf(savedAt)}` : saved ? 'Enregistré' : 'Pas encore enregistré'}
               {dirty && saved && autoState === null ? ' · modifications en cours' : ''}
             </span>
           </span>
         }
-        documentTitle={saved ? 'Brouillon de facture' : 'Nouvelle facture'}
+        documentTitle={heading}
         actions={<>
           <button className="btn" onClick={onCancel} disabled={locked}>{saved ? 'Fermer' : 'Annuler'}</button>
           <button className="btn" onClick={() => void onSave()} disabled={locked}>
-            {busy === 'save' ? 'Enregistrement…' : 'Enregistrer le brouillon'}
+            {busy === 'save' ? 'Enregistrement…' : isQuote ? 'Enregistrer' : 'Enregistrer le brouillon'}
           </button>
           <button className="btn btn-primary" onClick={onIssue} disabled={locked}>
-            {busy === 'issue' ? 'Émission…' : compliance.checking ? 'Vérification…' : 'Émettre la facture'}
+            {isQuote
+              ? (busy === 'issue' ? 'Enregistrement…' : 'Enregistrer et fermer')
+              : busy === 'issue' ? 'Émission…' : compliance.checking ? 'Vérification…' : 'Émettre la facture'}
           </button>
         </>}
       >
@@ -612,7 +724,7 @@ export default function InvoiceEditorPage() {
             // The toolbar's formatting follows where the cursor was last
             onFocusCapture={e => { if (!(e.target as HTMLElement).closest('.ie-notes')) setNotesActive(false); }}
           >
-            <div className="ie-watermark" aria-hidden="true">BROUILLON</div>
+            {!isQuote && <div className="ie-watermark" aria-hidden="true">BROUILLON</div>}
 
             <div className="pp-top">
               <div className="pp-biz ie-locked" title="Depuis Paramètres">
@@ -628,14 +740,16 @@ export default function InvoiceEditorPage() {
                 </div>
               </div>
               <div className="pp-doc">
-                <div className="pp-doc-title">Facture</div>
-                <div className="pp-doc-num ie-later">N° attribué à l’émission</div>
+                <div className="pp-doc-title">{isQuote ? 'Devis' : 'Facture'}</div>
+                {isQuote && savedQuote
+                  ? <div className="pp-doc-num">#{savedQuote.id}</div>
+                  : <div className="pp-doc-num ie-later">{isQuote ? 'N° attribué à l’enregistrement' : 'N° attribué à l’émission'}</div>}
               </div>
             </div>
 
             <div className="pp-parties">
               <div>
-                <div className="pp-block-label">Facturé à</div>
+                <div className="pp-block-label">{isQuote ? 'Adressé à' : 'Facturé à'}</div>
                 <ClientPicker value={client} onChange={setClient} disabled={locked} kybLabel={kybText} />
                 {clientRec && (
                   <>
@@ -649,12 +763,14 @@ export default function InvoiceEditorPage() {
               <div>
                 <div className="pp-block-label">Détails</div>
                 <div className="pp-meta-grid">
-                  <label className="k" htmlFor="ie-issued">Date de facturation</label>
+                  <label className="k" htmlFor="ie-issued">{isQuote ? 'Date du devis' : 'Date de facturation'}</label>
                   <div className="v"><input id="ie-issued" type="date" className="ie-field" value={issued} disabled={locked} onChange={e => setIssued(e.target.value)} /></div>
-                  <label className="k" htmlFor="ie-due">Échéance</label>
+                  <label className="k" htmlFor="ie-due">{isQuote ? 'Valable jusqu’au' : 'Échéance'}</label>
                   <div className="v"><input id="ie-due" type="date" className={`ie-field${due < issued ? ' bad' : ''}`} value={due} disabled={locked} onChange={e => setDue(e.target.value)} /></div>
-                  <div className="k">Émise le</div>
-                  <div className="v ie-later">date, heure et opérateur à l’émission</div>
+                  {!isQuote && <>
+                    <div className="k">Émise le</div>
+                    <div className="v ie-later">date, heure et opérateur à l’émission</div>
+                  </>}
                   <div className="k">Paiement</div>
                   <div className="v">{orgSettings.paymentTerms || 'Net 14 jours'}</div>
                 </div>
@@ -754,10 +870,10 @@ export default function InvoiceEditorPage() {
                     <span className="tv">− {fmt(totals.withholding)} F CFA</span>
                   </div>
                 </>)}
-                <div className="tot-row grand"><span>{totals.withholding !== null ? 'Net à payer' : 'Total dû'}</span><span className="tv">{fmt(totals.toPay)} F CFA</span></div>
+                <div className="tot-row grand"><span>{totals.withholding !== null ? 'Net à payer' : isQuote ? 'Total estimé' : 'Total dû'}</span><span className="tv">{fmt(totals.toPay)} F CFA</span></div>
               </div>
             </div>
-            {totals.total > 0 && <p className="pp-words">{invoiceTotalMention(totals.total)}</p>}
+            {totals.total > 0 && <p className="pp-words">{invoiceTotalMention(totals.total, isQuote ? 'devis' : 'facture')}</p>}
 
             <div className="pp-pay">
               <div>
@@ -776,7 +892,7 @@ export default function InvoiceEditorPage() {
               </div>
             </div>
 
-            <div className="pp-mentions" aria-label="Mentions obligatoires">
+            {!isQuote && <div className="pp-mentions" aria-label="Mentions obligatoires">
               <div className="pp-block-label">Mentions obligatoires (DGI)</div>
               <ul>
                 <li>Émise le [date et heure à l’émission] par [opérateur]</li>
@@ -784,7 +900,7 @@ export default function InvoiceEditorPage() {
                 <li>Timbre fiscal (paiement en espèces) : barème à confirmer</li>
                 <li>Zone SECeF : QR code et code de la facture, ajoutés à la certification</li>
               </ul>
-            </div>
+            </div>}
 
             {/* The footer as the PDF prints it on every page, from Modèles */}
             <div className="pp-foot ie-locked">
@@ -795,7 +911,7 @@ export default function InvoiceEditorPage() {
           </div>
         </div>
 
-        <div className="ie-bar" role="toolbar" aria-label="Actions de la facture">
+        <div className="ie-bar" role="toolbar" aria-label={isQuote ? 'Actions du devis' : 'Actions de la facture'}>
           <button type="button" className="ie-bar-btn" onClick={() => void onPreviewPdf()} disabled={locked} title="Aperçu PDF" aria-label="Aperçu PDF">
             <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
             {busy === 'pdf' && <span>Préparation…</span>}
@@ -805,12 +921,12 @@ export default function InvoiceEditorPage() {
           </button>
           <div className="ie-bar-pop" ref={checksRef}>
             <button type="button" className={`ie-bar-btn${checksOpen ? ' on' : ''}`} aria-expanded={checksOpen} aria-haspopup="dialog" onClick={() => setChecksOpen(o => !o)}
-              aria-label={blocking ? `Contrôles : ${blocking} à corriger` : 'Contrôles : prêt à émettre'}>
+              aria-label={blocking ? `Contrôles : ${blocking} à corriger` : (isQuote ? 'Contrôles : prêt' : 'Contrôles : prêt à émettre')}>
               <span className={`ie-badge${blocking ? '' : ' ok'}`}>{blocking || '✓'}</span>Contrôles
             </button>
             {checksOpen && (
-              <div className="ie-pop ie-checks" role="dialog" aria-label="Avant d’émettre">
-                <div className="ie-checks-title">Avant d’émettre</div>
+              <div className="ie-pop ie-checks" role="dialog" aria-label={isQuote ? 'Contrôles du devis' : 'Avant d’émettre'}>
+                <div className="ie-checks-title">{isQuote ? 'Contrôles du devis' : 'Avant d’émettre'}</div>
                 <ul>
                   {checks.map((c, i) => (
                     <li key={i} className={c.ok ? 'ok' : c.warn ? 'warn' : 'bad'}>
@@ -827,8 +943,8 @@ export default function InvoiceEditorPage() {
             {moreOpen && (
               <div className="dt-menu ie-pop ie-more" role="menu" aria-label="Plus d’actions">
                 <button type="button" role="menuitem" className="dt-mi" onClick={() => { setMoreOpen(false); navigate('/templates'); }}>Modèle de facture…</button>
-                {saved && canDelete(userRole) && (
-                  <button type="button" role="menuitem" className="dt-mi danger" onClick={() => { setMoreOpen(false); void onDeleteDraft(); }}>Supprimer le brouillon</button>
+                {saved && saved.status === 'draft' && canDelete(userRole) && (
+                  <button type="button" role="menuitem" className="dt-mi danger" onClick={() => { setMoreOpen(false); void onDeleteDraft(); }}>{isQuote ? 'Supprimer le devis' : 'Supprimer le brouillon'}</button>
                 )}
               </div>
             )}

@@ -33,6 +33,8 @@ export interface QuoteListProps {
   writable: boolean;
   deletable: boolean;
   onOpen: (id: string) => void;
+  /** « Modifier » on a draft: opens it in the editor (PRO-185); onOpen when omitted */
+  onEdit?: (id: string) => void;
   onConvert: (quote: Quote) => void;
   onRemind: (id: string) => void;
   onDuplicate: (id: string) => void;
@@ -41,7 +43,7 @@ export interface QuoteListProps {
   duplicating: boolean;
 }
 
-export default function QuoteList({ writable, deletable, onOpen, onConvert, onRemind, onDuplicate, onDelete, duplicating }: QuoteListProps) {
+export default function QuoteList({ writable, deletable, onOpen, onEdit, onConvert, onRemind, onDuplicate, onDelete, duplicating }: QuoteListProps) {
   const { quotes, invoices, clientsMap, userId, userRole } = useApp();
   const navigate = useNavigate();
   const invoiceById = useMemo(() => new Map(invoices.map(i => [i.id, i])), [invoices]);
@@ -101,7 +103,9 @@ export default function QuoteList({ writable, deletable, onOpen, onConvert, onRe
   ];
 
   const rowActions = (q: Quote): RowAction<Quote>[] => [
-    { label: writable && q.status === 'draft' ? 'Modifier' : 'Ouvrir', icon: writable && q.status === 'draft' ? 'edit' : 'eye', onSelect: () => onOpen(q.id) },
+    writable && q.status === 'draft'
+      ? { label: 'Modifier', icon: 'edit', onSelect: () => (onEdit ?? onOpen)(q.id) }
+      : { label: 'Ouvrir', icon: 'eye', onSelect: () => onOpen(q.id) },
     ...(writable && canConvert(q) && q.status !== 'accepted' ? [{ label: 'Facturer', icon: 'arrow-right', onSelect: onConvert }] : []),
     ...(writable && q.status === 'sent' ? [{ label: 'Envoyer une relance', icon: 'send', onSelect: () => onRemind(q.id) }] : []),
     ...(writable && !duplicating && (q.status === 'declined' || q.status === 'expired' || q.status === 'invoiced')

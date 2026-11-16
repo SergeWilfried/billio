@@ -115,6 +115,8 @@ export default function App() {
             {UI_V2 && <Route path="/invoices/:id/edit" element={<InvoiceEditorPage />} />}
             {UI_V2 && <Route path="/invoices/:id/credit-note" element={<CreditNoteEditorPage />} />}
             {UI_V2 && <Route path="/credit-notes/:cnId/edit" element={<CreditNoteEditorPage />} />}
+            {UI_V2 && <Route path="/quotes/new" element={<Gated feature="quotes" title="Devis"><InvoiceEditorPage key="quote" doc="quote" /></Gated>} />}
+            {UI_V2 && <Route path="/quotes/:id/edit" element={<Gated feature="quotes" title="Devis"><InvoiceEditorPage key="quote" doc="quote" /></Gated>} />}
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/clients"  element={<Navigate to="/contacts" replace />} />
