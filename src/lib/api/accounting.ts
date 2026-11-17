@@ -229,20 +229,49 @@ export async function fetchOpeningBalances(
   );
 }
 
+/**
+ * The exercise's opening entry (piece « AN-… », see ledger.ts isOpeningEntry),
+ * posted first; null when there is none.
+ */
+async function findOpeningEntry(orgId: string, year: number): Promise<{ id: string; posted: boolean } | null> {
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .select('id, posted')
+    .eq('org_id', orgId)
+    .ilike('piece', 'AN-%')
+    .gte('date', `${year}-01-01`).lte('date', `${year}-12-31`)
+    .order('posted', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const row = (data ?? [])[0] as Record<string, unknown> | undefined;
+  return row ? { id: String(row.id), posted: Boolean(row.posted) } : null;
+}
+
+/**
+ * Whether the exercise's opening balances are adopted: their opening entry is
+ * posted. Saved rows alone don't count (an adoption that failed half-way can
+ * be done again).
+ */
 export async function fetchOpeningBalanceAdopted(
   orgId: string,
   year: number,
 ): Promise<boolean> {
   if (MOCK) return false;
-  const { count, error } = await supabase
-    .from('opening_balances')
-    .select('*', { count: 'exact', head: true })
-    .eq('org_id', orgId)
-    .eq('exercise_year', year);
-  if (error) throw error;
-  return (count ?? 0) > 0;
+  return (await findOpeningEntry(orgId, year))?.posted ?? false;
 }
 
+/** Opening entries are told apart by their piece: « AN-… » (ledger.ts). */
+export const openingPiece = (piece: string, year: number) => {
+  const p = piece.trim();
+  return /^AN-/i.test(p) ? p : `AN-${year}${p ? `-${p}` : '-001'}`;
+};
+
+/**
+ * Adopts the exercise's opening balances: saves them and posts the opening
+ * entry. Can be run again after a failure part-way (no posted opening entry
+ * yet): the rows saved then are replaced, a draft opening entry is removed.
+ * Returns the lines saved (with the balancing line on 110 when added).
+ */
 export async function adoptOpeningBalances(
   orgId: string,
   opts: {
@@ -252,15 +281,8 @@ export async function adoptOpeningBalances(
     label: string;
     lines: Array<{ acct: string; d: number; c: number }>;
   },
-): Promise<void> {
-  if (MOCK) return;
-
-  // Adopted once per exercise: a second time would post a second opening entry
-  if (await fetchOpeningBalanceAdopted(orgId, opts.year)) {
-    throw new Error(`Opening balances for ${opts.year} are already adopted`);
-  }
-
-  const validLines = opts.lines.filter(l => l.acct && (l.d || l.c));
+): Promise<Array<{ acct: string; d: number; c: number }>> {
+  const validLines = opts.lines.filter(l => l.acct && (l.d || l.c)).map(l => ({ ...l }));
 
   // Auto-balance with account 110 (Report à nouveau) if the entry is unbalanced
   const totalD = validLines.reduce((s, l) => s + l.d, 0);
@@ -278,6 +300,23 @@ export async function adoptOpeningBalances(
       );
     }
   }
+  if (MOCK) return validLines;
+
+  // Checked before anything is written: the journal and an open January
+  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'OD', opts.date);
+
+  // Adopted once per exercise: a second time would post a second opening entry
+  const existing = await findOpeningEntry(orgId, opts.year);
+  if (existing?.posted) throw new Error(`Opening balances for ${opts.year} are already adopted`);
+  if (existing) await deleteJournalEntry(existing.id);
+
+  // Replaces what an earlier, unfinished adoption saved
+  const { error: delErr } = await supabase
+    .from('opening_balances')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('exercise_year', opts.year);
+  if (delErr) throw delErr;
 
   const { error: obErr } = await supabase
     .from('opening_balances')
@@ -292,16 +331,16 @@ export async function adoptOpeningBalances(
     );
   if (obErr) throw obErr;
 
-  const { journalId, periodId } = await resolveJournalAndPeriod(orgId, 'OD', opts.date);
   const entryId = await createJournalEntry(orgId, {
     journalId,
     periodId,
     date:  opts.date,
-    piece: opts.piece,
+    piece: openingPiece(opts.piece, opts.year),
     label: opts.label,
     lines: validLines.map(l => ({ accountNum: l.acct, debit: l.d, credit: l.c })),
   });
   await postJournalEntry(entryId);
+  return validLines;
 }
 
 // ─── Account balances (from v_account_balances view) ─────────────────────────
@@ -339,8 +378,11 @@ export async function fetchJournalEntries(
     return entries;
   }
 
-  const rows: unknown[] = [];
-  for (let from = 0; ; from += PAGE) {
+  // Read by id (keyset), not by offset: an entry added or deleted meanwhile
+  // can't shift the pages (no duplicate, no entry skipped); sorted below
+  const rows: Array<Record<string, unknown>> = [];
+  let after: string | null = null;
+  for (;;) {
     let query = supabase
       .from('journal_entries')
       .select(`
@@ -349,19 +391,23 @@ export async function fetchJournalEntries(
         entry_lines ( account_num, debit, credit )
       `)
       .eq('org_id', orgId)
-      .order('date', { ascending: false })
-      .order('id', { ascending: true });
+      .order('id', { ascending: true })
+      .limit(PAGE);
 
+    if (after)            query = query.gt('id', after);
     if (opts.periodId)    query = query.eq('period_id', opts.periodId);
     if (opts.journalCode) query = query.eq('journals.code', opts.journalCode);
     if (!opts.includeDraft) query = query.eq('posted', true);
     if (opts.year)        query = query.gte('date', `${opts.year}-01-01`).lte('date', `${opts.year}-12-31`);
 
-    const { data, error } = await query.range(from, from + PAGE - 1);
+    const { data, error } = await query;
     if (error) throw error;
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE) break;
+    const page = (data ?? []) as Array<Record<string, unknown>>;
+    rows.push(...page);
+    if (page.length < PAGE) break;
+    after = String(page[page.length - 1].id);
   }
+  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   return rows.map(row => {
     const r = row as Record<string, unknown>;
@@ -461,7 +507,11 @@ export async function postJournalEntry(entryId: string): Promise<void> {
 }
 
 export async function deleteJournalEntry(entryId: string): Promise<void> {
-  if (MOCK) return;
+  if (MOCK) {
+    const i = mockEntries.findIndex(e => e.id === entryId);
+    if (i >= 0) mockEntries.splice(i, 1);
+    return;
+  }
   const { error } = await supabase
     .from('journal_entries')
     .delete()
@@ -537,9 +587,9 @@ async function resolveJournalAndPeriod(
     .single();
   if (jErr || !journal) throw jErr ?? new Error(`${journalCode} journal not found`);
 
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = d.getMonth() + 1;
+  // The calendar date as written (YYYY-MM-DD): no time zone conversion
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
 
   const { data: period } = await supabase
     .from('fiscal_periods')

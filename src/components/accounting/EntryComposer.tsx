@@ -12,7 +12,12 @@ import { todayISO } from '@/lib/invoice-status';
 
 interface Row { acct: string; query: string; debit: string; credit: string }
 const EMPTY: Row = { acct: '', query: '', debit: '', credit: '' };
-const num = (s: string) => { const n = Number(s.replace(/\s/g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+/** The amount typed: 0 when empty, NaN when it isn't a whole number of francs (refused) */
+const num = (s: string) => {
+  const t = s.replace(/[\s\u00a0\u202f]/g, '');
+  if (!t) return 0;
+  return /^\d+$/.test(t) ? Number(t) : NaN;
+};
 
 export interface ComposerPayload {
   journalCode: string; date: string; piece: string; label: string;
@@ -20,7 +25,7 @@ export interface ComposerPayload {
 }
 
 export default function EntryComposer({
-  journals, accounts, entries, periods, signedOf, postable, onClose, onSave,
+  journals, accounts, entries, periods, signedOf, postable, onClose, onCreate, onPost,
 }: {
   journals: Record<string, Journal>;
   accounts: Account[];
@@ -30,7 +35,9 @@ export default function EntryComposer({
   signedOf: (num: string) => number;
   postable: boolean;
   onClose: () => void;
-  onSave: (p: ComposerPayload, post: boolean) => Promise<unknown>;
+  /** Saves the entry as a draft; its id */
+  onCreate: (p: ComposerPayload) => Promise<string>;
+  onPost: (id: string) => Promise<void>;
 }) {
   const codes = Object.keys(journals);
   const [journal, setJournal] = useState(codes.includes('OD') ? 'OD' : codes[0] ?? 'OD');
@@ -44,7 +51,17 @@ export default function EntryComposer({
   const [highlight, setHighlight] = useState(0);
   const [saving, setSaving] = useState<null | 'draft' | 'post'>(null);
   const [error, setError] = useState<string | null>(null);
+  // The draft once saved: a retry after a failed « Comptabiliser » posts it
+  // instead of saving a second entry; the form is then locked
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const mounted = useRef(true);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Focus into the panel on opening, back to the opener on closing
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.querySelector<HTMLElement>('select, input')?.focus();
+    return () => { opener?.focus?.(); };
+  }, []);
   // Set again on mount: StrictMode runs effects twice in development
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
@@ -63,9 +80,12 @@ export default function EntryComposer({
   const periodClosed = period?.status === 'closed';
 
   const lines: ComposerLine[] = rows.map(r => ({ acct: r.acct, debit: num(r.debit), credit: num(r.credit) }));
-  const totalD = lines.reduce((s, l) => s + l.debit, 0);
-  const totalC = lines.reduce((s, l) => s + l.credit, 0);
-  const problem = entryProblem({ label, lines, periodClosed });
+  const totalD = lines.reduce((s, l) => s + (l.debit || 0), 0);
+  const totalC = lines.reduce((s, l) => s + (l.credit || 0), 0);
+  const badAmount = lines.findIndex(l => Number.isNaN(l.debit) || Number.isNaN(l.credit));
+  const problem = badAmount >= 0
+    ? `Ligne ${badAmount + 1} : montant invalide (un nombre entier de francs, sans décimales).`
+    : entryProblem({ label, lines, periodClosed, piece: shownPiece });
 
   const suggestions = useMemo(() => {
     if (active === null) return [];
@@ -91,31 +111,48 @@ export default function EntryComposer({
   };
 
   async function save(post: boolean) {
-    if (problem || saving) return;
+    if (saving || (!createdId && problem)) return;
     setSaving(post ? 'post' : 'draft'); setError(null);
+    let id = createdId;
     try {
-      await onSave({
-        journalCode: journal, date, piece: shownPiece.trim(), label: label.trim(),
-        lines: lines.filter(l => l.acct && (l.debit > 0 || l.credit > 0)).map(l => ({ accountNum: l.acct, debit: l.debit, credit: l.credit })),
-      }, post);
+      if (!id) {
+        id = await onCreate({
+          journalCode: journal, date, piece: shownPiece.trim(), label: label.trim(),
+          lines: lines.filter(l => l.acct && (l.debit > 0 || l.credit > 0)).map(l => ({ accountNum: l.acct, debit: l.debit, credit: l.credit })),
+        });
+        if (mounted.current) setCreatedId(id);
+      }
+      if (post) await onPost(id);
       if (mounted.current) onClose();
     } catch (err) {
       console.error('[saveEntry]', err);
       if (!mounted.current) return;
       const msg = err instanceof Error ? err.message : '';
-      setError(/is closed/.test(msg)
-        ? 'Cette période est clôturée : choisissez une date dans une période ouverte.'
-        : 'L’écriture n’a pas pu être enregistrée. Vérifiez votre connexion et réessayez.');
+      setError(id
+        ? 'Le brouillon est enregistré, mais il n’a pas pu être comptabilisé. Réessayez « Comptabiliser », ou fermez : il reste dans Journaux.'
+        : /is closed/.test(msg)
+          ? 'Cette période est clôturée : choisissez une date dans une période ouverte.'
+          : 'L’écriture n’a pas pu être enregistrée. Vérifiez votre connexion et réessayez.');
     } finally {
       if (mounted.current) setSaving(null);
     }
   }
 
+  // Tab stays inside the panel
+  function trapTab(e: React.KeyboardEvent) {
+    if (e.key !== 'Tab' || !panelRef.current) return;
+    const items = [...panelRef.current.querySelectorAll<HTMLElement>('button, input, select, [tabindex]:not([tabindex="-1"])')].filter(el => !el.hasAttribute('disabled'));
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+
   return (
     <>
       <div className="acc-scrim open" onClick={onClose} aria-hidden="true" />
-      <div className="ec-panel" role="dialog" aria-modal="true" aria-labelledby="ec-title"
-        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void save(false); } }}>
+      <div ref={panelRef} className="ec-panel" role="dialog" aria-modal="true" aria-labelledby="ec-title"
+        onKeyDown={e => { trapTab(e); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void save(false); } }}>
         <div className="ec-head">
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="ec-kicker">Nouvelle écriture · saisie manuelle</div>
@@ -125,7 +162,7 @@ export default function EntryComposer({
           <button className="acc-drawer-close" onClick={onClose} aria-label="Fermer"><Icon name="x" size={16} /></button>
         </div>
 
-        <fieldset disabled={!!saving} className="ec-body">
+        <fieldset disabled={!!saving || !!createdId} className="ec-body">
           <div className="ec-fields">
             <label><span>Journal</span>
               <select className="form-input" value={journal} onChange={e => setJournal(e.target.value)}>
@@ -197,10 +234,10 @@ export default function EntryComposer({
           </table>
 
           <div className="ec-status">
-            <span className={`ec-check ${totalD > 0 && Math.round(totalD) === Math.round(totalC) ? 'ok' : totalD || totalC ? 'err' : ''}`}>
-              {totalD > 0 && Math.round(totalD) === Math.round(totalC) ? '✓ Équilibrée : débit = crédit' : totalD || totalC ? `Écart : ${fmt(Math.abs(totalD - totalC))}` : 'Saisissez les lignes'}
+            <span className={`ec-check ${totalD > 0 && totalD === totalC ? 'ok' : totalD || totalC ? 'err' : ''}`}>
+              {totalD > 0 && totalD === totalC ? '✓ Équilibrée : débit = crédit' : totalD || totalC ? `Écart : ${fmt(Math.abs(totalD - totalC))}` : 'Saisissez les lignes'}
             </span>
-            {Math.round(totalD) !== Math.round(totalC) && <button type="button" className="ec-link" onClick={balanceActive}>Équilibrer sur la ligne {(active ?? lastFilledIndex(rows)) + 1}</button>}
+            {totalD !== totalC && <button type="button" className="ec-link" onClick={balanceActive}>Équilibrer sur la ligne {(active ?? lastFilledIndex(rows)) + 1}</button>}
             <span style={{ flex: 1 }} />
             <span className="ec-hint">Entrée sur le dernier crédit : nouvelle ligne · Ctrl+Entrée : enregistrer</span>
           </div>
@@ -212,8 +249,8 @@ export default function EntryComposer({
         <div className="ec-foot">
           <span className="ec-foot-text">Un brouillon peut encore être supprimé. Une fois comptabilisée, l’écriture ne change plus : on la corrige par une autre écriture.</span>
           <button className="btn" onClick={onClose} disabled={!!saving}>Annuler</button>
-          <button className="btn" onClick={() => void save(false)} disabled={!!problem || !!saving}>{saving === 'draft' ? 'Enregistrement…' : 'Enregistrer en brouillon'}</button>
-          {postable && <button className="btn btn-primary" onClick={() => void save(true)} disabled={!!problem || !!saving}>{saving === 'post' ? 'Comptabilisation…' : 'Comptabiliser'}</button>}
+          {!createdId && <button className="btn" onClick={() => void save(false)} disabled={!!problem || !!saving}>{saving === 'draft' ? 'Enregistrement…' : 'Enregistrer en brouillon'}</button>}
+          {postable && <button className="btn btn-primary" onClick={() => void save(true)} disabled={(!createdId && !!problem) || !!saving}>{saving === 'post' ? 'Comptabilisation…' : 'Comptabiliser'}</button>}
         </div>
       </div>
     </>

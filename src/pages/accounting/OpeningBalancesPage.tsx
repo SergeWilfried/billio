@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { useApp } from '@/context/AppContext';
-import { adoptOpeningBalances, fetchOpeningBalances } from '@/lib/api/accounting';
+import { adoptOpeningBalances, fetchOpeningBalanceAdopted, fetchOpeningBalances, openingPiece } from '@/lib/api/accounting';
 import { exerciseYear } from '@/lib/period';
 import Page from '@/components/Page';
 import {
@@ -352,11 +352,14 @@ export default function OpeningBalancesPage() {
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
-    fetchOpeningBalances(orgId, year).then(ob => {
+    // Adopted = the opening entry is posted; rows saved by an adoption that
+    // stopped half-way don't count (it can be done again)
+    Promise.all([fetchOpeningBalances(orgId, year), fetchOpeningBalanceAdopted(orgId, year)]).then(([ob, adopted]) => {
       if (cancelled) return;
       const rows = Object.entries(ob).filter(([, v]) => v).map(([acct, v], i) => ({ id: 1000 + i, acct, d: v > 0 ? v : 0, c: v < 0 ? -v : 0 }));
-      setSaved(rows);
-      if (rows.length && !openingBalancesAdopted) setOpeningBalancesAdopted(true);
+      if (adopted) setSaved(rows);
+      else if (rows.length) setLines(rows);
+      if (adopted !== openingBalancesAdopted) setOpeningBalancesAdopted(adopted);
     }, err => console.error('[opening balances]', err));
     return () => { cancelled = true; };
   }, [orgId, year]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -419,18 +422,23 @@ export default function OpeningBalancesPage() {
     if (saving) return;
     setSaving(true);
     try {
-      await adoptOpeningBalances(orgId, {
+      const savedLines = await adoptOpeningBalances(orgId, {
         year,
         date:  `${year}-01-01`,
         piece,
         label,
         lines,
       });
-      setSaved(lines.filter(l => l.acct && (l.d || l.c)));
+      // What was saved, the balancing line on 110 included
+      setSaved(savedLines.map((l, i) => ({ id: 2000 + i, ...l })));
+      setPiece(openingPiece(piece, year));
       setOpeningBalancesAdopted(true);
       showToast('À-nouveaux adoptés — écriture verrouillée');
     } catch (err) {
-      showToast('Erreur lors de l\'adoption des à-nouveaux', true);
+      const msg = err instanceof Error ? err.message : '';
+      showToast(/is closed/.test(msg) ? 'Janvier est clôturé : les à-nouveaux ne peuvent plus y être passés.'
+        : /already adopted/.test(msg) ? 'Les à-nouveaux de cet exercice sont déjà adoptés.'
+        : 'Erreur lors de l’adoption des à-nouveaux. Vous pouvez réessayer.', true);
       console.error(err);
     } finally {
       setSaving(false);

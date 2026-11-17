@@ -95,7 +95,7 @@ const PAGE = 50;
 
 export default function JournalsPage() {
   const { writable, postable } = usePermissions();
-  const { data, loading, postEntry, removeEntry, saveEntry } = useJournalsData(true);
+  const { data, loading, postEntry, removeEntry, createEntry } = useJournalsData(true);
   const [activeJournal, setActiveJournal] = useState('all');
   const [draftsOnly, setDraftsOnly] = useState(false);
   const [query, setQuery] = useState('');
@@ -157,7 +157,7 @@ export default function JournalsPage() {
         {selected && <EntryDrawer entry={selected} journals={journals} accounts={accounts} onClose={() => setSelected(null)} onPost={postEntry} onDelete={removeEntry} />}
         {showComposer && data && (
           <EntryComposer journals={journals} accounts={accounts} entries={entries} periods={data.periods} signedOf={signedOf}
-            postable={postable} onClose={() => setShowComposer(false)} onSave={saveEntry} />
+            postable={postable} onClose={() => setShowComposer(false)} onCreate={createEntry} onPost={postEntry} />
         )}
       </>}
     >

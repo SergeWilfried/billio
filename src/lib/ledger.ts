@@ -80,8 +80,10 @@ export function nextPiece(entries: Pick<JournalEntry, 'piece'>[], journal: strin
 export interface ComposerLine { acct: string; debit: number; credit: number }
 
 /** Why a typed entry can't be saved yet, or null. */
-export function entryProblem(opts: { label: string; lines: ComposerLine[]; periodClosed: boolean }): string | null {
+export function entryProblem(opts: { label: string; lines: ComposerLine[]; periodClosed: boolean; piece?: string }): string | null {
   const lines = opts.lines.filter(l => l.acct || l.debit || l.credit);
+  if (lines.some(l => !Number.isInteger(l.debit) || !Number.isInteger(l.credit))) return 'Les montants sont des nombres entiers de francs.';
+  if (opts.piece && isOpeningEntry({ piece: opts.piece })) return 'Le préfixe « AN- » est réservé aux à-nouveaux : choisissez un autre numéro de pièce.';
   if (!opts.label.trim()) return 'Indiquez le libellé de l’écriture.';
   if (opts.periodClosed) return 'Ce mois est clôturé : choisissez une date dans une période ouverte.';
   if (lines.some(l => !l.acct)) return 'Chaque montant doit avoir un compte.';
@@ -90,7 +92,7 @@ export function entryProblem(opts: { label: string; lines: ComposerLine[]; perio
   const filled = lines.filter(l => l.debit > 0 || l.credit > 0);
   if (filled.length < 2) return 'Une écriture a au moins deux lignes.';
   const d = filled.reduce((s, l) => s + l.debit, 0), c = filled.reduce((s, l) => s + l.credit, 0);
-  if (Math.round(d) !== Math.round(c)) return `L’écriture n’est pas équilibrée : écart de ${Math.abs(Math.round(d - c)).toLocaleString('fr-FR')}.`;
+  if (d !== c) return `L’écriture n’est pas équilibrée : écart de ${Math.abs(d - c).toLocaleString('fr-FR')}.`;
   return null;
 }
 
@@ -123,11 +125,29 @@ export function monthState(period: { status: 'open' | 'closed' } | undefined, ye
  */
 export function plannedDepreciation(asset: Pick<FixedAsset, 'grossValue' | 'usefulLife' | 'acquisitionDate'>, asOf: string): { accumulated: number; net: number } {
   if (!asset.usefulLife || asset.usefulLife <= 0) return { accumulated: 0, net: asset.grossValue };
+  // Nothing before the asset is acquired
+  if (asOf.slice(0, 10) < asset.acquisitionDate.slice(0, 10)) return { accumulated: 0, net: asset.grossValue };
   const [ay, am] = asset.acquisitionDate.split('-').map(Number);
   const [ty, tm] = asOf.split('-').map(Number);
   const months = Math.max(0, (ty - ay) * 12 + (tm - am) + 1);
   const accumulated = Math.min(asset.grossValue, Math.round(asset.grossValue * months / (asset.usefulLife * 12)));
   return { accumulated, net: asset.grossValue - accumulated };
+}
+
+export interface PlannedYear { year: number; annualDepreciation: number; cumulative: number; netValue: number }
+
+/** The plan year by year, from the acquisition year until fully depreciated: the same figures as `plannedDepreciation`. */
+export function plannedSchedule(asset: Pick<FixedAsset, 'grossValue' | 'usefulLife' | 'acquisitionDate'>): PlannedYear[] {
+  if (!asset.usefulLife || asset.usefulLife <= 0) return [];
+  const start = Number(asset.acquisitionDate.slice(0, 4));
+  const rows: PlannedYear[] = [];
+  let prev = 0;
+  for (let y = start; prev < asset.grossValue && y <= start + asset.usefulLife; y++) {
+    const { accumulated, net } = plannedDepreciation(asset, `${y}-12-31`);
+    rows.push({ year: y, annualDepreciation: accumulated - prev, cumulative: accumulated, netValue: net });
+    prev = accumulated;
+  }
+  return rows;
 }
 
 /**

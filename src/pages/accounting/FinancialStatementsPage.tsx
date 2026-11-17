@@ -7,6 +7,7 @@ import { calculateIS } from '@/lib/tax-bf';
 import { exerciseYear } from '@/lib/period';
 import { useApp } from '@/context/AppContext';
 import Page from '@/components/Page';
+import LoadError from '@/components/accounting/LoadError';
 
 const card: React.CSSProperties = { background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)', flex: 1, minWidth: 0 };
 const head: React.CSSProperties = { padding: '12px 16px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: 14, fontWeight: 700 };
@@ -30,18 +31,21 @@ function Sections({ sections }: { sections: StatementSection[] }) {
 }
 
 export default function FinancialStatementsPage() {
-  const { data, loading } = useFinancialStatements();
+  const { data, loading, error, reload } = useFinancialStatements();
   const { signedOf, accountNums } = useBalanceFns(data);
   const { orgSettings } = useApp();
   const year = data?.year ?? exerciseYear();
 
+  if (error && !data) return <LoadError title="États financiers" onRetry={reload} />;
   if (loading || !data) return <PageSkeleton section={{ icon: 'report-money', label: 'Comptabilité' }} title="États financiers" variant="accounting" rows={8} />;
 
   const st = buildStatements(accountNums(), signedOf);
   const { income, balance } = st;
-  // IS: an estimate from the result to date (27.5 %, with the minimum), not an entry
-  const isEstimate = calculateIS({
-    taxableProfit: income.result,
+  // IS: when booked on 89, the books say it; else an estimate on the result
+  // before tax (27.5 %, with the minimum), not an entry
+  const isBooked = income.tax !== 0;
+  const isEstimate = isBooked ? income.tax : calculateIS({
+    taxableProfit: income.beforeTax,
     regime: orgSettings.taxRegime === 'RNI' ? 'RNI' : 'RSI',
     creationDate: orgSettings.businessCreationDate || undefined,
     isAdherentCGA: false,
@@ -71,9 +75,11 @@ export default function FinancialStatementsPage() {
         <section style={card} aria-label="Compte de résultat">
           <div style={head}>Compte de résultat</div>
           <Sections sections={[income.products, income.charges]} />
-          <Row label="Résultat avant impôt" amount={income.result} bold />
-          <Row label={<>IS estimé <span className="tag-estimate" style={{ fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#FDF1E3', color: '#8A4A07', marginLeft: 4 }}>estimation</span></>} amount={-isEstimate} indent muted />
-          <Row label="Résultat net estimé" amount={income.result - isEstimate} bold />
+          <Row label="Résultat avant impôt" amount={income.beforeTax} bold />
+          {isBooked
+            ? <Row label="Impôt sur le résultat comptabilisé (89)" amount={-income.tax} indent />
+            : <Row label={<>IS estimé <span className="tag-estimate" style={{ fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#FDF1E3', color: '#8A4A07', marginLeft: 4 }}>estimation</span></>} amount={-isEstimate} indent muted />}
+          <Row label={isBooked ? 'Résultat net' : 'Résultat net estimé'} amount={income.beforeTax - isEstimate} bold />
         </section>
         <section style={card} aria-label="Bilan">
           <div style={head}>Bilan</div>
@@ -86,7 +92,9 @@ export default function FinancialStatementsPage() {
         </section>
       </div>
       <p style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 10, lineHeight: 1.5 }}>
-        L’IS est une estimation (27,5 % du résultat, avec le minimum forfaitaire) : il n’entre ni dans les totaux ni dans les écritures tant qu’il n’est pas déclaré.
+        {isBooked
+          ? 'L’impôt sur le résultat est celui comptabilisé au compte 89.'
+          : 'L’IS est une estimation (27,5 % du résultat avant impôt, avec le minimum forfaitaire) : il n’entre ni dans les totaux ni dans les écritures tant qu’il n’est pas comptabilisé au compte 89.'}
         Chaque compte est classé selon sa classe SYSCOHADA ; un compte hors des rubriques usuelles apparaît dans « Autres », jamais ignoré.
       </p>
     </Page>

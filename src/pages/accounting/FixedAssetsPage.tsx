@@ -6,8 +6,8 @@ import KPIStrip from '@/components/accounting/KPIStrip';
 import DrawerPanel from '@/components/accounting/DrawerPanel';
 import { EmptyState } from '@/components/EmptyState';
 import type { FixedAsset } from '@/lib/accounting-data';
-import { fmt, fmtCompact, amortSchedule } from '@/lib/accounting-data';
-import { plannedDepreciation } from '@/lib/ledger';
+import { fmt, fmtCompact } from '@/lib/accounting-data';
+import { plannedDepreciation, plannedSchedule } from '@/lib/ledger';
 import { todayISO } from '@/lib/invoice-status';
 
 import { useFixedAssets } from '@/lib/accounting-hooks';
@@ -111,7 +111,7 @@ function AssetDrawer({ asset, onClose }: { asset: FixedAsset; onClose: () => voi
   const amortCumul = grossValue - netValue;
   const pct = grossValue > 0 ? (amortCumul / grossValue) * 100 : 0;
   const annualAmort = grossValue / asset.usefulLife;
-  const schedule = amortSchedule(asset);
+  const schedule = plannedSchedule(asset);
   const currentYear = exerciseYear();
 
   return (

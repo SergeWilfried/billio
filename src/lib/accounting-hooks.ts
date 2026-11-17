@@ -177,12 +177,10 @@ export function useJournalsData(includeDraft = true) {
     }
   }, [result]);
 
-  /** Saves a typed entry as a draft, and posts it when `post` (admins and accountants). */
-  const saveEntry = useCallback(async (payload: Parameters<typeof createManualJournalEntry>[1], post = false): Promise<string> => {
+  /** Saves a typed entry as a draft; its id. Posting it is `postEntry`, so a failed post can be retried on the same draft. */
+  const createEntry = useCallback(async (payload: Parameters<typeof createManualJournalEntry>[1]): Promise<string> => {
     try {
-      const id = await createManualJournalEntry(orgId, payload);
-      if (post) await postJournalEntry(id);
-      return id;
+      return await createManualJournalEntry(orgId, payload);
     } finally {
       result.reload();
     }
@@ -199,7 +197,7 @@ export function useJournalsData(includeDraft = true) {
     return () => { supabase.removeChannel(ch); };
   }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { ...result, postEntry, removeEntry, saveEntry };
+  return { ...result, postEntry, removeEntry, createEntry };
 }
 
 // ─── Trial Balance ────────────────────────────────────────────────────────────

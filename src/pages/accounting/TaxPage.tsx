@@ -73,6 +73,11 @@ function sumPostedCreditPrefix(entries: JournalEntry[], prefix: string): number 
     .reduce((s, l) => s + l.c, 0);
 }
 
+/** VAT withheld by clients (4449) in a month « YYYY-MM »: already paid to the DGI, so off that month's VAT due */
+function withheldIn(entries: JournalEntry[], prefix: string): number {
+  return sumPostedDebit(entries.filter(e => e.date.startsWith(prefix)), '4449');
+}
+
 function sumPostedDebit(entries: JournalEntry[], acct: string): number {
   return entries
     .filter(e => e.posted)
@@ -93,32 +98,29 @@ interface TaxLine {
   type: 'collected' | 'deductible';
 }
 
+/**
+ * VAT lines, signed: a sale credits 443 and its credit note debits it back,
+ * a purchase debits 445 and a supplier credit note credits it back. Only the
+ * sales (VE) and purchases (AC) journals reverse the VAT: a debit on 443 in
+ * another journal is the VAT settled with the DGI, not a lower VAT collected.
+ */
 function buildTaxLines(entries: JournalEntry[]): TaxLine[] {
   const lines: TaxLine[] = [];
+  const rate = 0.18;
   for (const e of entries) {
     if (!e.posted) continue;
     for (const l of e.lines) {
-      if (l.acct === '443' && l.c > 0) {
-        // Determine rate: 10% for hotel/restaurant entries (not common in mock, default 18%)
-        const rate = 0.18;
-        lines.push({
-          entryId: e.id, journal: e.journal, label: e.label, piece: e.piece, date: e.date,
-          htBase: Math.round(l.c / rate),
-          tvaAmount: l.c,
-          tvaRate: rate,
-          type: 'collected',
-        });
-      }
-      if (l.acct === '445' && l.d > 0) {
-        const rate = 0.18;
-        lines.push({
-          entryId: e.id, journal: e.journal, label: e.label, piece: e.piece, date: e.date,
-          htBase: Math.round(l.d / rate),
-          tvaAmount: l.d,
-          tvaRate: rate,
-          type: 'deductible',
-        });
-      }
+      const collected = l.acct === '443' ? l.c - (e.journal === 'VE' ? l.d : 0) : 0;
+      const deductible = l.acct === '445' ? l.d - (e.journal === 'AC' ? l.c : 0) : 0;
+      const amount = collected || deductible;
+      if (!amount) continue;
+      lines.push({
+        entryId: e.id, journal: e.journal, label: e.label, piece: e.piece, date: e.date,
+        htBase: Math.round(amount / rate),
+        tvaAmount: amount,
+        tvaRate: rate,
+        type: collected ? 'collected' : 'deductible',
+      });
     }
   }
   return lines.sort((a, b) => a.date < b.date ? -1 : 1);
@@ -205,7 +207,7 @@ export default function TaxPage() {
     const prefix = `${y}-${String(i + 1).padStart(2, '0')}`;
     const c = lines.filter(l => l.type === 'collected'  && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
     const d = lines.filter(l => l.type === 'deductible' && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
-    return c - d;
+    return c - d - withheldIn(allEntries, prefix);
   });
 
   type Deadline = { label: string; date: string; amount: number; status: 'overdue' | 'pending' | 'upcoming'; category: string };
@@ -336,7 +338,7 @@ export default function TaxPage() {
             const prefix = `${EXERCISE_YEAR}-${String(i + 1).padStart(2, '0')}`;
             const c = collectedLines.filter(l => l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
             const d = deductibleLines.filter(l => l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
-            return { label: MONTH_FR[i], c, d, net: c - d };
+            return { label: MONTH_FR[i], c, d, net: c - d - withheldIn(entries, prefix) };
           }).filter((m, i) => m.c || m.d || i < new Date().getMonth() + 1 || EXERCISE_YEAR < new Date().getFullYear());
           return (
             <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 20 }}>
@@ -345,7 +347,7 @@ export default function TaxPage() {
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                 <thead><tr style={{ background: 'var(--color-background-secondary)', color: 'var(--color-text-secondary)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  <th style={{ textAlign: 'left', padding: '8px 18px' }}>Mois</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Collectée (443)</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Déductible (445)</th><th style={{ textAlign: 'right', padding: '8px 18px' }}>Nette</th>
+                  <th style={{ textAlign: 'left', padding: '8px 18px' }}>Mois</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Collectée (443)</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Déductible (445)</th><th style={{ textAlign: 'right', padding: '8px 18px' }} title="Collectée − déductible − TVA retenue par les clients (4449)">Nette</th>
                 </tr></thead>
                 <tbody>
                   {months.map(m => (

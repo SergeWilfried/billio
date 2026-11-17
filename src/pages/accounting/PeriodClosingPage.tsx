@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
+import LoadError from '@/components/accounting/LoadError';
 import { fmt } from '@/lib/accounting-data';
 import { usePeriodClosing, useBalanceFns } from '@/lib/accounting-hooks';
 import { draftsInMonth, exerciseResult, isOpeningEntry, monthState, type MonthState } from '@/lib/ledger';
@@ -21,12 +22,13 @@ const STATE: Record<MonthState, { label: string; bg: string; fg: string }> = {
 const CARD: React.CSSProperties = { background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)' };
 
 export default function PeriodClosingPage() {
-  const { data, loading, closePeriod } = usePeriodClosing();
+  const { data, loading, error: loadError, reload, closePeriod } = usePeriodClosing();
   const { postable } = usePermissions();
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { signedOf, openingOf, accountNums } = useBalanceFns(data);
 
+  if (loadError && !data) return <LoadError title="Clôture" icon="lock" onRetry={reload} />;
   if (loading || !data) return <PageSkeleton section={{ icon: 'lock', label: 'Comptabilité' }} title="Clôture" variant="accounting" rows={5} />;
 
   const { entries, periods } = data;
@@ -86,7 +88,7 @@ export default function PeriodClosingPage() {
         })}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 16, alignItems: 'start' }}>
+      <div className="cl-layout">
         <section style={{ ...CARD, padding: '16px 20px' }} aria-labelledby="close-title">
           {target ? <>
             <h2 id="close-title" style={{ margin: '0 0 6px', fontSize: 15 }}>Clôturer {MONTHS_LONG[target - 1]} {year}</h2>

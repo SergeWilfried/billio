@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accountLedger, balanceFns, balanceOnLine, draftsInMonth, entryProblem, entrySource, exerciseMovements,
-  exerciseResult, isOpeningEntry, monthState, nextPiece, plannedDepreciation, withUnlisted,
+  exerciseResult, isOpeningEntry, monthState, nextPiece, plannedDepreciation, plannedSchedule, withUnlisted,
 } from '@/lib/ledger';
 import { buildStatements } from '@/lib/financial-statements';
 import type { JournalEntry } from '@/lib/accounting-data';
@@ -81,6 +81,11 @@ describe('typed entry checks', () => {
     expect(entryProblem({ label: 'L', lines: [ok[0]], periodClosed: false })).toMatch(/deux lignes/);
     expect(entryProblem({ label: 'L', lines: [ok[0], { acct: '401', debit: 0, credit: 100 }], periodClosed: false })).toMatch(/écart de 50/);
   });
+  it('refuses decimals and the « AN- » pieces of the opening entry', () => {
+    expect(entryProblem({ label: 'L', lines: [{ acct: '622', debit: 10.5, credit: 0 }, { acct: '401', debit: 0, credit: 10.5 }], periodClosed: false })).toMatch(/entiers/);
+    expect(entryProblem({ label: 'L', lines: ok, periodClosed: false, piece: 'AN-2026-002' })).toMatch(/réservé/);
+    expect(entryProblem({ label: 'L', lines: ok, periodClosed: false, piece: 'OD-2026-002' })).toBeNull();
+  });
   it('balances on the chosen line', () => {
     const lines = [{ acct: '622', debit: 150, credit: 0 }, { acct: '445', debit: 27, credit: 0 }, { acct: '401', debit: 0, credit: 0 }];
     expect(balanceOnLine(lines, 2)[2]).toEqual({ acct: '401', debit: 0, credit: 177 });
@@ -105,6 +110,17 @@ describe('fixed assets', () => {
     expect(plannedDepreciation(a, '2026-06-30')).toEqual({ accumulated: 360_000, net: 840_000 });
     expect(plannedDepreciation(a, '2035-01-01').net).toBe(0);
   });
+  it('depreciates nothing before the acquisition date', () => {
+    expect(plannedDepreciation({ grossValue: 1_200_000, usefulLife: 5, acquisitionDate: '2026-06-15' }, '2026-01-31')).toEqual({ accumulated: 0, net: 1_200_000 });
+  });
+  it('gives the plan year by year with the same figures', () => {
+    const a = { grossValue: 1_200_000, usefulLife: 5, acquisitionDate: '2025-07-01' };
+    const rows = plannedSchedule(a);
+    expect(rows[0]).toEqual({ year: 2025, annualDepreciation: 120_000, cumulative: 120_000, netValue: 1_080_000 });
+    expect(rows.map(r => r.year)).toEqual([2025, 2026, 2027, 2028, 2029, 2030]);
+    expect(rows.at(-1)!.netValue).toBe(0);
+    expect(rows.reduce((s, r) => s + r.annualDepreciation, 0)).toBe(1_200_000);
+  });
 });
 
 describe('financial statements', () => {
@@ -116,6 +132,21 @@ describe('financial statements', () => {
     expect(st.balance.totalLiabilities).toBe(2180);
     expect(st.tied).toBe(true);
     expect(st.turnover).toBe(1000);
+  });
+
+  it('shows the income tax booked on 89 below the result before tax', () => {
+    const st = buildStatements(['706', '891', '521', '441'], n => ({ '706': -1000, '891': 275, '521': 1000, '441': -275 } as Record<string, number>)[n]);
+    expect(st.income.beforeTax).toBe(1000);
+    expect(st.income.tax).toBe(275);
+    expect(st.income.result).toBe(725);
+    expect(st.income.charges.lines).toEqual([]);
+    expect(st.tied).toBe(true);
+  });
+
+  it('keeps fractions: no rounding of each account', () => {
+    const st = buildStatements(['706', '521', '411'], n => ({ '706': -1000, '521': 500.4, '411': 499.6 } as Record<string, number>)[n]);
+    expect(st.balance.totalAssets).toBe(1000);
+    expect(st.tied).toBe(true);
   });
 
   it('puts an unusual account under « Autres », not nowhere', () => {

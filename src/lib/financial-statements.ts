@@ -8,7 +8,8 @@ export interface StatementLine { label: string; amount: number }
 export interface StatementSection { title: string; lines: StatementLine[]; total: number }
 
 export interface Statements {
-  income: { products: StatementSection; charges: StatementSection; result: number };
+  /** `tax`: the income tax booked on 89; `beforeTax`: the result before it */
+  income: { products: StatementSection; charges: StatementSection; result: number; tax: number; beforeTax: number };
   balance: { assets: StatementSection[]; liabilities: StatementSection[]; totalAssets: number; totalLiabilities: number };
   /** Totals of debit and credit closing balances, as in the trial balance */
   trial: { debit: number; credit: number };
@@ -35,7 +36,6 @@ const CHARGES: [RegExp, string][] = [
   [/^67/, 'Frais financiers (67)'],
   [/^6[89]/, 'Dotations (68–69)'],
   [/^8[1357]/, 'Charges hors activités ordinaires (81, 83, 85, 87)'],
-  [/^89/, 'Impôts sur le résultat (89)'],
 ];
 
 function group(rows: { num: string; amount: number }[], rules: [RegExp, string][], other: string): StatementLine[] {
@@ -53,14 +53,17 @@ const section = (title: string, lines: StatementLine[]): StatementSection =>
   ({ title, lines, total: lines.reduce((s, l) => s + l.amount, 0) });
 
 export function buildStatements(nums: string[], signedOf: (num: string) => number): Statements {
-  const rows = nums.map(num => ({ num, signed: Math.round(signedOf(num)) })).filter(r => r.signed !== 0);
+  const rows = nums.map(num => ({ num, signed: signedOf(num) })).filter(r => r.signed !== 0);
 
   // Income statement: classes 6, 7, 8 (products are credit balances)
   const pl = rows.filter(r => /^[678]/.test(r.num));
   const isProduct = (n: string) => /^7/.test(n) || /^8[2468]/.test(n);
   const products = section('Produits', group(pl.filter(r => isProduct(r.num)).map(r => ({ num: r.num, amount: -r.signed })), PRODUCTS, 'Autres produits'));
-  const charges = section('Charges', group(pl.filter(r => !isProduct(r.num)).map(r => ({ num: r.num, amount: r.signed })), CHARGES, 'Autres charges'));
-  const result = products.total - charges.total;
+  // Income tax (89) is shown below the result before tax, not among the charges
+  const charges = section('Charges', group(pl.filter(r => !isProduct(r.num) && !/^89/.test(r.num)).map(r => ({ num: r.num, amount: r.signed })), CHARGES, 'Autres charges'));
+  const tax = pl.filter(r => /^89/.test(r.num)).reduce((s, r) => s + r.signed, 0);
+  const beforeTax = products.total - charges.total;
+  const result = beforeTax - tax;
 
   // Balance sheet: classes 1 to 5 (and anything else), each on its side
   const bs = rows.filter(r => !/^[678]/.test(r.num));
@@ -103,7 +106,7 @@ export function buildStatements(nums: string[], signedOf: (num: string) => numbe
   };
   const turnover = -sum(rows.filter(r => /^70/.test(r.num)));
   return {
-    income: { products, charges, result },
+    income: { products, charges, result, tax, beforeTax },
     balance: { assets, liabilities, totalAssets, totalLiabilities },
     trial,
     tied: Math.abs(trial.debit - trial.credit) < 1 && Math.abs(totalAssets - totalLiabilities) < 1,
