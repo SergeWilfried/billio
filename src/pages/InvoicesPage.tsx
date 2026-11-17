@@ -17,6 +17,7 @@ import { createActivity } from '@/lib/api/activities';
 import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { confirmDiscard } from '@/lib/confirm-discard';
 import { renderInvoicePdf } from '@/lib/render-pdf';
+import { paymentUrlForInvoice } from '@/lib/api/payment-links';
 import { downloadBlob } from '@/lib/download';
 import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import {
@@ -50,7 +51,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
   const [filter, setFilter]     = useState<FilterKey>('all');
   const [search, setSearch]     = useState('');
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
+  const { lines: paymentMethods, status: paymentMethodsStatus, online } = usePaymentMethods();
   const [panelOpen, setPanelOpen] = useState(false);
 
   // New invoice form state
@@ -173,6 +174,7 @@ export default function InvoicesPage({ tabs }: { tabs?: ReactNode }) {
         paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
         deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
         paymentMethods,
+        paymentUrl: await paymentUrlForInvoice(orgId, invoice, online),
       });
       downloadBlob(blob, `facture-${invoiceRef(invoice).toLowerCase()}.pdf`);
       posthog.capture('invoice_pdf_downloaded', { invoice_id: id, from: 'list' });

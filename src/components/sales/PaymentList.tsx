@@ -45,7 +45,7 @@ export default function PaymentList({ onShownChange }: { onShownChange: (shown: 
 
   const columns: Column<Payment>[] = [
     { key: 'date', header: 'Date', width: '110px', cell: p => fmtDate(p.date) },
-    { key: 'ref', header: 'Référence', cell: p => p.source === 'online' ? <span className="dt-muted">via Paystack</span> : (p.ref || <span className="dt-muted">—</span>) },
+    { key: 'ref', header: 'Référence', cell: p => p.source === 'online' ? <span className="dt-muted">en ligne (PI-SPI)</span> : (p.ref || <span className="dt-muted">—</span>) },
     { key: 'client', header: 'Client', cell: p => clientName(p.client) },
     {
       key: 'invoice', header: 'Facture',

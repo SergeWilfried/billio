@@ -18,6 +18,7 @@ import { fmt, fmtCompact, fmtDate, clientInitials } from '@/data';
 import type { Payment, PayMethod, PayStatus, CreditNote } from '@/lib/schemas';
 import Page from '@/components/Page';
 import PaymentList from '@/components/sales/PaymentList';
+import IncomingPayments from '@/components/sales/IncomingPayments';
 import { paymentAuthor } from '@/lib/sales-tables';
 import { useCommandIntent } from '@/lib/command-intent';
 import { UI_V2 } from '@/lib/features';
@@ -29,6 +30,7 @@ const METHOD_META: Record<PayMethod, { label: string; icon: string; cls: string;
   wire:   { label: 'Virement',     icon: 'building-bank', cls: 'm-wire',   sub: 'Virement bancaire' },
   momo:   { label: 'Mobile Money', icon: 'device-mobile', cls: 'm-momo',   sub: 'MTN / Orange'    },
   cheque: { label: 'Chèque',       icon: 'writing',       cls: 'm-cheque', sub: 'Chèque bancaire'  },
+  pispi:  { label: 'PI-SPI',       icon: 'qrcode',        cls: 'm-wire',   sub: 'Paiement instantané BCEAO' },
 };
 
 
@@ -53,6 +55,7 @@ const REF_META: Record<PayMethod, { label: string; placeholder: string }> = {
   wire:   { label: 'Référence virement',   placeholder: '#WV0000'          },
   momo:   { label: 'ID de transaction',    placeholder: 'Réf MTN / Orange' },
   cheque: { label: 'Numéro de chèque',     placeholder: 'CHQ-0001'         },
+  pispi:  { label: 'ID de transaction PI-SPI', placeholder: 'End-to-end ID du relevé' },
 };
 
 
@@ -211,15 +214,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
         </>}
       >
           {UI_V2 ? <>
-            {onlineCount > 0 && (
-              <div className="recon-banner">
-                <div className="rb-ico"><Icon name="bolt" size={18} /></div>
-                <div className="rb-text">
-                  <b>Les paiements en ligne se rapprochent automatiquement</b>
-                  Connecté via Paystack — chaque paiement en ligne est associé à la facture correspondante en temps réel.
-                </div>
-              </div>
-            )}
+            <IncomingPayments />
             <PaymentList onShownChange={rows => { tableShown.current = rows; }} />
           </> : <>
           {/* Metrics */}
@@ -306,7 +301,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
               <div className="rb-ico"><Icon name="bolt" size={18} /></div>
               <div className="rb-text">
                 <b>Les paiements en ligne se rapprochent automatiquement</b>
-                Connecté via Paystack — chaque paiement en ligne est associé à la facture correspondante en temps réel.
+                Chaque paiement en ligne (PI-SPI) est enregistré sur sa facture automatiquement.
               </div>
             </div>
           )}
@@ -360,7 +355,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
                       <div>
                         <div className="method-name">{m.label}</div>
                         <div className="method-sub">
-                          {isOnline ? 'via Paystack' : p.ref}
+                          {isOnline ? 'en ligne (PI-SPI)' : p.ref}
                         </div>
                       </div>
                     </div>
@@ -418,7 +413,7 @@ export default function PaymentsPage({ tabs }: { tabs?: ReactNode }) {
           <div className="form-group">
             <label className="form-label">Méthode de paiement</label>
             <div className="method-pick">
-              {(['cash', 'wire', 'momo', 'cheque'] as PayMethod[]).map(m => (
+              {(['cash', 'wire', 'momo', 'cheque', 'pispi'] as PayMethod[]).map(m => (
                 <div
                   key={m}
                   className={'mp-opt' + (method === m ? ' active' : '')}

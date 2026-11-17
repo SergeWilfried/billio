@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 
 const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true';
 
-export type ProviderStatus = 'pending' | 'active' | 'suspended';
+import type { OnlineMode, PaygateStatus, PispiCountry } from '@/lib/online-payments';
 
 export interface PaymentSettings {
   // Invoice display methods
@@ -15,27 +15,12 @@ export interface PaymentSettings {
   methodBankEnabled:   boolean;
   methodBankIban:      string;
   methodCashEnabled:   boolean;
-  // Provider
-  activeProvider:       'paystack' | 'pawapay' | null;
-  providerMode:         'test' | 'live';
-  providerStatus:       ProviderStatus;
-  autoReconcile:        boolean;
-  checkoutMomoEnabled:  boolean;
-  checkoutWaveEnabled:  boolean;
-  checkoutCardEnabled:  boolean;
-  checkoutBankEnabled:  boolean;
-  // Paystack sub-account (settlement info, no secrets)
-  paystackBusinessName:     string;
-  paystackSettlementBank:   string;
-  paystackAccountNumber:    string;
-  paystackAccountName:      string;   // resolved by platform
-  paystackSubaccountCode:   string;   // set by platform after creation
-  paystackPercentageCharge: number;
-  // PawaPay sub-account
-  pawapayCountry:          string;
-  pawapayCorrespondent:    string;
-  pawapayPhone:            string;
-  pawapayCorrespondentId:  string;    // set by platform after activation
+  // Online payment by PI-SPI (PRO-189): off, on the business's own alias, or through Paygate
+  onlineMode:          OnlineMode;
+  pispiAlias:          string;
+  pispiCountry:        PispiCountry;
+  /** Read only, internal: whether Billio confirms this business's payments through its gateway (set by Billio) */
+  paygateStatus:       PaygateStatus;
 }
 
 export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
@@ -48,24 +33,10 @@ export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
   methodBankEnabled:   false,
   methodBankIban:      '',
   methodCashEnabled:   false,
-  activeProvider:          null,
-  providerMode:            'test',
-  providerStatus:          'pending',
-  autoReconcile:           true,
-  checkoutMomoEnabled:     true,
-  checkoutWaveEnabled:     true,
-  checkoutCardEnabled:     true,
-  checkoutBankEnabled:     false,
-  paystackBusinessName:    '',
-  paystackSettlementBank:  '',
-  paystackAccountNumber:   '',
-  paystackAccountName:     '',
-  paystackSubaccountCode:  '',
-  paystackPercentageCharge: 0,
-  pawapayCountry:          '',
-  pawapayCorrespondent:    '',
-  pawapayPhone:            '',
-  pawapayCorrespondentId:  '',
+  onlineMode:          'off',
+  pispiAlias:          '',
+  pispiCountry:        'BF',
+  paygateStatus:       'none',
 };
 
 function dbToSettings(row: Record<string, unknown>): PaymentSettings {
@@ -79,24 +50,10 @@ function dbToSettings(row: Record<string, unknown>): PaymentSettings {
     methodBankEnabled:   Boolean(row.method_bank_enabled),
     methodBankIban:      String(row.method_bank_iban     ?? ''),
     methodCashEnabled:   Boolean(row.method_cash_enabled),
-    activeProvider:      (row.active_provider  as 'paystack' | 'pawapay' | null) ?? null,
-    providerMode:        (row.provider_mode    as 'test' | 'live')               ?? 'test',
-    providerStatus:      (row.provider_status  as ProviderStatus)                ?? 'pending',
-    autoReconcile:       Boolean(row.auto_reconcile),
-    checkoutMomoEnabled: Boolean(row.checkout_momo_enabled),
-    checkoutWaveEnabled: Boolean(row.checkout_wave_enabled),
-    checkoutCardEnabled: Boolean(row.checkout_card_enabled),
-    checkoutBankEnabled: Boolean(row.checkout_bank_enabled),
-    paystackBusinessName:     String(row.paystack_business_name     ?? ''),
-    paystackSettlementBank:   String(row.paystack_settlement_bank   ?? ''),
-    paystackAccountNumber:    String(row.paystack_account_number    ?? ''),
-    paystackAccountName:      String(row.paystack_account_name      ?? ''),
-    paystackSubaccountCode:   String(row.paystack_subaccount_code   ?? ''),
-    paystackPercentageCharge: Number(row.paystack_percentage_charge ?? 0),
-    pawapayCountry:          String(row.pawapay_country           ?? ''),
-    pawapayCorrespondent:    String(row.pawapay_correspondent     ?? ''),
-    pawapayPhone:            String(row.pawapay_phone             ?? ''),
-    pawapayCorrespondentId:  String(row.pawapay_correspondent_id  ?? ''),
+    onlineMode:          (row.online_mode as OnlineMode) ?? 'off',
+    pispiAlias:          String(row.pispi_alias ?? ''),
+    pispiCountry:        (row.pispi_country as PispiCountry) ?? 'BF',
+    paygateStatus:       (row.paygate_status as PaygateStatus) ?? 'none',
   };
 }
 
@@ -119,6 +76,7 @@ export async function upsertPaymentSettings(
 ): Promise<void> {
   const db: Record<string, unknown> = { org_id: orgId, updated_at: new Date().toISOString() };
 
+  // paygate_status and paygate_commission_pct are Billio's (the database refuses them from the app)
   const map: Array<[keyof PaymentSettings, string]> = [
     ['methodMtnEnabled',         'method_mtn_enabled'],
     ['methodMtnPhone',           'method_mtn_phone'],
@@ -129,24 +87,9 @@ export async function upsertPaymentSettings(
     ['methodBankEnabled',        'method_bank_enabled'],
     ['methodBankIban',           'method_bank_iban'],
     ['methodCashEnabled',        'method_cash_enabled'],
-    ['activeProvider',           'active_provider'],
-    ['providerMode',             'provider_mode'],
-    ['providerStatus',           'provider_status'],
-    ['autoReconcile',            'auto_reconcile'],
-    ['checkoutMomoEnabled',      'checkout_momo_enabled'],
-    ['checkoutWaveEnabled',      'checkout_wave_enabled'],
-    ['checkoutCardEnabled',      'checkout_card_enabled'],
-    ['checkoutBankEnabled',      'checkout_bank_enabled'],
-    ['paystackBusinessName',     'paystack_business_name'],
-    ['paystackSettlementBank',   'paystack_settlement_bank'],
-    ['paystackAccountNumber',    'paystack_account_number'],
-    ['paystackAccountName',      'paystack_account_name'],
-    ['paystackSubaccountCode',   'paystack_subaccount_code'],
-    ['paystackPercentageCharge', 'paystack_percentage_charge'],
-    ['pawapayCountry',           'pawapay_country'],
-    ['pawapayCorrespondent',     'pawapay_correspondent'],
-    ['pawapayPhone',             'pawapay_phone'],
-    ['pawapayCorrespondentId',   'pawapay_correspondent_id'],
+    ['onlineMode',               'online_mode'],
+    ['pispiAlias',               'pispi_alias'],
+    ['pispiCountry',             'pispi_country'],
   ];
 
   for (const [jsKey, dbCol] of map) {
@@ -158,3 +101,4 @@ export async function upsertPaymentSettings(
     .upsert(db, { onConflict: 'org_id' });
   if (error) throw error;
 }
+

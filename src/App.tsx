@@ -20,6 +20,7 @@ const CreditNoteEditorPage   = lazy(() => import('./pages/CreditNoteEditorPage')
 const AuthPage               = lazy(() => import('./pages/AuthPage'));
 const ResetPasswordPage      = lazy(() => import('./pages/ResetPasswordPage'));
 const InvitePage             = lazy(() => import('./pages/InvitePage'));
+const PayPage                = lazy(() => import('./pages/PayPage'));
 const OnboardingPage         = lazy(() => import('./pages/OnboardingPage'));
 const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
 const DashboardV2Page        = lazy(() => import('./pages/DashboardV2Page'));
@@ -100,6 +101,8 @@ export default function App() {
           }
         />
         <Route path="/invite/:token" element={<InvitePage />} />
+        {/* Public payment page of an invoice (PRO-187): opened by the QR code on the PDF */}
+        <Route path="/payer/:token" element={<PayPage />} />
 
         {/* Protected — wait for session to resolve before redirecting */}
         <Route

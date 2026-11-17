@@ -2754,3 +2754,50 @@ html[data-ui="v2"] .page-section { display: none; }
 .ec-foot { display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-top: 0.5px solid var(--color-border-tertiary); }
 .ec-foot .btn { white-space: nowrap; }
 .ec-foot-text { flex: 1; font-size: 12px; color: var(--color-text-secondary); line-height: 1.4; }
+
+/* ── Paiements en ligne (PRO-189) ── */
+.op-modes { display: grid; gap: 8px; margin-bottom: 14px; }
+.op-mode { display: flex; gap: 11px; align-items: flex-start; padding: 12px 14px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); cursor: pointer; background: var(--color-background-primary); }
+.op-mode.active { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; background: var(--brand-tint); }
+.op-mode input { margin-top: 3px; accent-color: var(--brand); }
+.op-mode-title { display: block; font-size: 13px; font-weight: 700; }
+.op-mode-sub { display: block; font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; line-height: 1.45; }
+.op-badge { display: inline-flex; margin-left: 8px; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 20px; vertical-align: 1px; }
+.op-idle { background: var(--color-background-secondary); color: var(--color-text-secondary); }
+.op-wait { background: #FFF4DB; color: #8A5A00; }
+.op-ok   { background: #E7F3E2; color: #276C2B; }
+.op-bad  { background: #FDECEA; color: #B42318; }
+.op-note { margin-top: 12px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
+
+/* ── Public payment page (PRO-187) ── */
+.pay-amount { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 18px 0 6px; padding: 14px 16px; border-radius: var(--border-radius-md); background: var(--color-background-secondary); }
+.pay-amount span { font-size: 12.5px; color: var(--color-text-secondary); }
+.pay-amount strong { font-size: 22px; letter-spacing: -0.3px; margin-left: auto; }
+.pay-amount small { width: 100%; text-align: right; font-size: 11.5px; color: var(--color-text-tertiary); }
+/* the BCEAO SDK's SVG has no margin: the white padding is the quiet zone a scanner needs */
+.pay-qr { width: min(280px, 100%); aspect-ratio: 1; margin: 18px auto 10px; padding: 14px; background: #fff; border-radius: 12px; box-shadow: var(--shadow-sm); }
+.pay-qr svg { display: block; width: 100%; height: 100%; }
+.pay-steps { margin: 6px 0 12px; padding-left: 20px; font-size: 13px; line-height: 1.55; color: var(--color-text-secondary); }
+.pay-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; margin: 0 0 12px; }
+.pay-kv dt { color: var(--color-text-tertiary); }
+.pay-kv dd { margin: 0; font-weight: 600; word-break: break-all; }
+.pay-wait { margin-top: 14px; font-size: 13px; font-weight: 600; color: var(--brand); }
+.pay-done { margin: 18px 0 8px; padding: 12px 14px; border-radius: var(--border-radius-md); background: #E7F3E2; color: #276C2B; font-weight: 700; }
+.pay-error { margin-top: 12px; font-size: 13px; font-weight: 600; color: #B42318; }
+.paylink { margin-top: 4px; padding: 11px 12px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); text-align: left; }
+.paylink-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; }
+.paylink-off { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 20px; background: var(--color-background-secondary); color: var(--color-text-secondary); }
+.paylink-sub { font-size: 11.5px; color: var(--color-text-secondary); margin: 4px 0 8px; line-height: 1.45; }
+.paylink-url { width: 100%; font-size: 11.5px; margin-bottom: 8px; }
+.paylink-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── Reçus en ligne (PRO-189) ── */
+.incoming { margin-bottom: 18px; }
+.incoming-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.incoming-head h2 { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; margin: 0; }
+.incoming-sub { font-size: 12px; color: var(--color-text-secondary); }
+.incoming-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.incoming-table th, .incoming-table td { padding: 9px 12px; border-bottom: 0.5px solid var(--color-border-tertiary); text-align: left; vertical-align: top; }
+.incoming-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.incoming-ref, .incoming-detail { font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; }
+.incoming .table-wrap { overflow-x: auto; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); background: var(--color-background-primary); }

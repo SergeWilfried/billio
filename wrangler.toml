@@ -16,8 +16,16 @@ run_worker_first = ["/api/*"]
 # Public values the Worker reads (not secrets). ANTHROPIC_API_KEY is a secret:
 # set it in the dashboard (Settings → Variables and Secrets) or with
 # `npx wrangler secret put ANTHROPIC_API_KEY`; locally, in .dev.vars.
+#
+# Online payments through Paygate (worker/paygate.ts) need three more secrets:
+#   SUPABASE_SERVICE_ROLE_KEY  the payment page and Paygate's events write through server-side functions only
+#   PAYGATE_API_KEY            Billio's key as a Paygate product (pgk_…)
+#   PAYGATE_WEBHOOK_SECRET     the secret Paygate signs its webhooks to Billio with (whsec_…)
+# and PAYGATE_URL below, set to the Paygate Worker's address. Without them the payment page answers
+# « pas encore disponible » and nothing is charged.
 [vars]
 SUPABASE_URL = "https://kqywszzcivoxxxsljlzw.supabase.co"
+# PAYGATE_URL = "https://paygate.<your-subdomain>.workers.dev"
 
 [observability]
 enabled = true
