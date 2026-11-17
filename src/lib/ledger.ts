@@ -176,7 +176,8 @@ export function exerciseResult(signedOf: (num: string) => number, nums: string[]
 export function monthVat(entries: JournalEntry[], prefix: string): { collected: number; deductible: number; withheld: number; net: number } {
   let collected = 0, deductible = 0, withheld = 0;
   for (const e of entries) {
-    if (!e.posted || !e.date.startsWith(prefix)) continue;
+    // The opening entry carries last year's VAT balances, not this month's VAT
+    if (!e.posted || !e.date.startsWith(prefix) || isOpeningEntry(e)) continue;
     for (const l of e.lines) {
       if (l.acct === '443') collected += l.c - (e.journal === 'VE' ? l.d : 0);
       else if (l.acct === '445') deductible += l.d - (e.journal === 'AC' ? l.c : 0);

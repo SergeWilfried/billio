@@ -116,6 +116,10 @@ describe('monthly VAT', () => {
     ];
     expect(monthVat(vat, '2026-04')).toEqual({ collected: 90, deductible: 36, withheld: 18, net: 36 });
   });
+  it('leaves the opening entry out of January', () => {
+    const an = e('an', '2026-01-01', 'AN-2026-001', [['521', 500, 0], ['443', 0, 300], ['101', 0, 200]]);
+    expect(monthVat([an], '2026-01').net).toBe(0);
+  });
 });
 
 describe('fixed assets', () => {
