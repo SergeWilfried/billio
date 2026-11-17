@@ -164,16 +164,16 @@ export function paymentFigures(payments: Payment[]): PaymentFigures {
     const list = done.filter(p => methods.includes(p.method));
     return { amount: list.reduce((s, p) => s + p.amount, 0), count: list.length };
   };
-  const collected = sum(['momo', 'wire', 'cash', 'cheque']);
+  const collected = sum(['momo', 'wire', 'cash', 'cheque', 'pispi']);
   const momo = sum(['momo']);
-  const wire = sum(['wire']);
+  const wire = sum(['wire', 'pispi']); // PI-SPI is a bank-to-bank instant transfer: counted with transfers
   const cashCheque = sum(['cash', 'cheque']);
   const pct = (f: Figure) => collected.amount ? Math.round((f.amount / collected.amount) * 100) : 0;
   return { collected, momo, wire, cashCheque, share: { momo: pct(momo), wire: pct(wire), cashCheque: pct(cashCheque) } };
 }
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
-  momo: 'Mobile Money', wire: 'Virement', cash: 'Espèces', cheque: 'Chèque',
+  momo: 'Mobile Money', wire: 'Virement', cash: 'Espèces', cheque: 'Chèque', pispi: 'PI-SPI',
 };
 
 export const PAYMENT_STATUS: Record<Payment['status'], RowStatus> = {
@@ -212,7 +212,7 @@ export function ownerOptions(rows: Owned[]): { key: string; label: string }[] {
 
 // ── « Saisi par » (PRO-173) ──────────────────────────────────────────────────
 
-/** Who recorded a payment, as shown: online payments come from Paystack. */
+/** Who recorded a payment, as shown: online payments come from Paygate (PI-SPI). */
 export function paymentAuthor(p: Pick<Payment, 'source' | 'createdByName'>): string {
   return p.source === 'online' ? 'En ligne' : p.createdByName ?? 'Inconnu';
 }

@@ -5,10 +5,13 @@
 // Anthropic with the ANTHROPIC_API_KEY secret, which never reaches the browser,
 // and only answers users who are signed in to Billio (their Supabase token is
 // checked first), so nobody else can spend the key.
+//
+// /api/pay/*, /api/paygate/webhook: online payments through Paygate (worker/paygate.ts).
 
 import { BuiltInAgent, CopilotRuntime, createCopilotRuntimeHandler } from '@copilotkit/runtime/v2';
+import { handlePaygate, type PaygateEnv } from './paygate';
 
-export interface Env {
+export interface Env extends PaygateEnv {
   ASSETS: Fetcher;
   /** Secret, set on the Worker (Settings → Variables and Secrets) */
   ANTHROPIC_API_KEY: string;
@@ -67,6 +70,10 @@ export default {
       });
       return createCopilotRuntimeHandler({ runtime, basePath: '/api/copilotkit' })(request);
     }
+
+    // online payments by PI-SPI through Paygate, and the public payment page (worker/paygate.ts)
+    const pay = await handlePaygate(request, env, url);
+    if (pay) return pay;
 
     if (url.pathname.startsWith('/api/')) return json(404, { error: 'not_found' });
     return env.ASSETS.fetch(request);
