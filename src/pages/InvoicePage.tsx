@@ -26,6 +26,8 @@ import { useComplianceGuard } from '@/lib/use-compliance-guard';
 import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '@/data';
 import { renderInvoicePdf } from '@/lib/render-pdf';
+import { paymentUrlForInvoice } from '@/lib/api/payment-links';
+import PaymentLinkCard from '@/components/PaymentLinkCard';
 import { downloadBlob } from '@/lib/download';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Status } from '@/data';
@@ -90,7 +92,7 @@ export default function InvoicePage() {
   const { invoices, quotes, setQuotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
   const writable = canWrite(userRole);
   const compliance = useComplianceGuard();
-  const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
+  const { lines: paymentMethods, status: paymentMethodsStatus, online } = usePaymentMethods();
   const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [sendKind, setSendKind] = useState<'send' | 'reminder' | null>(null);
   // The list and the create panel link here with { openSend: true } to open the send dialog
@@ -301,6 +303,7 @@ export default function InvoicePage() {
         paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
         deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
         paymentMethods,
+        paymentUrl: await paymentUrlForInvoice(orgId, invoice, online),
       });
       downloadBlob(blob, `facture-${invoiceRef(invoice).toLowerCase()}.pdf`);
       posthog.capture('invoice_pdf_downloaded', { invoice_id: invoice.id });
@@ -390,12 +393,14 @@ export default function InvoicePage() {
     wire: '#WV0000',
     momo: 'Réf MTN / Orange',
     cheque: 'ch_3PXyZ...',
+    pispi: 'ID de transaction PI-SPI',
   };
   const METHOD_LABEL: Record<PayMethod, string> = {
     cash:   'Cash',
     wire:   'Virement',
     momo:   'Mobile Money',
     cheque: 'Chèque',
+    pispi:  'PI-SPI',
   };
 
   // Once a credit note was issued on it, its lines stay as credited (PRO-168): corrections go through credit notes
@@ -795,6 +800,9 @@ export default function InvoicePage() {
                 <button className="btn btn-block" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
+                {online !== 'off' && (isOverdue || invoice.status === 'pending') && (
+                  <PaymentLinkCard orgId={orgId} invoiceId={invoice.id} writable={writable} onToast={showToast} />
+                )}
                 {writable && (<>
                 <div className="rail-divider" />
                 <button className="btn btn-block" onClick={handleDuplicate} disabled={busyAction !== null || linesLoading}>
@@ -885,7 +893,7 @@ export default function InvoicePage() {
             <div>
               <div className="form-label">Méthode de paiement</div>
               <div className="method-pick" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                {(['cash', 'wire', 'momo', 'cheque'] as PayMethod[]).map(m => (
+                {(['cash', 'wire', 'momo', 'cheque', 'pispi'] as PayMethod[]).map(m => (
                   <button
                     key={m}
                     type="button"

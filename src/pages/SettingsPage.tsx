@@ -19,6 +19,7 @@ import {
   fetchPaymentSettings, upsertPaymentSettings,
   DEFAULT_PAYMENT_SETTINGS, type PaymentSettings,
 } from '@/lib/api/payment-settings';
+import { PISPI_COUNTRIES, aliasProblem, type PispiCountry } from '@/lib/online-payments';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import { sellerIssues, type SellerInfo } from '@/lib/invoice-compliance';
 import { issuedThisMonth } from '@/lib/invoice-limit';
@@ -33,7 +34,7 @@ const TABS: { key: SettingsTab; icon: string; label: string }[] = [
   { key: 'invoicing',     icon: 'file-invoice',    label: 'Préférences facture'  },
   { key: 'reminders',     icon: 'bell',            label: 'Relances'             },
   { key: 'payments',      icon: 'credit-card',     label: 'Moyens de paiement'   },
-  { key: 'providers',     icon: 'plug-connected',  label: 'Prestataires'         },
+  { key: 'providers',     icon: 'plug-connected',  label: 'Paiements en ligne'   },
   { key: 'notifications', icon: 'bell',            label: 'Notifications'        },
   { key: 'team',          icon: 'users',           label: 'Équipe'               },
   { key: 'plan',          icon: 'sparkles',        label: 'Plan & facturation'   },
@@ -714,432 +715,89 @@ function PaymentMethodsSection({ onSave }: { onSave: () => void }) {
   );
 }
 
-/* ─── Providers ─────────────────────────────────────────────────── */
-
-type ConnectTarget = 'paystack' | 'pawapay' | null;
-
-// BF-centric bank list for Paystack settlement
-const BF_BANKS = [
-  { code: 'ecobank',  label: 'Ecobank Burkina'           },
-  { code: 'biciab',   label: 'BICIAB'                    },
-  { code: 'boa',      label: 'Bank of Africa (BOA)'      },
-  { code: 'coris',    label: 'Coris Bank International'  },
-  { code: 'sgbf',     label: 'Société Générale BF'       },
-  { code: 'uba',      label: 'UBA Burkina'               },
-  { code: 'bsic',     label: 'BSIC Burkina'              },
-];
-
-const PAWAPAY_CORRESPONDENTS: Record<string, { label: string; country: string }[]> = {
-  BFA: [
-    { label: 'MTN MoMo',    country: 'MTN_MOMO_BFA'    },
-    { label: 'Orange Money', country: 'ORANGE_MONEY_BFA'},
-    { label: 'Moov Money',  country: 'MOOV_MONEY_BFA'  },
-  ],
-  CIV: [
-    { label: 'MTN MoMo',    country: 'MTN_MOMO_CIV'    },
-    { label: 'Orange Money', country: 'ORANGE_MONEY_CIV'},
-    { label: 'Wave',         country: 'WAVE_MONEY_CIV'  },
-  ],
-  SEN: [
-    { label: 'Orange Money', country: 'ORANGE_MONEY_SEN'},
-    { label: 'Wave',         country: 'WAVE_MONEY_SEN'  },
-    { label: 'Free Money',   country: 'FREE_MONEY_SEN'  },
-  ],
-  GHA: [
-    { label: 'MTN MoMo',    country: 'MTN_MOMO_GHA'    },
-    { label: 'AirtelTigo',  country: 'AIRTELTIGO_MONEY_GHA' },
-  ],
-};
-
-const CHECKOUT_METHODS: { label: string; icon: string; cls: string; sub: string; feePaystack: string; feePawapay: string | null; key: keyof PaymentSettings }[] = [
-  { label: 'Mobile Money', icon: 'device-mobile', cls: 'pv-mi-momo', sub: 'MTN · Orange · Moov',    feePaystack: '1,5 %',       feePawapay: '1,0 %',  key: 'checkoutMomoEnabled' },
-  { label: 'Wave',         icon: 'wave',          cls: 'pv-mi-wave', sub: 'QR & lien deep-link',     feePaystack: '1,0 %',       feePawapay: '0,8 %',  key: 'checkoutWaveEnabled' },
-  { label: 'Carte',        icon: 'credit-card',   cls: 'pv-mi-card', sub: 'Visa · Mastercard · 3DS', feePaystack: '2,9 % + 100', feePawapay: null,      key: 'checkoutCardEnabled' },
-  { label: 'Virement',     icon: 'building-bank', cls: 'pv-mi-bank', sub: 'Pay-with-transfer',       feePaystack: '0,5 %',       feePawapay: null,      key: 'checkoutBankEnabled' },
-];
-
-const STATUS_BADGE: Record<string, { label: string; icon: string; cls: string }> = {
-  pending:   { label: 'Vérification en cours', icon: 'clock-pause',   cls: 'pv-badge-pending'  },
-  active:    { label: 'Actif',                  icon: 'circle-check',  cls: 'pv-badge-active'   },
-  suspended: { label: 'Suspendu',               icon: 'alert-triangle',cls: 'pv-badge-suspended'},
-};
-
-function ProvidersSection({ onSave }: { onSave: () => void }) {
+/* ─── Paiements en ligne (PRO-189) ─────────────────────────────── */
+// One switch, and the business's PI-SPI alias. How a payment is confirmed (on the alias, or by Billio through its
+// payment gateway) is Billio's decision (paygate_status), not shown here.
+function OnlinePaymentsSection({ onSave }: { onSave: () => void }) {
   const { orgId, showToast } = useApp();
-  const [settings,      setSettings]      = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
-  const [loading,       setLoading]       = useState(true);
-  const [saving,        setSaving]        = useState(false);
-  const [connectTarget, setConnectTarget] = useState<ConnectTarget>(null);
-
-  // Paystack settlement form
-  const [psBusinessName,   setPsBusinessName]   = useState('');
-  const [psBank,           setPsBank]           = useState('');
-  const [psAccountNumber,  setPsAccountNumber]  = useState('');
-
-  // PawaPay settlement form
-  const [ppCountry,        setPpCountry]        = useState('BFA');
-  const [ppCorrespondent,  setPpCorrespondent]  = useState('');
-  const [ppPhone,          setPpPhone]          = useState('');
+  const [settings, setSettings] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
     fetchPaymentSettings(orgId)
       .then(s => { setSettings(s); setLoading(false); })
-      .catch(err => { console.error('[Providers] fetch:', err); setLoading(false); });
+      .catch(err => { console.error('[OnlinePayments] fetch:', err); setLoading(false); });
   }, [orgId]);
 
-  function patchLocal<K extends keyof PaymentSettings>(key: K, value: PaymentSettings[K]) {
-    setSettings(prev => ({ ...prev, [key]: value }));
-  }
+  const patch = <K extends keyof PaymentSettings>(key: K, value: PaymentSettings[K]) => setSettings(prev => ({ ...prev, [key]: value }));
+  const enabled = settings.onlineMode !== 'off';
+  const aliasError = enabled ? aliasProblem(settings.pispiAlias) : null;
 
-  async function persist(patch: Partial<PaymentSettings>) {
+  async function handleSave() {
     if (!orgId) return;
+    setTouched(true);
+    if (aliasError) { showToast(aliasError, true); return; }
     setSaving(true);
     try {
-      await upsertPaymentSettings(orgId, patch);
-      setSettings(prev => ({ ...prev, ...patch }));
+      await upsertPaymentSettings(orgId, { onlineMode: settings.onlineMode, pispiAlias: settings.pispiAlias.trim().toLowerCase(), pispiCountry: settings.pispiCountry });
+      posthog.capture('settings_saved', { section: 'online_payments', enabled });
+      showToast(enabled ? 'Paiement en ligne activé' : 'Paiement en ligne désactivé');
       onSave();
     } catch (err) {
-      console.error('[Providers] save:', err);
+      console.error('[OnlinePayments] save:', err);
       showToast('Erreur lors de l\'enregistrement', true);
     } finally {
       setSaving(false);
     }
   }
 
-  function openConnect(target: 'paystack' | 'pawapay') {
-    // Pre-fill from existing settings if already set
-    if (target === 'paystack') {
-      setPsBusinessName(settings.paystackBusinessName);
-      setPsBank(settings.paystackSettlementBank);
-      setPsAccountNumber(settings.paystackAccountNumber);
-    } else {
-      setPpCountry(settings.pawapayCountry || 'BFA');
-      setPpCorrespondent(settings.pawapayCorrespondent);
-      setPpPhone(settings.pawapayPhone);
-    }
-    setConnectTarget(target);
-  }
-
-  async function handleSubmitConnect() {
-    if (!connectTarget) return;
-    if (connectTarget === 'paystack') {
-      if (!psBusinessName.trim() || !psBank || !psAccountNumber.trim()) {
-        showToast('Remplissez tous les champs de règlement', true); return;
-      }
-      await persist({
-        activeProvider:         'paystack',
-        providerStatus:         'pending',
-        paystackBusinessName:   psBusinessName.trim(),
-        paystackSettlementBank: psBank,
-        paystackAccountNumber:  psAccountNumber.trim(),
-      });
-    } else {
-      if (!ppCountry || !ppCorrespondent || !ppPhone.trim()) {
-        showToast('Remplissez tous les champs de règlement', true); return;
-      }
-      await persist({
-        activeProvider:      'pawapay',
-        providerStatus:      'pending',
-        pawapayCountry:      ppCountry,
-        pawapayCorrespondent: ppCorrespondent,
-        pawapayPhone:        ppPhone.trim(),
-      });
-    }
-    showToast('Demande envoyée — activation sous 24 h');
-    setConnectTarget(null);
-  }
-
-  async function handleDisconnect() {
-    await persist({ activeProvider: null, providerStatus: 'pending' });
-    showToast('Prestataire déconnecté');
-  }
-
-  async function handleSaveMethods() {
-    await persist({
-      checkoutMomoEnabled: settings.checkoutMomoEnabled,
-      checkoutWaveEnabled: settings.checkoutWaveEnabled,
-      checkoutCardEnabled: settings.checkoutCardEnabled,
-      checkoutBankEnabled: settings.checkoutBankEnabled,
-    });
-    showToast('Méthodes enregistrées');
-  }
-
-  async function handleToggleReconcile(value: boolean) {
-    patchLocal('autoReconcile', value);
-    await persist({ autoReconcile: value });
-  }
-
-  const provider      = settings.activeProvider;
-  const isPaystack    = provider === 'paystack';
-  const providerLabel = isPaystack ? 'Paystack' : 'PawaPay';
-  const statusMeta    = STATUS_BADGE[settings.providerStatus] ?? STATUS_BADGE.pending;
-  const visibleMethods = CHECKOUT_METHODS.filter(m => isPaystack || m.feePawapay !== null);
-
-  // Sub-account summary line shown in the connected card
-  const connectedMeta = provider
-    ? isPaystack
-      ? `${settings.paystackBusinessName || '—'} · ${(BF_BANKS.find(b => b.code === settings.paystackSettlementBank)?.label ?? settings.paystackSettlementBank) || '—'} ••${settings.paystackAccountNumber.slice(-3) || '?'}`
-      : `${settings.pawapayPhone || '—'} · ${settings.pawapayCorrespondent || '—'} · ${settings.pawapayCountry || '—'}`
-    : '';
-
   return (
-    <>
-      {/* ── Status card (when a provider is set) ── */}
-      {provider && !connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
-            <div>
-              <div className="s-card-title">Prestataire de paiement</div>
-              <div className="s-card-desc">Billio collecte les paiements via votre sous-compte — aucune clé API à gérer.</div>
-            </div>
-            <div className="pv-mode">
-              <button className={'pv-mode-opt' + (settings.providerMode === 'test' ? ' active' : '')}
-                onClick={() => persist({ providerMode: 'test' })}>Test</button>
-              <button className={'pv-mode-opt' + (settings.providerMode === 'live' ? ' active' : '')}
-                onClick={() => persist({ providerMode: 'live' })}>Live</button>
-            </div>
+    <div className="s-card">
+      <div className="s-card-head">
+        <div className="s-card-title">Paiements en ligne</div>
+        <div className="s-card-desc">Vos clients paient par PI-SPI en scannant le QR code de la facture.</div>
+      </div>
+      <div className="s-card-body">
+        <div className="s-row">
+          <div className="s-row-ico"><Icon name="qrcode" size={17} /></div>
+          <div className="s-row-main">
+            <div className="s-row-title" id="online-toggle">Paiement en ligne</div>
+            <div className="s-row-sub">{enabled ? 'Activé sur vos factures émises.' : 'Désactivé.'}</div>
           </div>
-          <div className="s-card-body">
-            <div className="pv-connected-head">
-              <div className={`pv-logo ${isPaystack ? 'pv-paystack' : 'pv-pawapay'}`}>
-                {isPaystack ? 'P' : 'PP'}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="pv-conn-name">
-                  {providerLabel}
-                  <span className={`pv-conn-badge ${statusMeta.cls}`}>
-                    <Icon name={statusMeta.icon} size={12} /> {statusMeta.label}
-                  </span>
-                </div>
-                <div className="pv-conn-meta">{connectedMeta}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-sm" onClick={() => openConnect(provider)} disabled={saving}>
-                  Modifier
-                </button>
-                <button className="btn btn-sm" onClick={handleDisconnect} disabled={saving}>
-                  Déconnecter
-                </button>
-              </div>
-            </div>
-
-            {settings.providerStatus === 'pending' && (
-              <div className="pv-notice pv-notice-pending">
-                <Icon name="clock-pause" size={15} />
-                <span>Votre sous-compte est en cours de vérification. Vous recevrez un email sous 24 h à l'activation.</span>
-              </div>
-            )}
-            {settings.providerStatus === 'suspended' && (
-              <div className="pv-notice pv-notice-suspended">
-                <Icon name="alert-triangle" size={15} />
-                <span>Ce sous-compte a été suspendu. Contactez le support pour rétablir l'accès.</span>
-              </div>
-            )}
+          <div className="s-row-aside" aria-labelledby="online-toggle">
+            <Toggle on={enabled} onChange={v => { patch('onlineMode', v ? 'alias' : 'off'); if (!v) setTouched(false); }} />
           </div>
         </div>
-      )}
 
-      {/* ── No provider — show picker ── */}
-      {!provider && !connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">Prestataires de paiement</div>
-            <div className="s-card-desc">Billio crée un sous-compte en votre nom — vos règlements arrivent directement sur votre compte bancaire ou mobile.</div>
-          </div>
-          <div className="s-card-body">
-            {loading ? (
-              <div style={{ color: 'var(--color-text-tertiary)', padding: '8px 0' }}>Chargement…</div>
-            ) : (
-              <div className="pv-avail-grid">
-                <div className="pv-avail-card pv-avail-card--featured">
-                  <div className="pv-logo pv-paystack">P</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="pv-avail-name">Paystack</div>
-                    <div className="pv-avail-sub">MoMo · Wave · carte · virement — règlement J+1</div>
-                  </div>
-                  <button className="btn btn-primary btn-sm" onClick={() => openConnect('paystack')}>Activer</button>
-                </div>
-                <div className="pv-avail-card">
-                  <div className="pv-logo pv-pawapay">PP</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="pv-avail-name">PawaPay</div>
-                    <div className="pv-avail-sub">MoMo · Wave — agrégateur Afrique subsaharienne</div>
-                  </div>
-                  <button className="btn btn-sm" onClick={() => openConnect('pawapay')}>Activer</button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Connect / edit form ── */}
-      {connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">
-              {provider === connectTarget ? 'Modifier le compte de règlement' : `Activer ${connectTarget === 'paystack' ? 'Paystack' : 'PawaPay'}`}
+        {enabled && (
+          <div className="s-row">
+            <div className="s-row-ico"><Icon name="building-bank" size={17} /></div>
+            <div className="s-row-main">
+              <label className="s-row-title" htmlFor="pispi-alias">Alias PI-SPI</label>
+              <div className="s-row-sub">Identifiant de votre compte, fourni par votre banque.</div>
+              {touched && aliasError && <div className="s-field-error" role="alert">{aliasError}</div>}
             </div>
-            <div className="s-card-desc">
-              {connectTarget === 'paystack'
-                ? 'Billio crée un sous-compte Paystack lié à votre banque. Vos règlements arrivent directement sur ce compte sous 24 h.'
-                : 'Billio enregistre votre numéro de règlement auprès de PawaPay. Les fonds sont versés sur ce mobile money après chaque transaction.'}
+            <div className="s-row-aside">
+              <input id="pispi-alias" className="form-input" style={{ width: 300 }} placeholder="3497a720-ab11-4973-9619-534e04f263a1" spellCheck={false}
+                value={settings.pispiAlias} disabled={loading} aria-invalid={touched && !!aliasError}
+                onChange={e => patch('pispiAlias', e.target.value)} onBlur={() => setTouched(true)} />
+              <select className="form-input" style={{ width: 150 }} aria-label="Pays du compte" value={settings.pispiCountry} disabled={loading}
+                onChange={e => patch('pispiCountry', e.target.value as PispiCountry)}>
+                {PISPI_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
             </div>
           </div>
-          <div className="s-card-body">
-            {connectTarget === 'paystack' ? (
-              <>
-                <div className="form-group">
-                  <label className="form-label">Nom de l'entreprise</label>
-                  <input className="form-input" placeholder="Studio Wend SARL"
-                    value={psBusinessName} onChange={e => setPsBusinessName(e.target.value)} />
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Banque de règlement</label>
-                    <select className="form-input" value={psBank} onChange={e => setPsBank(e.target.value)}>
-                      <option value="">Sélectionner…</option>
-                      {BF_BANKS.map(b => <option key={b.code} value={b.code}>{b.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Numéro de compte</label>
-                    <input className="form-input" placeholder="BF76 0001 2345 6789"
-                      value={psAccountNumber} onChange={e => setPsAccountNumber(e.target.value)} />
-                  </div>
-                </div>
-                <div className="pv-notice pv-notice-info">
-                  <Icon name="info-circle" size={15} />
-                  <span>Paystack vérifie le titulaire du compte automatiquement. Aucune clé API ne vous sera demandée.</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Pays</label>
-                    <select className="form-input" value={ppCountry}
-                      onChange={e => { setPpCountry(e.target.value); setPpCorrespondent(''); }}>
-                      <option value="BFA">Burkina Faso</option>
-                      <option value="CIV">Côte d'Ivoire</option>
-                      <option value="SEN">Sénégal</option>
-                      <option value="GHA">Ghana</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Opérateur mobile</label>
-                    <select className="form-input" value={ppCorrespondent} onChange={e => setPpCorrespondent(e.target.value)}>
-                      <option value="">Sélectionner…</option>
-                      {(PAWAPAY_CORRESPONDENTS[ppCountry] ?? []).map(c => (
-                        <option key={c.country} value={c.country}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Numéro de règlement</label>
-                  <input className="form-input" type="tel" placeholder="70 12 34 56"
-                    value={ppPhone} onChange={e => setPpPhone(e.target.value)} />
-                </div>
-                <div className="pv-notice pv-notice-info">
-                  <Icon name="info-circle" size={15} />
-                  <span>PawaPay versera les règlements sur ce numéro après chaque paiement client réussi.</span>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="s-card-foot" style={{ gap: 8 }}>
-            <button className="btn" onClick={() => setConnectTarget(null)} disabled={saving}>Annuler</button>
-            <button className="btn btn-primary" onClick={handleSubmitConnect} disabled={saving}>
-              {saving ? 'Envoi…' : 'Envoyer la demande'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Checkout methods (only when active) ── */}
-      {provider && settings.providerStatus === 'active' && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">Méthodes de paiement en ligne</div>
-            <div className="s-card-desc">Les méthodes activées s'affichent sur votre lien de paiement billio.app/pay. Les frais sont prélevés par {providerLabel}.</div>
-          </div>
-          <div className="s-card-body">
-            {visibleMethods.map(m => (
-              <div key={m.key} className="pv-method-row">
-                <div className={`pv-m-ico ${m.cls}`}><Icon name={m.icon} size={18} /></div>
-                <div className="pv-m-main">
-                  <div className="pv-m-title">{m.label}</div>
-                  <div className="pv-m-sub">{m.sub}</div>
-                </div>
-                <div className="pv-m-fee">{isPaystack ? m.feePaystack : m.feePawapay}</div>
-                <Toggle on={Boolean(settings[m.key])} onChange={v => patchLocal(m.key, v as PaymentSettings[typeof m.key])} />
-              </div>
-            ))}
-          </div>
-          <div className="s-card-foot">
-            <button className="btn btn-primary" onClick={handleSaveMethods} disabled={saving}>
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Auto-reconciliation (only when active) ── */}
-      {provider && settings.providerStatus === 'active' && (
-        <div className="s-card">
-          <div className="s-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
-            <div>
-              <div className="s-card-title">Rapprochement automatique</div>
-              <div className="s-card-desc">À chaque webhook de paiement reçu, Billio marque la facture correspondante comme payée.</div>
-            </div>
-            <Toggle on={settings.autoReconcile} onChange={handleToggleReconcile} />
-          </div>
-          <div className="s-card-body">
-            <div className="pv-flow">
-              <div className="pv-flow-step"><span className="pv-fs-ico"><Icon name="device-mobile" size={14} /></span>Client paie</div>
-              <Icon name="arrow-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="pv-flow-step"><span className="pv-fs-ico"><Icon name="bolt" size={14} /></span>Webhook</div>
-              <Icon name="arrow-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="pv-flow-step"><span className="pv-fs-ico"><Icon name="link" size={14} /></span>Correspondance</div>
-              <Icon name="arrow-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="pv-flow-step pv-flow-paid"><span className="pv-fs-ico"><Icon name="check" size={14} /></span>Payée</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Switch provider (only when one is already connected) ── */}
-      {provider && !connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">Changer de prestataire</div>
-            <div className="s-card-desc">Un seul prestataire actif à la fois. L'ancien sous-compte sera désactivé.</div>
-          </div>
-          <div className="s-card-body">
-            <div className="pv-avail-grid">
-              {([
-                { id: 'paystack' as const, name: 'Paystack', cls: 'pv-paystack', letter: 'P',  sub: 'MoMo · Wave · carte · virement' },
-                { id: 'pawapay' as const, name: 'PawaPay',  cls: 'pv-pawapay',  letter: 'PP', sub: 'MoMo · Wave — agrégateur Afrique' },
-              ] as const).map(p => (
-                <div key={p.id} className="pv-avail-card">
-                  <div className={`pv-logo ${p.cls}`}>{p.letter}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="pv-avail-name">{p.name}</div>
-                    <div className="pv-avail-sub">{p.sub}</div>
-                  </div>
-                  {provider === p.id
-                    ? <span className="pv-conn-badge pv-badge-active"><Icon name="circle-check" size={12} /> Actif</span>
-                    : <button className="btn btn-sm" onClick={() => openConnect(p.id)}>Passer à {p.name}</button>
-                  }
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+        )}
+      </div>
+      <div className="s-card-foot">
+        <button className="btn btn-primary" onClick={handleSave} disabled={loading || saving}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1834,7 +1492,7 @@ function LegacySettingsPage() {
               {tab === 'business'      && <BusinessSection />}
               {tab === 'invoicing'     && <InvoicingSection />}
               {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
-              {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
+              {tab === 'providers'     && <OnlinePaymentsSection onSave={onSave} />}
             </fieldset>
             {tab === 'team'          && <TeamSection />}
             {tab === 'plan'          && <PlanSection />}
@@ -2051,7 +1709,7 @@ function SettingsPageV2() {
               {section === 'business'  && <BusinessSection onDraft={setDraft} />}
               {section === 'invoicing' && <InvoicingSection />}
               {section === 'payments'  && <PaymentMethodsSection onSave={onPaymentsSaved} />}
-              {section === 'providers' && <ProvidersSection onSave={onPaymentsSaved} />}
+              {section === 'providers' && <OnlinePaymentsSection onSave={onPaymentsSaved} />}
             </fieldset>
             {section === 'compliance' && (rows
               ? <DgiChecklist rows={rows} onFix={fix} large />

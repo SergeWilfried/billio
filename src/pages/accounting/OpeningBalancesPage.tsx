@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/Icon';
 import { useApp } from '@/context/AppContext';
-import { adoptOpeningBalances } from '@/lib/api/accounting';
+import { adoptOpeningBalances, fetchOpeningBalanceAdopted, fetchOpeningBalances, openingPiece } from '@/lib/api/accounting';
+import { exerciseYear } from '@/lib/period';
 import Page from '@/components/Page';
 import {
   ACCOUNTS, CLASSES, clsOf, acctOf, fmt,
@@ -11,21 +12,8 @@ import {
 /* ─── types ──────────────────────────────────────────────────────────────── */
 interface OBLine { id: number; acct: string; d: number; c: number }
 
-const SEED: OBLine[] = [
-  { id: 1,  acct: '101',  d: 0,       c: 5000000 },
-  { id: 2,  acct: '106',  d: 0,       c: 1200000 },
-  { id: 3,  acct: '162',  d: 0,       c: 8180000 },
-  { id: 4,  acct: '211',  d: 1800000, c: 0 },
-  { id: 5,  acct: '281',  d: 0,       c: 600000 },
-  { id: 6,  acct: '2441', d: 2400000, c: 0 },
-  { id: 7,  acct: '2451', d: 6500000, c: 0 },
-  { id: 8,  acct: '2818', d: 0,       c: 2100000 },
-  { id: 9,  acct: '311',  d: 1250000, c: 0 },
-  { id: 10, acct: '401',  d: 0,       c: 1920000 },
-  { id: 11, acct: '411',  d: 3420000, c: 0 },
-  { id: 12, acct: '521',  d: 4180000, c: 0 },
-  { id: 13, acct: '571',  d: 320000,  c: 0 },
-];
+/** A blank start: two empty lines (amounts are never made up) */
+const BLANK: OBLine[] = [{ id: 1, acct: '', d: 0, c: 0 }, { id: 2, acct: '', d: 0, c: 0 }];
 
 const AUTO_BALANCE_ACCT = '110';
 let nextId = 100;
@@ -176,7 +164,7 @@ function PreviewPanel({ lines, totD, totC }: { lines: OBLine[]; totD: number; to
           <Icon name="eye" size={13} style={{ color: 'var(--brand)' }} /> Aperçu en direct
         </div>
         <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.3px', marginTop: 5 }}>À-nouveaux par classe</div>
-        <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>au 1 juin 2026 · XOF</div>
+        <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>au 1er janvier {exerciseYear()} · XOF</div>
       </div>
 
       <div style={{ padding: '6px 18px 4px' }}>
@@ -228,9 +216,8 @@ function PreviewPanel({ lines, totD, totC }: { lines: OBLine[]; totD: number; to
 /* ─── success view ───────────────────────────────────────────────────────── */
 
 function SuccessView({
-  totD, totC, lineCount, bankAmt, piece,
-  onEdit,
-}: { totD: number; totC: number; lineCount: number; bankAmt: number; piece: string; onEdit: () => void }) {
+  totD, totC, lineCount, bankAmt, piece, year,
+}: { totD: number; totC: number; lineCount: number; bankAmt: number; piece: string; year: number }) {
   const navigate = useNavigate();
   return (
     <div style={{ maxWidth: 760, margin: '0 auto' }}>
@@ -246,16 +233,16 @@ function SuccessView({
         </div>
         <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.7px', marginTop: 16 }}>Position d'ouverture adoptée</div>
         <div style={{ fontSize: 13.5, color: 'var(--color-text-secondary)', marginTop: 9, lineHeight: 1.55, maxWidth: '50ch', margin: '9px auto 0' }}>
-          Vos à-nouveaux constituent désormais le point de départ de Billio pour l'exercice 2026. Chaque compte s'ouvre sur ces soldes — aucune ressaisie nécessaire.
+          Vos à-nouveaux constituent désormais le point de départ de Billio pour l'exercice {year}. Chaque compte s'ouvre sur ces soldes — aucune ressaisie nécessaire.
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
           {[
             { icon: 'list', label: <><b style={{ fontWeight: 800, color: 'var(--color-text-primary)' }}>{lineCount}</b> comptes</> },
             { icon: 'arrows-exchange', label: <><b style={{ fontWeight: 800, color: 'var(--color-text-primary)' }}>{fmt(totD)}</b> F CFA</> },
-            { icon: 'calendar', label: '1 juin 2026' },
-            { icon: 'notebook', label: <span className="mono">OD · {piece || 'AN-2026-001'}</span> },
-            { icon: 'lock', label: 'Verrouillée', iconStyle: { color: '#226B2A' } },
+            { icon: 'calendar', label: `1er janvier ${year}` },
+            { icon: 'notebook', label: <span className="mono">OD · {piece}</span> },
+            { icon: 'lock', label: 'Adoptée', iconStyle: { color: '#226B2A' } },
           ].map((pill, i) => (
             <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', borderRadius: 20, background: 'var(--color-background-secondary)', border: '0.5px solid var(--color-border-tertiary)', fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
               <Icon name={pill.icon} size={14} style={{ color: 'var(--brand)', ...(pill.iconStyle ?? {}) }} />
@@ -326,21 +313,17 @@ function SuccessView({
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 26 }}>
         <a className="btn btn-primary btn-lg" onClick={e => { e.preventDefault(); navigate('/accounting/trial-balance'); }} href="/accounting/trial-balance" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
-          <Icon name="arrows-exchange" /> Open trial balance
+          <Icon name="arrows-exchange" /> Ouvrir la balance
         </a>
         <a className="btn btn-lg" onClick={e => { e.preventDefault(); navigate('/accounting/journals'); }} href="/accounting/journals" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
-          <Icon name="notebook" /> View the entry
+          <Icon name="notebook" /> Voir l’écriture
         </a>
       </div>
 
-      <div
-        onClick={onEdit}
-        style={{ display: 'block', textAlign: 'center', marginTop: 16, fontSize: 12, fontWeight: 600, color: 'var(--color-text-tertiary)', cursor: 'pointer' }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--brand)'; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text-tertiary)'; }}
-      >
-        ← Edit the opening entry
-      </div>
+      <p style={{ textAlign: 'center', marginTop: 16, fontSize: 12.5, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+        Les à-nouveaux adoptés ne se ressaisissent pas : les adopter une seconde fois créerait une deuxième écriture d’ouverture.
+        Pour corriger un solde, passez une écriture de correction dans <a href="/accounting/journals" onClick={e => { e.preventDefault(); navigate('/accounting/journals'); }}>Journaux</a>.
+      </p>
 
       <style>{`
         @keyframes ob-pop {
@@ -359,10 +342,27 @@ export default function OpeningBalancesPage() {
   const { orgId, openingBalancesAdopted, setOpeningBalancesAdopted, showToast } = useApp();
   const navigate = useNavigate();
 
-  const [lines, setLines]     = useState<OBLine[]>(SEED);
-  const [label, setLabel]     = useState('Reprise des à-nouveaux — exercice 2026');
-  const [piece, setPiece]     = useState('AN-2026-001');
+  const year = exerciseYear();
+  const [lines, setLines]     = useState<OBLine[]>(BLANK);
+  const [label, setLabel]     = useState(`Reprise des à-nouveaux — exercice ${year}`);
+  const [piece, setPiece]     = useState(`AN-${year}-001`);
   const [saving, setSaving]   = useState(false);
+  // The balances saved for this exercise: shown once adopted, instead of what was typed
+  const [saved, setSaved]     = useState<OBLine[] | null>(null);
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    // Adopted = the opening entry is posted; rows saved by an adoption that
+    // stopped half-way don't count (it can be done again)
+    Promise.all([fetchOpeningBalances(orgId, year), fetchOpeningBalanceAdopted(orgId, year)]).then(([ob, adopted]) => {
+      if (cancelled) return;
+      const rows = Object.entries(ob).filter(([, v]) => v).map(([acct, v], i) => ({ id: 1000 + i, acct, d: v > 0 ? v : 0, c: v < 0 ? -v : 0 }));
+      if (adopted) setSaved(rows);
+      else if (rows.length) setLines(rows);
+      if (adopted !== openingBalancesAdopted) setOpeningBalancesAdopted(adopted);
+    }, err => console.error('[opening balances]', err));
+    return () => { cancelled = true; };
+  }, [orgId, year]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── derived totals ── */
   const { totD, totC, ecart, lineCount } = useMemo(() => {
@@ -415,35 +415,41 @@ export default function OpeningBalancesPage() {
       return [...prev, { id: nextId++, acct: tgt, d: side === 'd' ? amt : 0, c: side === 'c' ? amt : 0 }];
     });
     const a = acctOf(tgt);
-    showToast(`Balancing line added — ${tgt}${a ? ' ' + a.label : ''}`);
+    showToast(`Ligne d’équilibre ajoutée — ${tgt}${a ? ' ' + a.label : ''}`);
   }, [ecart, showToast]);
 
   const handleAdopt = useCallback(async () => {
     if (saving) return;
     setSaving(true);
     try {
-      await adoptOpeningBalances(orgId, {
-        year:  new Date().getFullYear(),
-        date:  '2026-06-01',
+      const savedLines = await adoptOpeningBalances(orgId, {
+        year,
+        date:  `${year}-01-01`,
         piece,
         label,
         lines,
       });
+      // What was saved, the balancing line on 110 included
+      setSaved(savedLines.map((l, i) => ({ id: 2000 + i, ...l })));
+      setPiece(openingPiece(piece, year));
       setOpeningBalancesAdopted(true);
       showToast('À-nouveaux adoptés — écriture verrouillée');
     } catch (err) {
-      showToast('Erreur lors de l\'adoption des à-nouveaux', true);
+      const msg = err instanceof Error ? err.message : '';
+      showToast(/is closed/.test(msg) ? 'Janvier est clôturé : les à-nouveaux ne peuvent plus y être passés.'
+        : /already adopted/.test(msg) ? 'Les à-nouveaux de cet exercice sont déjà adoptés.'
+        : /not deleted/.test(msg) ? 'Une tentative précédente a laissé un brouillon d’à-nouveaux que votre rôle ne peut pas supprimer : demandez à un administrateur de le supprimer dans Journaux, puis réessayez.'
+        : 'Erreur lors de l’adoption des à-nouveaux. Vous pouvez réessayer.', true);
       console.error(err);
     } finally {
       setSaving(false);
     }
-  }, [saving, orgId, piece, label, lines, setOpeningBalancesAdopted, showToast]);
+  }, [saving, orgId, piece, label, lines, setOpeningBalancesAdopted, showToast, year]);
 
-  /* ── bank amount for success card ── */
-  const bankAmt = useMemo(() => {
-    const l = lines.find(x => x.acct === '521');
-    return l ? l.d - l.c : 0;
-  }, [lines]);
+  /* ── bank amount for success card: from the saved balances ── */
+  const shownLines = saved && saved.length ? saved : lines;
+  const bankAmt = useMemo(() => shownLines.filter(x => x.acct.startsWith('52')).reduce((s, l) => s + l.d - l.c, 0), [shownLines]);
+  const savedTot = useMemo(() => shownLines.reduce((t, l) => ({ d: t.d + l.d, c: t.c + l.c, n: t.n + (l.acct && (l.d || l.c) ? 1 : 0) }), { d: 0, c: 0, n: 0 }), [shownLines]);
 
   /* ── banner content ── */
   const banner = useMemo(() => {
@@ -463,15 +469,14 @@ export default function OpeningBalancesPage() {
       <Page
         section={{ icon: 'arrows-exchange', label: 'Comptabilité' }}
         title="À-nouveaux"
-        subtitle="Journal des à-nouveaux · reprise au 1 juin 2026"
+        subtitle={`Journal des à-nouveaux · ouverture au 1er janvier ${year}`}
         actions={<>
-          <span className="period-pill"><span className="dot" /> Exercice 2026 · ouverture</span>
+          <span className="period-pill"><span className="dot" /> Exercice {year} · ouverture</span>
         </>}
       >
           <SuccessView
-            totD={totD} totC={totC} lineCount={lineCount}
-            bankAmt={bankAmt} piece={piece}
-            onEdit={() => setOpeningBalancesAdopted(false)}
+            totD={savedTot.d} totC={savedTot.c} lineCount={savedTot.n}
+            bankAmt={bankAmt} piece={piece} year={year}
           />
       </Page>
     );
@@ -480,10 +485,10 @@ export default function OpeningBalancesPage() {
   return (
     <Page
       section={{ icon: 'arrows-exchange', label: 'Comptabilité' }}
-      title="Opening balances"
-      subtitle="Journal des à-nouveaux · reprise au 1 juin 2026"
+      title="À-nouveaux"
+      subtitle={`Journal des à-nouveaux · ouverture au 1er janvier ${year}`}
       actions={<>
-        <span className="period-pill"><span className="dot" /> Exercice 2026 · ouverture</span>
+        <span className="period-pill"><span className="dot" /> Exercice {year} · ouverture</span>
       </>}
     >
         {/* ── intro banner ── */}
@@ -545,8 +550,8 @@ export default function OpeningBalancesPage() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', border: '0.5px solid var(--color-border-secondary)', borderRadius: 'var(--border-radius-md)', background: 'var(--color-background-primary)' }}>
                   <Icon name="calendar" size={16} style={{ color: 'var(--brand)' }} />
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>1 juin 2026</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.3px', textTransform: 'uppercase', color: 'var(--brand)', background: 'var(--brand-tint)', padding: '2px 7px', borderRadius: 5, marginLeft: 'auto' }}>FY start</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>1er janvier {year}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.3px', textTransform: 'uppercase', color: 'var(--brand)', background: 'var(--brand-tint)', padding: '2px 7px', borderRadius: 5, marginLeft: 'auto' }}>Début d’exercice</span>
                 </div>
               </div>
               <div>

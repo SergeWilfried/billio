@@ -9,6 +9,7 @@ import { useApp } from '@/context/AppContext';
 import { calculateTVA, calculateIS, isRegimeCaducite, isFirstFiscalYear } from '@/lib/tax-bf';
 import type { Regime } from '@/lib/tax-bf';
 import { exerciseYear, monthLabel } from '@/lib/period';
+import { isOpeningEntry } from '@/lib/ledger';
 import Page from '@/components/Page';
 
 // ─── Regime metadata ─────────────────────────────────────────────────────────
@@ -73,6 +74,11 @@ function sumPostedCreditPrefix(entries: JournalEntry[], prefix: string): number 
     .reduce((s, l) => s + l.c, 0);
 }
 
+/** VAT withheld by clients (4449) in a month « YYYY-MM »: already paid to the DGI, so off that month's VAT due */
+function withheldIn(entries: JournalEntry[], prefix: string): number {
+  return sumPostedDebit(entries.filter(e => e.date.startsWith(prefix) && !isOpeningEntry(e)), '4449');
+}
+
 function sumPostedDebit(entries: JournalEntry[], acct: string): number {
   return entries
     .filter(e => e.posted)
@@ -93,32 +99,30 @@ interface TaxLine {
   type: 'collected' | 'deductible';
 }
 
+/**
+ * VAT lines, signed: a sale credits 443 and its credit note debits it back,
+ * a purchase debits 445 and a supplier credit note credits it back. Only the
+ * sales (VE) and purchases (AC) journals reverse the VAT: a debit on 443 in
+ * another journal is the VAT settled with the DGI, not a lower VAT collected.
+ */
 function buildTaxLines(entries: JournalEntry[]): TaxLine[] {
   const lines: TaxLine[] = [];
+  const rate = 0.18;
   for (const e of entries) {
-    if (!e.posted) continue;
+    // The opening entry carries last year's VAT balances, not this year's VAT
+    if (!e.posted || isOpeningEntry(e)) continue;
     for (const l of e.lines) {
-      if (l.acct === '443' && l.c > 0) {
-        // Determine rate: 10% for hotel/restaurant entries (not common in mock, default 18%)
-        const rate = 0.18;
-        lines.push({
-          entryId: e.id, journal: e.journal, label: e.label, piece: e.piece, date: e.date,
-          htBase: Math.round(l.c / rate),
-          tvaAmount: l.c,
-          tvaRate: rate,
-          type: 'collected',
-        });
-      }
-      if (l.acct === '445' && l.d > 0) {
-        const rate = 0.18;
-        lines.push({
-          entryId: e.id, journal: e.journal, label: e.label, piece: e.piece, date: e.date,
-          htBase: Math.round(l.d / rate),
-          tvaAmount: l.d,
-          tvaRate: rate,
-          type: 'deductible',
-        });
-      }
+      const collected = l.acct === '443' ? l.c - (e.journal === 'VE' ? l.d : 0) : 0;
+      const deductible = l.acct === '445' ? l.d - (e.journal === 'AC' ? l.c : 0) : 0;
+      const amount = collected || deductible;
+      if (!amount) continue;
+      lines.push({
+        entryId: e.id, journal: e.journal, label: e.label, piece: e.piece, date: e.date,
+        htBase: Math.round(amount / rate),
+        tvaAmount: amount,
+        tvaRate: rate,
+        type: collected ? 'collected' : 'deductible',
+      });
     }
   }
   return lines.sort((a, b) => a.date < b.date ? -1 : 1);
@@ -149,7 +153,7 @@ export default function TaxPage() {
   const collected  = taxLines.filter(l => l.type === 'collected').reduce((s, l) => s + l.tvaAmount, 0);
   const deductible = taxLines.filter(l => l.type === 'deductible').reduce((s, l) => s + l.tvaAmount, 0);
   // 4449 = TVA retenue par clients assujettis (already remitted to DGI by the client)
-  const alreadyWithheld = sumPostedDebit(entries, '4449');
+  const alreadyWithheld = sumPostedDebit(entries.filter(e => !isOpeningEntry(e)), '4449');
   const netDue     = collected - deductible - alreadyWithheld;
   const collectedLines  = taxLines.filter(l => l.type === 'collected');
   const deductibleLines = taxLines.filter(l => l.type === 'deductible');
@@ -205,7 +209,7 @@ export default function TaxPage() {
     const prefix = `${y}-${String(i + 1).padStart(2, '0')}`;
     const c = lines.filter(l => l.type === 'collected'  && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
     const d = lines.filter(l => l.type === 'deductible' && l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
-    return c - d;
+    return c - d - withheldIn(allEntries, prefix);
   });
 
   type Deadline = { label: string; date: string; amount: number; status: 'overdue' | 'pending' | 'upcoming'; category: string };
@@ -313,7 +317,6 @@ export default function TaxPage() {
       </>}
       actions={<>
         <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
-        <button className="btn"><Icon name="download" />Exporter déclaration</button>
       </>}
     >
 
@@ -330,6 +333,38 @@ export default function TaxPage() {
           { icon: 'users', iconBg: '#F3E8FF', iconColor: '#6B21A8', label: 'IUTS + TPA + SP dus', value: fmtCompact(iutsAmount + tpaAmount + spAmount), unit: 'F CFA', sub: `IUTS ${fmtCompact(iutsAmount)} · TPA ${fmtCompact(tpaAmount)}${spAmount > 0 ? ` · SP ${fmtCompact(spAmount)}` : ''}` },
           riskKpi,
         ]} />
+
+        {/* TVA month by month (PRO-180) — only when VAT is charged */}
+        {canInvoiceTVA && (() => {
+          const months = Array.from({ length: 12 }, (_, i) => {
+            const prefix = `${EXERCISE_YEAR}-${String(i + 1).padStart(2, '0')}`;
+            const c = collectedLines.filter(l => l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+            const d = deductibleLines.filter(l => l.date.startsWith(prefix)).reduce((s, l) => s + l.tvaAmount, 0);
+            return { label: MONTH_FR[i], c, d, net: c - d - withheldIn(entries, prefix) };
+          }).filter((m, i) => m.c || m.d || i < new Date().getMonth() + 1 || EXERCISE_YEAR < new Date().getFullYear());
+          return (
+            <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 20 }}>
+              <div style={{ padding: '13px 18px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="calendar" size={15} />TVA par mois · Exercice {EXERCISE_YEAR}
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead><tr style={{ background: 'var(--color-background-secondary)', color: 'var(--color-text-secondary)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  <th style={{ textAlign: 'left', padding: '8px 18px' }}>Mois</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Collectée (443)</th><th style={{ textAlign: 'right', padding: '8px 12px' }}>Déductible (445)</th><th style={{ textAlign: 'right', padding: '8px 18px' }} title="Collectée − déductible − TVA retenue par les clients (4449)">Nette</th>
+                </tr></thead>
+                <tbody>
+                  {months.map(m => (
+                    <tr key={m.label} style={{ borderTop: '0.5px solid var(--color-border-tertiary)' }}>
+                      <td style={{ padding: '7px 18px', textTransform: 'capitalize' }}>{m.label}</td>
+                      <td className="mono" style={{ textAlign: 'right', padding: '7px 12px' }}>{m.c ? fmt(m.c) : '—'}</td>
+                      <td className="mono" style={{ textAlign: 'right', padding: '7px 12px' }}>{m.d ? fmt(m.d) : '—'}</td>
+                      <td className="mono" style={{ textAlign: 'right', padding: '7px 18px', fontWeight: 700, color: m.net < 0 ? '#276C2B' : undefined }}>{m.net ? `${m.net < 0 ? 'crédit ' : ''}${fmt(Math.abs(m.net))}` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
 
         {/* TVA section — only for RNI */}
         {canInvoiceTVA ? (
@@ -364,7 +399,8 @@ export default function TaxPage() {
                   <span className="mono" style={{ textAlign: 'right', color: 'var(--color-text-secondary)', fontSize: 11.5 }}>{(l.tvaRate * 100).toFixed(0)}%</span>
                   <span className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(l.htBase)}</span>
                   <span className="mono" style={{ textAlign: 'right', fontWeight: 700, color: isCollected ? '#276C2B' : '#8A5207' }}>
-                    {isCollected ? '+' : '−'}{fmt(l.tvaAmount)}
+                    {/* Net effect on the VAT due: a sale adds, a credit note or a purchase takes off */}
+                    {(isCollected ? l.tvaAmount : -l.tvaAmount) < 0 ? '−' : '+'}{fmt(Math.abs(l.tvaAmount))}
                   </span>
                   <div style={{ textAlign: 'right' }}>
                     <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: isCollected ? '#E7F3E2' : '#FAEEDA', color: isCollected ? '#276C2B' : '#8A5207' }}>
