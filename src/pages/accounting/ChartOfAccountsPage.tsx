@@ -1,14 +1,13 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { usePermissions } from '@/lib/use-permissions';
 import Icon from '@/components/Icon';
 import { PageSkeleton } from '@/components/SkeletonLoader';
 import KPIStrip from '@/components/accounting/KPIStrip';
 import DrawerPanel from '@/components/accounting/DrawerPanel';
-import type { Account, AccountClass, Journal, LedgerRow } from '@/lib/accounting-data';
-import { fmt, fmtCompact, clsOf, openingOf } from '@/lib/accounting-data';
+import type { Account, AccountClass, Journal } from '@/lib/accounting-data';
+import { fmt, fmtCompact, clsOf } from '@/lib/accounting-data';
+import { accountLedger, type LedgerLine } from '@/lib/ledger';
 import { useChartOfAccounts, useBalanceFns } from '@/lib/accounting-hooks';
-import { useApp } from '@/context/AppContext';
-import { supabase } from '@/lib/supabase';
 import { EmptyState } from '@/components/EmptyState';
 import { ChartOfAccountsEmptyIllustration } from '@/components/accounting/EmptyIllustrations';
 import { exerciseYear } from '@/lib/period';
@@ -26,46 +25,17 @@ function SideTag({ signed }: { signed: number }) {
   );
 }
 
-function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }: {
+function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf, openingOf, ledger }: {
   account: Account;
   classes: Record<number, AccountClass>;
   journals: Record<string, Journal>;
   onClose: () => void;
   mvtOf: (num: string) => { debit: number; credit: number };
   signedOf: (num: string) => number;
+  openingOf: (num: string) => number;
+  /** The account's posted movements over the exercise (ledger.ts) */
+  ledger: LedgerLine[];
 }) {
-  const { orgId } = useApp();
-  const [ledger, setLedger] = useState<LedgerRow[]>([]);
-  const [loadingLedger, setLoadingLedger] = useState(true);
-
-  useEffect(() => {
-    if (!orgId) return;
-    setLoadingLedger(true);
-    supabase
-      .from('journal_entries')
-      .select('id, date, piece, label, posted, journals!inner(code), entry_lines!inner(account_num, debit, credit)')
-      .eq('org_id', orgId)
-      .eq('entry_lines.account_num', account.num)
-      .eq('posted', true)
-      .order('date', { ascending: true })
-      .then(({ data }) => {
-        if (!data) return;
-        let running = openingOf(account.num);
-        const rows: LedgerRow[] = [];
-        for (const e of data as Array<Record<string, unknown>>) {
-          const j = e.journals as Record<string, unknown>;
-          const lines = (e.entry_lines as Array<Record<string, unknown>>) ?? [];
-          for (const l of lines) {
-            const d = Number(l.debit), c = Number(l.credit);
-            running += d - c;
-            rows.push({ entry: { id: String(e.id), date: String(e.date), piece: String(e.piece), label: String(e.label), journal: String(j?.code ?? ''), lines: [], posted: Boolean(e.posted) }, d, c, running });
-          }
-        }
-        setLedger(rows);
-      })
-      .then(() => setLoadingLedger(false), () => setLoadingLedger(false));
-  }, [orgId, account.num]);
-
   const mvt = mvtOf(account.num);
   const opening = openingOf(account.num);
   const closing = signedOf(account.num);
@@ -111,25 +81,10 @@ function AccountDrawer({ account, classes, journals, onClose, mvtOf, signedOf }:
 
       <div className="dsec-label">
         <Icon name="list" size={13} />
-        Mouvements ({loadingLedger ? '…' : ledger.length})
+        Mouvements ({ledger.length})
       </div>
 
-      {loadingLedger ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, padding: '13px 0', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div className="skel" style={{ width: '65%', height: 12, borderRadius: 5 }} />
-                <div className="skel" style={{ width: '40%', height: 10, borderRadius: 5 }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                <div className="skel" style={{ width: 72, height: 12, borderRadius: 5 }} />
-                <div className="skel" style={{ width: 52, height: 10, borderRadius: 5 }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : ledger.length === 0 ? (
+      {ledger.length === 0 ? (
         <EmptyState
           illustration={<ChartOfAccountsEmptyIllustration />}
           title="Aucun mouvement trouvé"
@@ -222,10 +177,18 @@ function NewAccountModal({ classes, onSave, onClose }: { classes: Record<number,
   );
 }
 
+const SHORTCUTS = [
+  { prefix: '411', label: 'Clients 411' },
+  { prefix: '401', label: 'Fournisseurs 401' },
+  { prefix: '5',   label: 'Trésorerie 5x' },
+];
+
 export default function ChartOfAccountsPage() {
   const { writable } = usePermissions();
   const { data, loading, addAccount } = useChartOfAccounts();
   const [activeClass, setActiveClass] = useState<string>('all');
+  // Shortcuts: receivables, payables, cash (a prefix of the account number)
+  const [shortcut, setShortcut] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<Account | null>(null);
@@ -253,13 +216,14 @@ export default function ChartOfAccountsPage() {
   const filtered = useMemo(() => {
     return accounts.filter(a => {
       if (activeClass !== 'all' && String(clsOf(a.num)) !== activeClass) return false;
+      if (shortcut && !a.num.startsWith(shortcut)) return false;
       if (query) {
         const q = query.toLowerCase();
         return a.num.startsWith(q) || a.label.toLowerCase().includes(q);
       }
       return true;
     });
-  }, [accounts, activeClass, query]);
+  }, [accounts, activeClass, query, shortcut]);
 
   const byClass = useMemo(() => {
     const map: Record<string, Account[]> = {};
@@ -292,13 +256,13 @@ export default function ChartOfAccountsPage() {
       subtitle="SYSCOHADA · Système Normal"
       actions={<>
         <span className="period-pill"><span className="dot" />Exercice {exerciseYear()} · ouvert</span>
-        <button className="btn"><Icon name="download" />Importer</button>
         {writable && <button className="btn btn-primary" onClick={() => setShowNewAccount(true)}><Icon name="plus" />Nouveau compte</button>}
       </>}
       mainStyle={{ position: 'relative' }}
       after={<>
 
-        {selected && <AccountDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} mvtOf={mvtOf} signedOf={signedOf} />}
+        {selected && <AccountDrawer account={selected} classes={classes} journals={journals} onClose={() => setSelected(null)} mvtOf={mvtOf} signedOf={signedOf} openingOf={openOf}
+          ledger={accountLedger(data?.entries ?? [], selected.num, data?.year ?? exerciseYear(), openOf(selected.num))} />}
         {showNewAccount && <NewAccountModal classes={classes} onSave={addAccount} onClose={() => setShowNewAccount(false)} />}
       </>}
     >
@@ -317,10 +281,18 @@ export default function ChartOfAccountsPage() {
               value={query} onChange={e => setQuery(e.target.value)}
             />
           </div>
+          <div className="chips" role="group" aria-label="Raccourcis">
+            {SHORTCUTS.map(sc => (
+              <button key={sc.prefix} className={`chip-f${shortcut === sc.prefix ? ' active' : ''}`} aria-pressed={shortcut === sc.prefix}
+                onClick={() => { setShortcut(shortcut === sc.prefix ? null : sc.prefix); setActiveClass('all'); }}>
+                {sc.label}
+              </button>
+            ))}
+          </div>
           <div className="chips">
             <button
               className={`chip-f${activeClass === 'all' ? ' active' : ''}`}
-              onClick={() => setActiveClass('all')}
+              onClick={() => { setActiveClass('all'); setShortcut(null); }}
             >
               Tous <span className="cnt">{classCounts.all}</span>
             </button>
@@ -329,7 +301,7 @@ export default function ChartOfAccountsPage() {
                 <button
                   key={k}
                   className={`chip-f${activeClass === k ? ' active' : ''}`}
-                  onClick={() => setActiveClass(k)}
+                  onClick={() => { setActiveClass(k); setShortcut(null); }}
                 >
                   <span className="cls-tag" style={{ background: c.color, width: 18, height: 18, fontSize: 10 }}>{k}</span>
                   {c.short} <span className="cnt">{classCounts[k]}</span>
@@ -351,6 +323,9 @@ export default function ChartOfAccountsPage() {
             />
           ) : (
             <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 'var(--border-radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr 120px 120px 120px 140px 28px', gap: 14, padding: '9px 18px', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--color-text-secondary)', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+                <span>Compte</span><span>Intitulé</span><span style={{ textAlign: 'right' }}>Ouverture</span><span style={{ textAlign: 'right' }}>Débit</span><span style={{ textAlign: 'right' }}>Crédit</span><span style={{ textAlign: 'right' }}>Clôture</span><span />
+              </div>
               {Object.keys(byClass).sort().map((k, gi) => {
                 const cls = classes[Number(k)];
                 const clsAccounts = byClass[k];
@@ -384,7 +359,7 @@ export default function ChartOfAccountsPage() {
                           key={a.num}
                           onClick={() => setSelected(a)}
                           style={{
-                            display: 'grid', gridTemplateColumns: '92px 1fr 120px 150px 36px',
+                            display: 'grid', gridTemplateColumns: '92px 1fr 120px 120px 120px 140px 28px',
                             alignItems: 'center', gap: 14, padding: '11px 18px',
                             borderTop: '0.5px solid var(--color-border-tertiary)',
                             cursor: 'pointer', transition: 'background .1s',
@@ -399,11 +374,9 @@ export default function ChartOfAccountsPage() {
                               {a.nature === 'D' ? 'Débit' : 'Crédit'}
                             </div>
                           </div>
-                          <div className="mono" style={{ fontSize: 12, color: 'var(--color-text-secondary)', textAlign: 'right' }}>
-                            {(m.debit || m.credit)
-                              ? <><span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{fmt(m.debit)}</span><span style={{ color: 'var(--color-text-tertiary)', margin: '0 5px' }}>/</span>{fmt(m.credit)}</>
-                              : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
-                          </div>
+                          <div className="mono" style={{ fontSize: 12, color: 'var(--color-text-secondary)', textAlign: 'right' }}>{openOf(a.num) ? fmt(openOf(a.num)) : '—'}</div>
+                          <div className="mono" style={{ fontSize: 12, textAlign: 'right' }}>{m.debit ? fmt(m.debit) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}</div>
+                          <div className="mono" style={{ fontSize: 12, textAlign: 'right' }}>{m.credit ? fmt(m.credit) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}</div>
                           <div className="mono" style={{ textAlign: 'right', fontSize: 13.5, fontWeight: Math.abs(signed) < 0.5 ? 500 : 700, color: Math.abs(signed) < 0.5 ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)' }}>
                             {Math.abs(signed) < 0.5 ? '0' : fmt(Math.abs(signed))}
                             {Math.abs(signed) >= 0.5 && <SideTag signed={signed} />}

@@ -16,17 +16,16 @@ import { PLAN_LABELS, minPlanForFeature, type Feature } from '@/lib/plans';
 import { ACCOUNTING_MENU, SALES_MENU, isLinkActive, type MenuGroup, type MenuLink } from '@/lib/nav';
 
 export default function TopNav({ onLogout }: { onLogout: () => void }) {
-  const { invoices, openingBalancesAdopted, hasFeature } = useApp();
+  const { invoices, hasFeature } = useApp();
+  // The accounting area: admins and accountants (PRO-180)
+  const { postable: seesAccounting } = usePermissions();
   const { pathname } = useLocation();
   const [locked, setLocked] = useState<Feature | null>(null);
 
   const overdue = useMemo(() => invoices.filter(i => i.status === 'overdue').length, [invoices]);
   const salesActive = pathname.startsWith('/invoices') || pathname.startsWith('/quotes') || pathname.startsWith('/payments');
-  const accountingMenu = useMemo<MenuGroup[]>(() => ACCOUNTING_MENU.map(g => ({
-    ...g,
-    // Same rule as the side menu: once opening balances are adopted the page is done
-    links: g.links.filter(l => l.to !== '/accounting/opening-balances' || !openingBalancesAdopted),
-  })), [openingBalancesAdopted]);
+  // Every page stays reachable, À-nouveaux included once adopted (to see them)
+  const accountingMenu: MenuGroup[] = ACCOUNTING_MENU;
 
   return (
     <>
@@ -47,7 +46,7 @@ export default function TopNav({ onLogout }: { onLogout: () => void }) {
           />
           <NavLink to="/contacts" className={({ isActive }) => `tn-link${isActive ? ' on' : ''}`}>Contacts</NavLink>
           <NavLink to="/products" className={({ isActive }) => `tn-link${isActive ? ' on' : ''}`}>Produits</NavLink>
-          {ACCOUNTING_ENABLED && (
+          {ACCOUNTING_ENABLED && seesAccounting && (
             <AreaMenu
               label="Comptabilité" to={accountingMenu[0].links[0].to} active={pathname.startsWith('/accounting')}
               groups={accountingMenu} wide
