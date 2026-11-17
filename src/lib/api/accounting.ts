@@ -512,11 +512,14 @@ export async function deleteJournalEntry(entryId: string): Promise<void> {
     if (i >= 0) mockEntries.splice(i, 1);
     return;
   }
-  const { error } = await supabase
+  // Row security can refuse a delete without an error (no row deleted): say so
+  const { data, error } = await supabase
     .from('journal_entries')
     .delete()
-    .eq('id', entryId);
+    .eq('id', entryId)
+    .select('id');
   if (error) throw error;
+  if (!data?.length) throw new Error('Journal entry not deleted: not allowed for this role');
 }
 
 // ─── Fixed assets ─────────────────────────────────────────────────────────────

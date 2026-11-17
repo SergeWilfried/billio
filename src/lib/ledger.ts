@@ -165,3 +165,23 @@ export function withUnlisted<A extends { num: string; label: string; nature: 'D'
 export function exerciseResult(signedOf: (num: string) => number, nums: string[]): number {
   return -nums.filter(n => /^[678]/.test(n)).reduce((s, n) => s + signedOf(n), 0);
 }
+
+/**
+ * The VAT of the month « YYYY-MM » to declare, from posted entries: collected
+ * (443) less deductible (445) less what clients withheld (4449). A sale credits
+ * 443 and its credit note debits it back, in the sales journal (VE); a 443
+ * debit elsewhere is the VAT settled with the DGI, not lower VAT collected.
+ * Likewise for 445 credits outside purchases (AC). The same rule as Fiscalité.
+ */
+export function monthVat(entries: JournalEntry[], prefix: string): { collected: number; deductible: number; withheld: number; net: number } {
+  let collected = 0, deductible = 0, withheld = 0;
+  for (const e of entries) {
+    if (!e.posted || !e.date.startsWith(prefix)) continue;
+    for (const l of e.lines) {
+      if (l.acct === '443') collected += l.c - (e.journal === 'VE' ? l.d : 0);
+      else if (l.acct === '445') deductible += l.d - (e.journal === 'AC' ? l.c : 0);
+      else if (l.acct === '4449') withheld += l.d;
+    }
+  }
+  return { collected, deductible, withheld, net: collected - deductible - withheld };
+}

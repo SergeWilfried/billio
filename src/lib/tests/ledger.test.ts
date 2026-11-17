@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accountLedger, balanceFns, balanceOnLine, draftsInMonth, entryProblem, entrySource, exerciseMovements,
-  exerciseResult, isOpeningEntry, monthState, nextPiece, plannedDepreciation, plannedSchedule, withUnlisted,
+  exerciseResult, isOpeningEntry, monthState, monthVat, nextPiece, plannedDepreciation, plannedSchedule, withUnlisted,
 } from '@/lib/ledger';
 import { buildStatements } from '@/lib/financial-statements';
 import type { JournalEntry } from '@/lib/accounting-data';
@@ -104,6 +104,20 @@ describe('closing', () => {
   });
 });
 
+describe('monthly VAT', () => {
+  it('nets credit notes, leaves the DGI settlement out, takes off withholdings', () => {
+    const vat: JournalEntry[] = [
+      e('s', '2026-04-02', 'VE-F9', [['411', 1180, 0], ['706', 0, 1000], ['443', 0, 180]], true, 'VE'),
+      e('cn', '2026-04-10', 'AV-3', [['706', 500, 0], ['443', 90, 0], ['411', 0, 590]], true, 'VE'),
+      e('p', '2026-04-12', 'FRN-1', [['601', 200, 0], ['445', 36, 0], ['401', 0, 236]], true, 'AC'),
+      e('w', '2026-04-15', 'REG-F9', [['521', 1162, 0], ['4449', 18, 0], ['411', 0, 1180]], true, 'BQ'),
+      e('dgi', '2026-04-20', 'OD-2026-010', [['443', 500, 0], ['521', 0, 500]], true, 'OD'),
+      e('d', '2026-04-21', 'VE-F10', [['411', 118, 0], ['706', 0, 100], ['443', 0, 18]], false, 'VE'),
+    ];
+    expect(monthVat(vat, '2026-04')).toEqual({ collected: 90, deductible: 36, withheld: 18, net: 36 });
+  });
+});
+
 describe('fixed assets', () => {
   it('depreciates on the plan, month by month, up to the gross value', () => {
     const a = { grossValue: 1_200_000, usefulLife: 5, acquisitionDate: '2025-01-15' };
@@ -144,9 +158,13 @@ describe('financial statements', () => {
   });
 
   it('keeps fractions: no rounding of each account', () => {
-    const st = buildStatements(['706', '521', '411'], n => ({ '706': -1000, '521': 500.4, '411': 499.6 } as Record<string, number>)[n]);
-    expect(st.balance.totalAssets).toBe(1000);
+    const st = buildStatements(['521', '706', '707'], n => ({ '521': 100.5, '706': -50.25, '707': -50.25 } as Record<string, number>)[n]);
+    expect(st.trial).toEqual({ debit: 100.5, credit: 100.5 });
     expect(st.tied).toBe(true);
+  });
+
+  it('does not call a half-franc gap tied', () => {
+    expect(buildStatements(['521', '706'], n => (n === '521' ? 100.5 : -100)).tied).toBe(false);
   });
 
   it('puts an unusual account under « Autres », not nowhere', () => {

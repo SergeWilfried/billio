@@ -438,6 +438,7 @@ export default function OpeningBalancesPage() {
       const msg = err instanceof Error ? err.message : '';
       showToast(/is closed/.test(msg) ? 'Janvier est clôturé : les à-nouveaux ne peuvent plus y être passés.'
         : /already adopted/.test(msg) ? 'Les à-nouveaux de cet exercice sont déjà adoptés.'
+        : /not deleted/.test(msg) ? 'Une tentative précédente a laissé un brouillon d’à-nouveaux que votre rôle ne peut pas supprimer : demandez à un administrateur de le supprimer dans Journaux, puis réessayez.'
         : 'Erreur lors de l’adoption des à-nouveaux. Vous pouvez réessayer.', true);
       console.error(err);
     } finally {

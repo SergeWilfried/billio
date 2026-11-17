@@ -109,7 +109,8 @@ export function buildStatements(nums: string[], signedOf: (num: string) => numbe
     income: { products, charges, result, tax, beforeTax },
     balance: { assets, liabilities, totalAssets, totalLiabilities },
     trial,
-    tied: Math.abs(trial.debit - trial.credit) < 1 && Math.abs(totalAssets - totalLiabilities) < 1,
+    // Half a centime: sums of floats, not a whole franc that would hide a real gap
+    tied: Math.abs(trial.debit - trial.credit) < 0.005 && Math.abs(totalAssets - totalLiabilities) < 0.005,
     turnover,
   };
 }

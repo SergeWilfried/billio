@@ -397,7 +397,8 @@ export default function TaxPage() {
                   <span className="mono" style={{ textAlign: 'right', color: 'var(--color-text-secondary)', fontSize: 11.5 }}>{(l.tvaRate * 100).toFixed(0)}%</span>
                   <span className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(l.htBase)}</span>
                   <span className="mono" style={{ textAlign: 'right', fontWeight: 700, color: isCollected ? '#276C2B' : '#8A5207' }}>
-                    {isCollected ? '+' : '−'}{fmt(l.tvaAmount)}
+                    {/* Net effect on the VAT due: a sale adds, a credit note or a purchase takes off */}
+                    {(isCollected ? l.tvaAmount : -l.tvaAmount) < 0 ? '−' : '+'}{fmt(Math.abs(l.tvaAmount))}
                   </span>
                   <div style={{ textAlign: 'right' }}>
                     <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: isCollected ? '#E7F3E2' : '#FAEEDA', color: isCollected ? '#276C2B' : '#8A5207' }}>

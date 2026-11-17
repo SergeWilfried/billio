@@ -78,7 +78,7 @@ function EntryDrawer({
         : postable && (
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
             <button className="btn" style={{ flex: 1, justifyContent: 'center' }}
-              onClick={() => { if (window.confirm(`Supprimer le brouillon ${entry.piece || entry.label} ?`)) void onDelete(entry.id).then(onClose); }}>
+              onClick={() => { if (window.confirm(`Supprimer le brouillon ${entry.piece || entry.label} ?`)) void onDelete(entry.id).then(onClose, () => window.alert('Ce brouillon n’a pas pu être supprimé : votre rôle ne le permet pas, ou la connexion a échoué.')); }}>
               <Icon name="trash" />Supprimer le brouillon
             </button>
             <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} disabled={!balanced}

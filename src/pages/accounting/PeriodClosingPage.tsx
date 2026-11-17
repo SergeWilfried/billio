@@ -5,7 +5,7 @@ import { PageSkeleton } from '@/components/SkeletonLoader';
 import LoadError from '@/components/accounting/LoadError';
 import { fmt } from '@/lib/accounting-data';
 import { usePeriodClosing, useBalanceFns } from '@/lib/accounting-hooks';
-import { draftsInMonth, exerciseResult, isOpeningEntry, monthState, type MonthState } from '@/lib/ledger';
+import { draftsInMonth, exerciseResult, isOpeningEntry, monthState, monthVat, type MonthState } from '@/lib/ledger';
 import { usePermissions } from '@/lib/use-permissions';
 import { todayISO } from '@/lib/invoice-status';
 import { exerciseYear } from '@/lib/period';
@@ -44,8 +44,7 @@ export default function PeriodClosingPage() {
   const monthEntries = target ? entries.filter(e => e.date.startsWith(prefix) && !isOpeningEntry(e)) : [];
   const drafts = target ? draftsInMonth(entries, year, target) : 0;
   const unbalanced = monthEntries.filter(e => Math.round(e.lines.reduce((s, l) => s + l.d - l.c, 0)) !== 0).length;
-  const vatNet = monthEntries.filter(e => e.posted).reduce((s, e) => s + e.lines.reduce((x, l) =>
-    x + (l.acct.startsWith('443') ? l.c - l.d : l.acct.startsWith('445') ? -(l.d - l.c) : 0), 0), 0);
+  const vatNet = target ? monthVat(monthEntries, prefix).net : 0;
   const blocked = drafts > 0 || unbalanced > 0;
 
   const nums = accountNums();
