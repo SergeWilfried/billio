@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import * as Sentry from '@sentry/react'
 import posthog from 'posthog-js'
 import './index.css'
@@ -34,10 +34,13 @@ Sentry.init({
   replaysOnErrorSampleRate: 1.0,
 })
 
+// A data router, so a page can hold back a navigation (useBlocker): the
+// invoice editor asks before unsaved changes are left (PRO-184). The app's
+// own <Routes> sit under one catch-all route.
+const router = createBrowserRouter([{ path: '*', element: <App /> }])
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <RouterProvider router={router} />
   </StrictMode>,
 )

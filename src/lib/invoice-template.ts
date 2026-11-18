@@ -23,8 +23,25 @@ export const DEFAULT_CONFIG: PaperConfig = {
   fontFamily: FONT_FAMILIES.jakarta,
   density: 'cozy', tableStyle: 'tinted', totalStyle: 'filled',
   showQty: true, showTax: true, showDiscount: false,
-  showSignature: false, showPayment: true, footer: '',
+  showSignature: false, showPaymentQr: true, showPayment: true, footer: '',
+  bands: true, bandColor: '#F3F4F6',
 };
+
+/** Light tints for the header and footer bands: dark text stays readable on each. */
+export const BAND_COLORS: readonly { value: string; label: string }[] = [
+  { value: '#F3F4F6', label: 'Gris clair' },
+  { value: '#EEF2F7', label: 'Gris bleuté' },
+  { value: '#F5F2EB', label: 'Sable' },
+  { value: '#EFF4EF', label: 'Vert pâle' },
+];
+
+/** The layouts whose header and footer can sit in bands. */
+export const BANDED_LAYOUTS: readonly PaperLayout[] = ['classic', 'minimal'];
+
+/** Whether this template draws its header and footer in bands, and their tint. */
+export function paperBands(cfg: Pick<PaperConfig, 'layout' | 'bands' | 'bandColor'>): string | null {
+  return cfg.bands && BANDED_LAYOUTS.includes(cfg.layout) ? cfg.bandColor : null;
+}
 
 export interface TemplatePreset {
   key:     string;
@@ -91,9 +108,30 @@ export function normalizeConfig(raw: unknown): PaperConfig {
     showTax:       bool(r.showTax, d.showTax),
     showDiscount:  bool(r.showDiscount, d.showDiscount),
     showSignature: bool(r.showSignature, d.showSignature),
+    showPaymentQr: bool(r.showPaymentQr, d.showPaymentQr),
     showPayment:   bool(r.showPayment, d.showPayment),
     footer:        typeof r.footer === 'string' ? r.footer.slice(0, 200) : d.footer,
+    // Templates saved before the bands existed get them (the new default look)
+    bands:         bool(r.bands, d.bands),
+    bandColor:     typeof r.bandColor === 'string' && BAND_COLORS.some(c => c.value === r.bandColor) ? r.bandColor : d.bandColor,
   };
+}
+
+/**
+ * What the payment QR code opens on this document, or null when none is
+ * printed: switched off in the template, a quote or a credit note, nothing
+ * left to pay, or no payment link. Invoices have no payment link until the
+ * public payment page exists (PRO-187), so for now none is printed.
+ */
+export function paymentQrTarget(opts: {
+  config: Pick<PaperConfig, 'showPaymentQr'>;
+  kind: 'facture' | 'devis' | 'avoir';
+  amountDue: number;
+  paymentUrl?: string | null;
+}): string | null {
+  if (!opts.config.showPaymentQr || opts.kind !== 'facture' || opts.amountDue <= 0) return null;
+  const url = opts.paymentUrl?.trim();
+  return url && /^https:\/\//.test(url) ? url : null;
 }
 
 /** Font registered for the PDF (see InvoicePDF), keyed by the CSS family. */

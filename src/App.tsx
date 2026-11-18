@@ -15,9 +15,12 @@ import type { Feature } from '@/lib/plans';
 // first visit, so subsequent navigations are instant.
 const LandingPage            = lazy(() => import('./pages/LandingPage'));
 const InvoiceGeneratorPage   = lazy(() => import('./pages/InvoiceGeneratorPage'));
+const InvoiceEditorPage      = lazy(() => import('./pages/InvoiceEditorPage'));
+const CreditNoteEditorPage   = lazy(() => import('./pages/CreditNoteEditorPage'));
 const AuthPage               = lazy(() => import('./pages/AuthPage'));
 const ResetPasswordPage      = lazy(() => import('./pages/ResetPasswordPage'));
 const InvitePage             = lazy(() => import('./pages/InvitePage'));
+const PayPage                = lazy(() => import('./pages/PayPage'));
 const OnboardingPage         = lazy(() => import('./pages/OnboardingPage'));
 const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
 const DashboardV2Page        = lazy(() => import('./pages/DashboardV2Page'));
@@ -30,6 +33,7 @@ const ProductsPage           = lazy(() => import('./pages/ProductsPage'));
 const QuotePage              = lazy(() => import('./pages/QuotePage'));
 const TemplatesPage          = lazy(() => import('./pages/TemplatesPage'));
 const SettingsPage           = lazy(() => import('./pages/SettingsPage'));
+const ProfilePage            = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.ProfilePage })));
 const ChartOfAccountsPage    = lazy(() => import('./pages/accounting/ChartOfAccountsPage'));
 const JournalsPage           = lazy(() => import('./pages/accounting/JournalsPage'));
 const TrialBalancePage       = lazy(() => import('./pages/accounting/TrialBalancePage'));
@@ -97,6 +101,8 @@ export default function App() {
           }
         />
         <Route path="/invite/:token" element={<InvitePage />} />
+        {/* Public payment page of an invoice (PRO-187): opened by the QR code on the PDF */}
+        <Route path="/payer/:token" element={<PayPage />} />
 
         {/* Protected — wait for session to resolve before redirecting */}
         <Route
@@ -109,6 +115,12 @@ export default function App() {
           <Route element={<OnboardingGuard />}>
             <Route path="/dashboard" element={UI_V2 ? <DashboardV2Page /> : <DashboardPage />} />
             <Route path="/invoices" element={<SalesPage />} />
+            {UI_V2 && <Route path="/invoices/new" element={<InvoiceEditorPage />} />}
+            {UI_V2 && <Route path="/invoices/:id/edit" element={<InvoiceEditorPage />} />}
+            {UI_V2 && <Route path="/invoices/:id/credit-note" element={<CreditNoteEditorPage />} />}
+            {UI_V2 && <Route path="/credit-notes/:cnId/edit" element={<CreditNoteEditorPage />} />}
+            {UI_V2 && <Route path="/quotes/new" element={<Gated feature="quotes" title="Devis"><InvoiceEditorPage key="quote" doc="quote" /></Gated>} />}
+            {UI_V2 && <Route path="/quotes/:id/edit" element={<Gated feature="quotes" title="Devis"><InvoiceEditorPage key="quote" doc="quote" /></Gated>} />}
             <Route path="/invoices/:id" element={<InvoicePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/clients"  element={<Navigate to="/contacts" replace />} />
@@ -134,6 +146,7 @@ export default function App() {
             <Route path="/quotes/:id" element={<Gated feature="quotes" title="Devis"><QuotePage /></Gated>} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings"  element={<SettingsPage />} />
+            {UI_V2 && <Route path="/profile" element={<ProfilePage />} />}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>

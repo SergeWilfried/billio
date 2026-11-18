@@ -10,22 +10,22 @@ import BillioMark from '@/components/BillioMark';
 import UpgradeModal from '@/components/UpgradeModal';
 import CommandBox from '@/components/CommandBox';
 import { useApp } from '@/context/AppContext';
+import { usePermissions } from '@/lib/use-permissions';
 import { ACCOUNTING_ENABLED } from '@/lib/features';
 import { PLAN_LABELS, minPlanForFeature, type Feature } from '@/lib/plans';
 import { ACCOUNTING_MENU, SALES_MENU, isLinkActive, type MenuGroup, type MenuLink } from '@/lib/nav';
 
 export default function TopNav({ onLogout }: { onLogout: () => void }) {
-  const { invoices, openingBalancesAdopted, hasFeature } = useApp();
+  const { invoices, hasFeature } = useApp();
+  // The accounting area: admins and accountants (PRO-180)
+  const { postable: seesAccounting } = usePermissions();
   const { pathname } = useLocation();
   const [locked, setLocked] = useState<Feature | null>(null);
 
   const overdue = useMemo(() => invoices.filter(i => i.status === 'overdue').length, [invoices]);
   const salesActive = pathname.startsWith('/invoices') || pathname.startsWith('/quotes') || pathname.startsWith('/payments');
-  const accountingMenu = useMemo<MenuGroup[]>(() => ACCOUNTING_MENU.map(g => ({
-    ...g,
-    // Same rule as the side menu: once opening balances are adopted the page is done
-    links: g.links.filter(l => l.to !== '/accounting/opening-balances' || !openingBalancesAdopted),
-  })), [openingBalancesAdopted]);
+  // Every page stays reachable, À-nouveaux included once adopted (to see them)
+  const accountingMenu: MenuGroup[] = ACCOUNTING_MENU;
 
   return (
     <>
@@ -46,7 +46,7 @@ export default function TopNav({ onLogout }: { onLogout: () => void }) {
           />
           <NavLink to="/contacts" className={({ isActive }) => `tn-link${isActive ? ' on' : ''}`}>Contacts</NavLink>
           <NavLink to="/products" className={({ isActive }) => `tn-link${isActive ? ' on' : ''}`}>Produits</NavLink>
-          {ACCOUNTING_ENABLED && (
+          {ACCOUNTING_ENABLED && seesAccounting && (
             <AreaMenu
               label="Comptabilité" to={accountingMenu[0].links[0].to} active={pathname.startsWith('/accounting')}
               groups={accountingMenu} wide
@@ -189,6 +189,7 @@ function AreaMenu({ label, to, active, badge, groups, wide, hasFeature, onLocked
 
 function AccountMenu({ onLogout }: { onLogout: () => void }) {
   const { userLabel, userInitials, plan } = useApp();
+  const { managesOrg } = usePermissions();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -232,12 +233,18 @@ function AccountMenu({ onLogout }: { onLogout: () => void }) {
             <b>{userLabel || '…'}</b>
             <small>Plan {PLAN_LABELS[plan]}</small>
           </div>
-          <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/settings')}>
-            <span className="tn-mi-label"><Icon name="settings" size={15} ariaHidden /> Paramètres</span>
+          <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/profile')}>
+            <span className="tn-mi-label"><Icon name="user" size={15} ariaHidden /> Mon profil</span>
           </button>
-          <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/templates')}>
-            <span className="tn-mi-label"><Icon name="layout-grid" size={15} ariaHidden /> Modèles de facture</span>
-          </button>
+          {/* The organisation's settings and templates: admins (PRO-171) */}
+          {managesOrg && <>
+            <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/settings')}>
+              <span className="tn-mi-label"><Icon name="settings" size={15} ariaHidden /> Paramètres</span>
+            </button>
+            <button type="button" role="menuitem" className="tn-mi" onClick={() => go('/templates')}>
+              <span className="tn-mi-label"><Icon name="layout-grid" size={15} ariaHidden /> Modèles de facture</span>
+            </button>
+          </>}
           <div className="tn-sep" role="separator" />
           <button type="button" role="menuitem" className="tn-mi danger" onClick={() => { setOpen(false); onLogout(); }}>
             <span className="tn-mi-label"><Icon name="logout" size={15} ariaHidden /> Se déconnecter</span>

@@ -7,7 +7,10 @@ import { OwnerLine } from '@/components/owner/OwnerControls';
 import { useApp } from '@/context/AppContext';
 import { usePermissions } from '@/lib/use-permissions';
 import { fetchInvoiceEntries } from '@/lib/api/accounting';
-import { fetchClientCreditNotes } from '@/lib/api/credit-notes';
+import { fetchClientCreditNotes, fetchCreditNoteDrafts } from '@/lib/api/credit-notes';
+import { renderCreditNotePdf, showPdf } from '@/lib/credit-note-pdf';
+import { creditNoteRef } from '@/lib/invoice-number';
+import { legacyCreditVat } from '@/lib/credit-note';
 import { withIntent } from '@/lib/command-intent';
 import { clientBalance, expectedSalesEntry, invoiceActivity, fmtDateTime } from '@/lib/invoice-view';
 import { contactValue } from '@/lib/share-links';
@@ -39,8 +42,8 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
   /** Goes up once a payment, issue, credit note or edit has been posted: entries are read again. */
   refreshKey?: number;
 }) {
-  const { invoices, payments, quotes, orgId, activity: teamActivity } = useApp();
-  const { postable } = usePermissions();
+  const { invoices, payments, quotes, orgId, activity: teamActivity, clientsMap, orgSettings, invoiceTemplate, showToast } = useApp();
+  const { postable, writable } = usePermissions();
   const navigate = useNavigate();
   // null while loading; 'error' when the entries couldn't be read (not the same as none)
   const [entries, setEntries] = useState<JournalEntry[] | 'error' | null>(null);
@@ -61,11 +64,44 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
   useEffect(() => {
     if (!orgId) return;
     let live = true;
+    // Back to « … » while it reloads, rather than the previous balance
+    setClientCredits(null);
     fetchClientCreditNotes(orgId, invoice.client)
       .then(c => { if (live) setClientCredits(c); })
       .catch(err => { console.error('[fetchClientCreditNotes]', err); if (live) setClientCredits('error'); });
     return () => { live = false; };
   }, [orgId, invoice.client, creditIds, refreshKey]);
+
+  // Draft credit notes on this invoice (PRO-168): not counted, but not to be forgotten
+  const [creditDrafts, setCreditDrafts] = useState<CreditNote[]>([]);
+  useEffect(() => {
+    if (!orgId || invoice.status === 'draft') return;
+    let live = true;
+    fetchCreditNoteDrafts(orgId, invoice.id)
+      .then(d => { if (live) setCreditDrafts(d); })
+      .catch(err => console.error('[fetchCreditNoteDrafts]', err));
+    return () => { live = false; };
+  }, [orgId, invoice.id, invoice.status, refreshKey]);
+  const [pdfFor, setPdfFor] = useState<string | null>(null);
+  async function openCreditPdf(cn: CreditNote) {
+    const rec = clientsMap[invoice.client];
+    if (!rec || pdfFor) return;
+    const tab = window.open('', '_blank');
+    setPdfFor(cn.id);
+    try {
+      // A note without lines (older ones): its own accounting entry says whether it carried VAT,
+      // else the invoice's sales entry, else the invoice as shown here
+      const { vat: chargedVat, estimated } = legacyCreditVat(Array.isArray(entries) ? entries : null, cn.id, invoice.id, vatOnInvoice);
+      if (estimated && cn.lines.length === 0) showToast('L’écriture de cet ancien avoir n’a pas pu être lue : la TVA du PDF est estimée d’après la facture.', true);
+      showPdf(await renderCreditNotePdf({ creditNote: cn, invoice, chargedVat, client: rec, biz: orgSettings, template: invoiceTemplate }), tab);
+    } catch (err) {
+      tab?.close();
+      console.error('[creditNotePdf]', err);
+      showToast('Le PDF de l’avoir n’a pas pu être généré. Réessayez.', true);
+    } finally {
+      setPdfFor(null);
+    }
+  }
 
   const activity = invoiceActivity(invoice, payments, creditNotes, fmt);
   // Sends and reminders are logged in the team's activity with the invoice's number
@@ -89,6 +125,33 @@ export default function InvoiceSide({ invoice, total, paid, credited, amountDue,
           <div className="iv-due"><dt>Reste dû</dt><dd className={invoice.status === 'overdue' && amountDue > 0 ? 'dt-late' : undefined}>{fmt(invoice.status === 'draft' ? total : amountDue)} F CFA</dd></div>
         </dl>
       </Card>
+
+      {invoice.status !== 'draft' && (creditNotes.length > 0 || creditDrafts.length > 0) && (
+        <Card title="Avoirs">
+          <ul className="iv-credits">
+            {creditNotes.map(cn => (
+              <li key={cn.id}>
+                <div>
+                  <b>{creditNoteRef(cn)}</b>{cn.nature && <span className="iv-nature">{cn.nature}</span>}
+                  <small>{fmtDateLong(cn.issued)}{cn.reason ? ` · ${cn.reason}` : ''}</small>
+                </div>
+                <span className="iv-credit-amt">− {fmt(cn.amount)}</span>
+                <button type="button" className="dt-linkcell" onClick={() => void openCreditPdf(cn)} disabled={pdfFor !== null}>{pdfFor === cn.id ? '…' : 'PDF'}</button>
+              </li>
+            ))}
+            {creditDrafts.map(cn => (
+              <li key={cn.id} className="draft">
+                <div>
+                  <b>Brouillon d’avoir</b>{cn.nature && <span className="iv-nature">{cn.nature}</span>}
+                  <small>{cn.reason || 'sans motif'}</small>
+                </div>
+                <span className="iv-credit-amt">− {fmt(cn.amount)}</span>
+                {writable && <button type="button" className="dt-linkcell" onClick={() => navigate(`/credit-notes/${cn.id}/edit`)}>Reprendre</button>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {postable && invoice.status !== 'draft' && (
         <Card title="Comptabilité">

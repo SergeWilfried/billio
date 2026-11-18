@@ -13,29 +13,35 @@ import { creditNoteRef, invoiceRef, isIssuedLockedError } from '@/lib/invoice-nu
 import { createActivity } from '@/lib/api/activities';
 import { deleteInvoiceEntries, updateInvoiceIssuanceEntry, recordCreditNoteEntry, recordInvoiceIssuanceEntry } from '@/lib/api/accounting';
 import { settleInvoicePayment } from '@/lib/api/payments';
+import { updateQuote } from '@/lib/api/quotes';
 import { invoiceBalance, daysOverdue, todayISO } from '@/lib/invoice-status';
 import { paymentMethodsNotReadyMessage, usePaymentMethods } from '@/lib/use-payment-methods';
 import { filledLines, lineItemsError } from '@/lib/line-validation';
 import { invoiceMessage } from '@/lib/document-messages';
 import { contactValue } from '@/lib/share-links';
 import { fetchLineItems, saveLineItems, deleteLineItems } from '@/lib/api/line-items';
-import { fetchCreditNotes, createCreditNote, nextCreditNoteId } from '@/lib/api/credit-notes';
+import { fetchCreditNotes, createCreditNote, nextCreditNoteId, creditNoteIssueError } from '@/lib/api/credit-notes';
+import { CREDIT_NATURES, type CreditNature } from '@/lib/credit-note';
 import { useComplianceGuard } from '@/lib/use-compliance-guard';
 import { isInvoiceLimitError } from '@/lib/invoice-limit';
 import { fmt, fmtDate, fmtDateLong, STATUS_LABEL, newLineItem } from '@/data';
 import { renderInvoicePdf } from '@/lib/render-pdf';
+import { paymentUrlForInvoice } from '@/lib/api/payment-links';
+import PaymentLinkCard from '@/components/PaymentLinkCard';
 import { downloadBlob } from '@/lib/download';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import type { Status } from '@/data';
-import { calculateServiceWithholding, SERVICE_WITHHOLDING_THRESHOLD } from '@/lib/tax-bf';
+import { calculateServiceWithholding, SERVICE_WITHHOLDING_RATE_LABEL, SERVICE_WITHHOLDING_THRESHOLD } from '@/lib/tax-bf';
 import type { Activity, CreditNote, LineItem, PayMethod, ServiceWithholdingScenario } from '@/lib/schemas';
 import { VAT_LABEL, chargesVat, documentHasVat, splitTtc, vatOn } from '@/lib/vat';
 import Page from '@/components/Page';
 import { OwnerLine } from '@/components/owner/OwnerControls';
 import InvoiceSide from '@/components/invoice/InvoiceSide';
+import RichTextView from '@/components/RichTextView';
 import MoreMenu from '@/components/MoreMenu';
 import StatusPill from '@/components/sales/StatusPill';
 import { UI_V2 } from '@/lib/features';
+import { paperBands } from '@/lib/invoice-template';
 import { invoiceBadge, fmtDateTime } from '@/lib/invoice-view';
 import { invoiceTotalMention } from '@/lib/amount-in-words';
 import { formatCadastralRef } from '@/lib/cadastral';
@@ -83,10 +89,10 @@ const BillioLogoSvg = () => (
 export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, quotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
+  const { invoices, quotes, setQuotes, setInvoices, payments, setPayments, setActivity, showToast, clientsMap, products, orgSettings, invoiceTemplate, orgId, loading, userRole, userLabel } = useApp();
   const writable = canWrite(userRole);
   const compliance = useComplianceGuard();
-  const { lines: paymentMethods, status: paymentMethodsStatus } = usePaymentMethods();
+  const { lines: paymentMethods, status: paymentMethodsStatus, online } = usePaymentMethods();
   const paymentMethodsReady = paymentMethodsStatus === 'ready';
   const [sendKind, setSendKind] = useState<'send' | 'reminder' | null>(null);
   // The list and the create panel link here with { openSend: true } to open the send dialog
@@ -120,6 +126,7 @@ export default function InvoicePage() {
   const [avoirReason,  setAvoirReason]  = useState('');
   const [avoirAmount,  setAvoirAmount]  = useState(0);
   const [avoirSaving,  setAvoirSaving]  = useState(false);
+  const [avoirNature,  setAvoirNature]  = useState<CreditNature | ''>('');
   const [creditNotes,  setCreditNotes]  = useState<CreditNote[]>([]);
   // Goes up once a posting to the books has finished, so the side panel reads the entries again
   const [ledgerTick, setLedgerTick] = useState(0);
@@ -225,7 +232,7 @@ export default function InvoicePage() {
       const issued = todayISO();
       const due = new Date(Date.parse(issued + 'T00:00:00Z') + termDays * 86_400_000).toISOString().slice(0, 10);
       const id = newDraftId();
-      const copy = { id, subject: invoice.subject, client: invoice.client, issued, due, amount: total, status: 'draft' as const, discountPct };
+      const copy = { id, subject: invoice.subject, client: invoice.client, issued, due, amount: total, status: 'draft' as const, discountPct, notes: invoice.notes };
       // The copy belongs to whoever duplicates it (set by the database, PRO-172)
       const stored = await createInvoice(orgId, copy);
       try {
@@ -296,6 +303,7 @@ export default function InvoicePage() {
         paymentTerms: orgSettings.paymentTerms || 'Net 14 jours',
         deliveryTerms: orgSettings.deliveryTerms || 'À convenir',
         paymentMethods,
+        paymentUrl: await paymentUrlForInvoice(orgId, invoice, online),
       });
       downloadBlob(blob, `facture-${invoiceRef(invoice).toLowerCase()}.pdf`);
       posthog.capture('invoice_pdf_downloaded', { invoice_id: invoice.id });
@@ -317,33 +325,45 @@ export default function InvoicePage() {
       return;
     }
     deleteInvoiceEntries(orgId, invoice.id).catch(err => console.error('[deleteInvoiceEntries] failed:', err));
+    // A draft started from a quote (PRO-167): the quote can be invoiced again
+    for (const q of quotes.filter(q => q.invoiceId === invoice.id && q.status !== 'invoiced')) {
+      updateQuote(orgId, q.id, { invoiceId: null }, { onlyIfInvoiceId: invoice.id })
+        .then(() => setQuotes(prev => prev.map(x => x.id === q.id && x.invoiceId === invoice.id ? { ...x, invoiceId: undefined } : x)))
+        .catch(err => console.error('[updateQuote] unlink failed:', err));
+    }
     setInvoices(prev => prev.filter(i => i.id !== invoice.id));
     showToast('Facture supprimée');
     navigate('/invoices');
   };
 
   const openAvoir = () => {
+    // The new look writes credit notes in the invoice editor (PRO-168)
+    if (UI_V2) { navigate(`/invoices/${invoice.id}/credit-note`); return; }
     setAvoirReason('');
+    setAvoirNature('');
     setAvoirAmount(creditable);
     setAvoirDialog(true);
   };
 
   const handleConfirmAvoir = async () => {
+    if (!avoirNature) { showToast('Choisissez la nature de l\'avoir.', true); return; }
     if (!avoirReason.trim()) { showToast('Saisissez le motif de l\'avoir.', true); return; }
     if (avoirAmount <= 0 || avoirAmount > creditable) { showToast(`Montant invalide (maximum ${fmt(creditable)} F CFA).`, true); return; }
     setAvoirSaving(true);
     try {
       const avId = await nextCreditNoteId(orgId);
       const today = new Date().toISOString().slice(0, 10);
-      const cn = await createCreditNote(orgId, {
-        id:        avId,
+      const cn = await createCreditNote(orgId, avId, {
         invoiceId: invoice.id,
         subject:   `Avoir sur ${invoiceRef(invoice)}`,
         client:    invoice.client,
         issued:    today,
         amount:    avoirAmount,
         reason:    avoirReason.trim(),
-      });
+        nature:    avoirNature,
+        lines:     [],
+        discountPct: 0,
+      }, 'issued');
       setCreditNotes(prev => [cn, ...prev]);
       // The database marks the invoice paid once nothing is left to collect
       if ((invoice.status === 'pending' || invoice.status === 'overdue') && balance - avoirAmount <= 0) {
@@ -363,7 +383,7 @@ export default function InvoicePage() {
       showToast(`Avoir ${creditNoteRef(cn)} émis`);
     } catch (err) {
       console.error('Create credit note failed:', err);
-      showToast('Erreur lors de l\'émission de l\'avoir', true);
+      showToast(creditNoteIssueError(err) ?? 'Erreur lors de l\'émission de l\'avoir', true);
     } finally {
       setAvoirSaving(false);
     }
@@ -373,15 +393,20 @@ export default function InvoicePage() {
     wire: '#WV0000',
     momo: 'Réf MTN / Orange',
     cheque: 'ch_3PXyZ...',
+    pispi: 'ID de transaction PI-SPI',
   };
   const METHOD_LABEL: Record<PayMethod, string> = {
     cash:   'Cash',
     wire:   'Virement',
     momo:   'Mobile Money',
     cheque: 'Chèque',
+    pispi:  'PI-SPI',
   };
 
-  const canEdit = writable && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
+  // Once a credit note was issued on it, its lines stay as credited (PRO-168): corrections go through credit notes
+  const canEdit = writable && creditNotes.length === 0 && (invoice.status === 'draft' || invoice.status === 'pending' || invoice.status === 'overdue');
+  // Header and footer bands of the organisation's template (PRO-167), in the new look
+  const pageBand = UI_V2 ? paperBands(invoiceTemplate) : null;
 
   const openEdit = () => {
     setEClient(invoice.client);
@@ -503,7 +528,7 @@ export default function InvoicePage() {
         </button>
         {writable && invoice.status === 'draft' && (<>
           {canEdit && (
-            <button className="btn" onClick={openEdit}>
+            <button className="btn" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
               <Icon name="edit" ariaHidden /> Modifier
             </button>
           )}
@@ -557,7 +582,7 @@ export default function InvoicePage() {
         <div className="detail-grid">
 
           {/* Invoice paper */}
-          <div className="paper">
+          <div className={`paper${pageBand ? ' has-bands' : ''}`} style={pageBand ? { ['--band' as string]: pageBand } : undefined}>
             <div className="pp-top">
               <div className="pp-biz">
                 <div className="pp-logo" aria-hidden="true"><BillioLogoSvg /></div>
@@ -702,10 +727,12 @@ export default function InvoicePage() {
                 </div>
               </div>
               <div>
-                <div className="pp-block-label">Notes</div>
-                <div className="pp-note">
-                  Merci pour votre confiance. Conditions de paiement : {orgSettings.paymentTerms || 'Net 14 jours'}.
-                </div>
+                <div className="pp-block-label">{invoice.notes ? 'Notes et conditions' : 'Notes'}</div>
+                {invoice.notes
+                  ? <RichTextView doc={invoice.notes} className="pp-note rich-text" />
+                  : <div className="pp-note">
+                      Merci pour votre confiance. Conditions de paiement : {orgSettings.paymentTerms || 'Net 14 jours'}.
+                    </div>}
               </div>
             </div>
 
@@ -722,7 +749,11 @@ export default function InvoicePage() {
               </div>
             )}
 
-            <div className="pp-foot">{orgSettings.name || 'Mon entreprise'} · Facture générée via Billio</div>
+            {/* The template's footer text, as the PDF prints it */}
+            <div className="pp-foot">
+              <span>{orgSettings.name || 'Mon entreprise'}</span>
+              <span>{invoiceTemplate.footer.trim() || 'Facture générée via Billio'}</span>
+            </div>
           </div>
 
           {UI_V2 ? (
@@ -769,6 +800,9 @@ export default function InvoicePage() {
                 <button className="btn btn-block" onClick={handleDownloadPDF} disabled={linesLoading || !paymentMethodsReady}>
                   <Icon name="printer" ariaHidden /> Télécharger PDF
                 </button>
+                {online !== 'off' && (isOverdue || invoice.status === 'pending') && (
+                  <PaymentLinkCard orgId={orgId} invoiceId={invoice.id} writable={writable} onToast={showToast} />
+                )}
                 {writable && (<>
                 <div className="rail-divider" />
                 <button className="btn btn-block" onClick={handleDuplicate} disabled={busyAction !== null || linesLoading}>
@@ -859,7 +893,7 @@ export default function InvoicePage() {
             <div>
               <div className="form-label">Méthode de paiement</div>
               <div className="method-pick" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                {(['cash', 'wire', 'momo', 'cheque'] as PayMethod[]).map(m => (
+                {(['cash', 'wire', 'momo', 'cheque', 'pispi'] as PayMethod[]).map(m => (
                   <button
                     key={m}
                     type="button"
@@ -923,12 +957,7 @@ export default function InvoicePage() {
                   ? calculateServiceWithholding(discountedSub, clientWithholdingScenario)
                   : null;
                 const belowThreshold = discountedSub < SERVICE_WITHHOLDING_THRESHOLD;
-                const RATE_LABEL: Record<string, string> = {
-                  'resident-with-ifu':    '5 %',
-                  'resident-without-ifu': '25 %',
-                  'construction':         '1 %',
-                  'non-resident':         '20 %',
-                };
+                const RATE_LABEL: Record<string, string> = SERVICE_WITHHOLDING_RATE_LABEL;
                 return (<>
                   <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Retenue à la source services (Art.207/212)</span>
@@ -1134,6 +1163,11 @@ export default function InvoicePage() {
               </button>
             </div>
             <div className="inv-modal-body">
+              <label className="form-label" htmlFor="avoir-nature">Nature de l'avoir <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+              <select id="avoir-nature" className="form-input" value={avoirNature} onChange={e => setAvoirNature(e.target.value as CreditNature)} style={{ marginBottom: 12 }}>
+                <option value="">Choisir…</option>
+                {CREDIT_NATURES.map(n => <option key={n.code} value={n.code} disabled={n.code === 'RAN' && paid > 0}>{n.code} · {n.label}</option>)}
+              </select>
               <div className="form-label">Motif de l'avoir <span style={{ color: 'var(--color-danger)' }}>*</span></div>
               <input
                 className="form-input"

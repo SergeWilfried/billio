@@ -1,3 +1,4 @@
+import type { RichDoc } from '@/lib/rich-text';
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
@@ -6,7 +7,7 @@ import { z } from 'zod';
 
 export const invoiceStatusSchema = z.enum(['paid', 'pending', 'overdue', 'draft']);
 export const clientStatusSchema  = z.enum(['active', 'lead', 'inactive']);
-export const payMethodSchema     = z.enum(['cash', 'wire', 'momo', 'cheque']);
+export const payMethodSchema     = z.enum(['cash', 'wire', 'momo', 'cheque', 'pispi']);
 export const paySourceSchema     = z.enum(['online', 'manual']);
 export const payStatusSchema     = z.enum(['completed', 'pending', 'failed']);
 export const productTypeSchema   = z.enum(['service', 'product']);
@@ -44,6 +45,8 @@ export const invoiceSchema = z.object({
   /** « Responsable »: the team member in charge (PRO-172), set and named by the database */
   ownerId:     z.string().optional(),
   ownerName:   z.string().optional(),
+  /** Notes and conditions (PRO-167): rich text, cleaned by cleanRichText; frozen once issued */
+  notes:       z.custom<RichDoc>().optional(),
 });
 
 export const serviceWithholdingScenarioSchema = z.enum([
@@ -134,8 +137,19 @@ export const creditNoteSchema = z.object({
   issued:    z.string(),
   amount:    z.number().min(0),
   reason:    z.string(),
-  /** Legal number (AV-2026-0001), given by the database */
+  /** Legal number (AV-2026-0001), given by the database at issue */
   number:    z.string().optional(),
+  /** A draft is written in the invoice editor and doesn't count until issued (PRO-168) */
+  status:    z.enum(['draft', 'issued']).default('issued'),
+  /** COR, RAN, RAM or RRR; none on credit notes from before PRO-168 */
+  nature:    z.enum(['COR', 'RAN', 'RAM', 'RRR']).optional(),
+  /** The credited lines; `sourceId` is the invoice line each one credits. Empty on older credit notes */
+  lines:     z.array(lineItemSchema.extend({ sourceId: z.string().optional() })).default([]),
+  /** The original invoice's discount, applied to these lines */
+  discountPct: z.number().min(0).max(100).default(0),
+  /** When and by whom it was issued, set by the database */
+  issuedTs:     z.string().optional(),
+  issuedByName: z.string().optional(),
 });
 
 export const quoteSchema = z.object({
@@ -149,6 +163,10 @@ export const quoteSchema = z.object({
   status:  quoteStatusSchema,
   /** The invoice it became, once converted (internal id; none for quotes converted before this was kept) */
   invoiceId: z.string().optional(),
+  /** Invoice-level discount, as on invoices (PRO-185); 0 on older quotes */
+  discountPct: z.number().min(0).max(100).optional(),
+  /** Notes and conditions (rich text), carried into the invoice (PRO-185) */
+  notes: z.custom<RichDoc>().optional(),
   /** « Responsable »: the team member in charge (PRO-172), set and named by the database */
   ownerId:     z.string().optional(),
   ownerName:   z.string().optional(),

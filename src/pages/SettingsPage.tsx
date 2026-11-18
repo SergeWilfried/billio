@@ -1,6 +1,9 @@
 import { cadastralRequired, formatCadastralRef, parseCadastralRef } from '@/lib/cadastral';
-import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Navigate, useBlocker, useSearchParams } from 'react-router-dom';
+import { UI_V2 } from '@/lib/features';
+import { SaveBarContext, useSaveBar, type SaveBarActions, type SaveBarApi, type SaveBarState } from '@/lib/use-save-bar';
+import { FIELD_IDS, cadastralProblem, checklistMissing, complianceChecklist, ifuProblem, type ChecklistFix, type ChecklistRow } from '@/lib/settings-checks';
 import { canManageOrg } from '@/lib/permissions';
 import { usePermissions } from '@/lib/use-permissions';
 import posthog from 'posthog-js';
@@ -16,6 +19,7 @@ import {
   fetchPaymentSettings, upsertPaymentSettings,
   DEFAULT_PAYMENT_SETTINGS, type PaymentSettings,
 } from '@/lib/api/payment-settings';
+import { PISPI_COUNTRIES, aliasProblem, type PispiCountry } from '@/lib/online-payments';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import { sellerIssues, type SellerInfo } from '@/lib/invoice-compliance';
 import { issuedThisMonth } from '@/lib/invoice-limit';
@@ -30,7 +34,7 @@ const TABS: { key: SettingsTab; icon: string; label: string }[] = [
   { key: 'invoicing',     icon: 'file-invoice',    label: 'Préférences facture'  },
   { key: 'reminders',     icon: 'bell',            label: 'Relances'             },
   { key: 'payments',      icon: 'credit-card',     label: 'Moyens de paiement'   },
-  { key: 'providers',     icon: 'plug-connected',  label: 'Prestataires'         },
+  { key: 'providers',     icon: 'plug-connected',  label: 'Paiements en ligne'   },
   { key: 'notifications', icon: 'bell',            label: 'Notifications'        },
   { key: 'team',          icon: 'users',           label: 'Équipe'               },
   { key: 'plan',          icon: 'sparkles',        label: 'Plan & facturation'   },
@@ -233,8 +237,29 @@ function ComplianceChecklist({ seller, orgId }: { seller: SellerInfo; orgId: str
   );
 }
 
-function BusinessSection() {
+/** A section whose values couldn't be read: its fields stay disabled until a retry works. */
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="s-load-failed">
+      <span>Ces informations n’ont pas pu être chargées : impossible de les modifier pour l’instant.</span>
+      <button type="button" className="btn btn-sm" onClick={onRetry}>Réessayer</button>
+    </div>
+  );
+}
+
+interface BizFields {
+  name: string; ifu: string; rccm: string; taxRegime: string; divisionFiscale: string; cadastralRef: string;
+  businessCreationDate: string; address: string; city: string; country: string; currency: string; email: string; phone: string;
+}
+
+/**
+ * `onDraft`: the seller as typed, for the DGI checklist beside the form (new
+ * interface); there the page's save bar replaces the card's button.
+ */
+function BusinessSection({ onDraft }: { onDraft?: (seller: SellerInfo) => void } = {}) {
   const { orgId, showToast, setOrgSettings } = useApp();
+  const [snapshot, setSnapshot] = useState<BizFields | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const [name,     setName]    = useState('');
   const [ifu,             setIfu]            = useState('');
@@ -251,6 +276,9 @@ function BusinessSection() {
   const [phone,    setPhone]   = useState('');
   const [loading,  setLoading] = useState(true);
   const [saving,   setSaving]  = useState(false);
+  // Not loaded: the form stays disabled (edits couldn't be saved or tracked) until a retry works
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt,    setAttempt]    = useState(0);
 
   useEffect(() => {
     if (!orgId) return;
@@ -260,44 +288,68 @@ function BusinessSection() {
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
-        if (error) { console.warn('[settings] org fetch:', error.message); setLoading(false); return; }
-        if (!data) return;
-        setName(data.name     ?? '');
-        setIfu(data.ifu               ?? '');
-        setRccm(data.rccm             ?? '');
-        setTaxRegime(data.tax_regime             ?? '');
-        setDivisionFiscale(data.division_fiscale ?? '');
-        setCadastralRef(formatCadastralRef(data.cadastral_ref));
-        setBusinessCreationDate(data.business_creation_date ?? '');
-        setAddress(data.address ?? '');
-        setCity(data.city     ?? '');
-        setCountry(data.country  ?? 'Burkina Faso');
-        setCurrency(data.currency ?? 'F CFA');
-        setEmail(data.email   ?? '');
-        setPhone(data.phone   ?? '');
+        if (error || !data) { console.warn('[settings] org fetch:', error?.message ?? 'no row'); setLoadFailed(true); return; }
+        const loaded: BizFields = {
+          name: data.name ?? '', ifu: data.ifu ?? '', rccm: data.rccm ?? '',
+          taxRegime: data.tax_regime ?? '', divisionFiscale: data.division_fiscale ?? '',
+          cadastralRef: formatCadastralRef(data.cadastral_ref), businessCreationDate: data.business_creation_date ?? '',
+          address: data.address ?? '', city: data.city ?? '', country: data.country ?? 'Burkina Faso',
+          currency: data.currency ?? 'F CFA', email: data.email ?? '', phone: data.phone ?? '',
+        };
+        apply(loaded);
+        setSnapshot(loaded);
         setLoading(false);
       });
-  }, [orgId]);
+  }, [orgId, attempt]);
 
-  async function handleSave() {
-    if (!orgId) return;
+  function apply(f: BizFields) {
+    setName(f.name); setIfu(f.ifu); setRccm(f.rccm); setTaxRegime(f.taxRegime); setDivisionFiscale(f.divisionFiscale);
+    setCadastralRef(f.cadastralRef); setBusinessCreationDate(f.businessCreationDate); setAddress(f.address);
+    setCity(f.city); setCountry(f.country); setCurrency(f.currency); setEmail(f.email); setPhone(f.phone);
+  }
+
+  const current: BizFields = { name, ifu, rccm, taxRegime, divisionFiscale, cadastralRef, businessCreationDate, address, city, country, currency, email, phone };
+  const dirty = snapshot !== null && (Object.keys(current) as (keyof BizFields)[]).some(k => current[k] !== snapshot[k]);
+  const ifuError = ifuProblem(country, ifu);
+  const cadastralError = cadastralProblem(cadastralRef);
+  // An error shows once the field is left, or straight away on a value already saved
+  const showIfuError = !!ifuError && (touched.ifu || ifu === snapshot?.ifu);
+  const showCadastralError = !!cadastralError && (touched.cadastre || cadastralRef === snapshot?.cadastralRef);
+
+  async function handleSave(): Promise<boolean> {
+    if (!orgId) return false;
     const cadastral = cadastralRef.trim() ? parseCadastralRef(cadastralRef) : '';
-    if (cadastral === null) { showToast('Référence cadastrale : 11 chiffres (section, îlot, parcelle), ex. 0123 456 7890.', true); return; }
+    if (cadastral === null) { showToast('Référence cadastrale : 11 chiffres (section, îlot, parcelle), ex. 0123 456 7890.', true); return false; }
     setSaving(true);
     const { error } = await supabase
       .from('organizations')
       .update({ name, ifu, rccm, tax_regime: taxRegime, division_fiscale: divisionFiscale, cadastral_ref: cadastral || null, business_creation_date: businessCreationDate || null, address, city, country, currency, email, phone })
       .eq('id', orgId);
     setSaving(false);
-    if (error) { showToast(error.message, true); return; }
+    if (error) { showToast(error.message, true); return false; }
     setOrgSettings(prev => ({ ...prev, name, ifu, rccm, taxRegime, divisionFiscale, cadastralRef: cadastral, businessCreationDate, address, city, country, email, phone }));
+    const saved = { ...current, cadastralRef: formatCadastralRef(cadastral) };
+    // Shown as « SSSS LLL PPPP », unless it was changed again while saving
+    const submitted = cadastralRef;
+    setCadastralRef(v => (v === submitted ? saved.cadastralRef : v));
+    setSnapshot(saved);
+    setTouched({});
     posthog.capture('settings_saved', { section: 'business' });
     showToast('Entreprise enregistrée');
+    return true;
   }
+
+  const inBar = useSaveBar(
+    { dirty, problem: ifuError ?? cadastralError, saving },
+    { save: handleSave, reset: () => { if (snapshot) { apply(snapshot); setTouched({}); } } },
+  );
+  useEffect(() => {
+    if (!loading) onDraft?.({ name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef });
+  }, [onDraft, loading, name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef]);
 
   return (
     <>
-    {!loading && (
+    {!loading && !inBar && (
       <ComplianceChecklist
         seller={{ name, address, city, country, ifu, rccm, taxRegime, divisionFiscale, cadastralRef }}
         orgId={orgId}
@@ -309,24 +361,27 @@ function BusinessSection() {
         <div className="s-card-desc">Affichées sur chaque facture et devis que vous envoyez.</div>
       </div>
       <div className="s-card-body">
+        {loadFailed && <LoadFailed onRetry={() => { setLoadFailed(false); setAttempt(a => a + 1); }} />}
         <div className="s-field">
-          <label className="s-label">Raison sociale</label>
-          <input className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={loading} />
+          <label className="s-label" htmlFor={FIELD_IDS.name}>Raison sociale</label>
+          <input id={FIELD_IDS.name} className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={loading} />
         </div>
         <div className="s-field-row">
           <div className="s-field">
-            <label className="s-label">{getFiscalIdLabel(country)}</label>
-            <input className="form-input" value={ifu} onChange={e => setIfu(e.target.value)} disabled={loading} placeholder="00012345 B" />
+            <label className="s-label" htmlFor={FIELD_IDS.ifu}>{getFiscalIdLabel(country)}</label>
+            <input id={FIELD_IDS.ifu} className="form-input" value={ifu} onChange={e => setIfu(e.target.value)} onBlur={() => setTouched(t => ({ ...t, ifu: true }))} disabled={loading} placeholder="00012345 B"
+              aria-invalid={showIfuError || undefined} aria-describedby={showIfuError ? 'set-ifu-error' : undefined} />
+            {showIfuError && <div id="set-ifu-error" className="s-field-error">{ifuError}</div>}
           </div>
           <div className="s-field">
-            <label className="s-label">RCCM</label>
-            <input className="form-input" value={rccm} onChange={e => setRccm(e.target.value)} disabled={loading} placeholder="BF-OUA-2021-B-1234" />
+            <label className="s-label" htmlFor={FIELD_IDS.rccm}>RCCM</label>
+            <input id={FIELD_IDS.rccm} className="form-input" value={rccm} onChange={e => setRccm(e.target.value)} disabled={loading} placeholder="BF-OUA-2021-B-1234" />
           </div>
         </div>
         <div className="s-field-row">
           <div className="s-field">
-            <label className="s-label">Régime fiscal</label>
-            <select className="form-input" value={taxRegime} onChange={e => setTaxRegime(e.target.value)} disabled={loading}>
+            <label className="s-label" htmlFor={FIELD_IDS.regime}>Régime fiscal</label>
+            <select id={FIELD_IDS.regime} className="form-input" value={taxRegime} onChange={e => setTaxRegime(e.target.value)} disabled={loading}>
               <option value="">— Sélectionner —</option>
               <option value="RNI">RNI — Régime normal d'imposition (CA ≥ 50M F CFA)</option>
               <option value="RSI">RSI — Régime simplifié d'imposition (CA 15–50M F CFA)</option>
@@ -334,16 +389,19 @@ function BusinessSection() {
             </select>
           </div>
           <div className="s-field">
-            <label className="s-label">Division fiscale</label>
-            <input className="form-input" value={divisionFiscale} onChange={e => setDivisionFiscale(e.target.value)} disabled={loading} placeholder="ex. Ouagadougou I" />
+            <label className="s-label" htmlFor={FIELD_IDS.division}>Division fiscale</label>
+            <input id={FIELD_IDS.division} className="form-input" value={divisionFiscale} onChange={e => setDivisionFiscale(e.target.value)} disabled={loading} placeholder="ex. Ouagadougou I" />
           </div>
         </div>
         <div className="s-field">
-          <label className="s-label">Référence cadastrale du lieu de vente</label>
-          <input className="form-input" value={cadastralRef} onChange={e => setCadastralRef(e.target.value)} disabled={loading} placeholder="Section, îlot, parcelle : 0123 456 7890" inputMode="numeric" />
-          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-            Mention obligatoire sur les factures (11 chiffres : section 4, îlot 3, parcelle 4).
-          </div>
+          <label className="s-label" htmlFor={FIELD_IDS.cadastre}>Référence cadastrale du lieu de vente</label>
+          <input id={FIELD_IDS.cadastre} className="form-input" value={cadastralRef} onChange={e => setCadastralRef(e.target.value)} onBlur={() => setTouched(t => ({ ...t, cadastre: true }))} disabled={loading} placeholder="Section, îlot, parcelle : 0123 456 7890" inputMode="numeric"
+            aria-invalid={showCadastralError || undefined} aria-describedby={showCadastralError ? 'set-cadastre-error' : 'set-cadastre-hint'} />
+          {showCadastralError
+            ? <div id="set-cadastre-error" className="s-field-error">{cadastralError}</div>
+            : <div id="set-cadastre-hint" style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+                Mention obligatoire sur les factures, au format SSSS LLL PPPP (section 4 chiffres, îlot 3, parcelle 4).
+              </div>}
         </div>
         <div className="s-field">
           <label className="s-label">Date de création de l'entreprise</label>
@@ -353,8 +411,8 @@ function BusinessSection() {
           </div>
         </div>
         <div className="s-field">
-          <label className="s-label">Adresse</label>
-          <input className="form-input" value={address} onChange={e => setAddress(e.target.value)} disabled={loading} placeholder="Av. Kwame Nkrumah, Immeuble Baobab" />
+          <label className="s-label" htmlFor={FIELD_IDS.address}>Adresse</label>
+          <input id={FIELD_IDS.address} className="form-input" value={address} onChange={e => setAddress(e.target.value)} disabled={loading} placeholder="Av. Kwame Nkrumah, Immeuble Baobab" />
         </div>
         <div className="s-field-row">
           <div className="s-field">
@@ -385,11 +443,13 @@ function BusinessSection() {
           </div>
         </div>
       </div>
-      <div className="s-card-foot">
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-          {saving ? 'Enregistrement…' : 'Enregistrer'}
-        </button>
-      </div>
+      {!inBar && (
+        <div className="s-card-foot">
+          <button className="btn btn-primary" onClick={() => void handleSave()} disabled={saving || loading}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      )}
     </div>
     </>
   );
@@ -398,8 +458,11 @@ function BusinessSection() {
 const TERMS_OPTIONS = ['À réception', 'Net 7 jours', 'Net 14 jours', 'Net 30 jours'];
 
 /* ─── Invoicing ─────────────────────────────────────────────────── */
+interface InvoicingFields { prefix: string; nextNum: string; terms: string; deliveryTerms: string; taxRate: number; footer: string }
+
 function InvoicingSection() {
   const { orgId, showToast, setOrgSettings } = useApp();
+  const [snapshot, setSnapshot] = useState<InvoicingFields | null>(null);
 
   const [prefix,        setPrefix]        = useState('INV-');
   const [nextNum,       setNextNum]        = useState('0001');
@@ -409,6 +472,8 @@ function InvoicingSection() {
   const [footer,        setFooter]        = useState('');
   const [loading,       setLoading]       = useState(true);
   const [saving,        setSaving]        = useState(false);
+  const [loadFailed,    setLoadFailed]    = useState(false);
+  const [attempt,       setAttempt]       = useState(0);
 
   const [autoReminders, setAutoReminders] = useState(true);
   const [attachPdf,     setAttachPdf]     = useState(true);
@@ -422,31 +487,44 @@ function InvoicingSection() {
       .eq('id', orgId)
       .single()
       .then(({ data, error }) => {
-        if (error) { console.warn('[settings] invoicing fetch:', error.message); setLoading(false); return; }
-        if (!data) return;
-        setPrefix(data.inv_prefix          ?? 'INV-');
-        setNextNum(data.inv_next_number    ?? '0001');
-        setTerms(data.payment_terms        ?? 'Net 14 jours');
-        setDeliveryTerms(data.delivery_terms ?? 'À convenir');
-        setTaxRate(Number(data.default_tax_rate ?? 18));
-        setFooter(data.invoice_footer      ?? '');
+        if (error || !data) { console.warn('[settings] invoicing fetch:', error?.message ?? 'no row'); setLoadFailed(true); return; }
+        const loaded = {
+          prefix: data.inv_prefix ?? 'INV-', nextNum: data.inv_next_number ?? '0001',
+          terms: data.payment_terms ?? 'Net 14 jours', deliveryTerms: data.delivery_terms ?? 'À convenir',
+          taxRate: Number(data.default_tax_rate ?? 18), footer: data.invoice_footer ?? '',
+        };
+        applyInvoicing(loaded);
+        setSnapshot(loaded);
         setLoading(false);
       });
-  }, [orgId]);
+  }, [orgId, attempt]);
 
-  async function handleSave() {
-    if (!orgId) return;
+  function applyInvoicing(f: InvoicingFields) {
+    setPrefix(f.prefix); setNextNum(f.nextNum); setTerms(f.terms); setDeliveryTerms(f.deliveryTerms); setTaxRate(f.taxRate); setFooter(f.footer);
+  }
+  const current: InvoicingFields = { prefix, nextNum, terms, deliveryTerms, taxRate, footer };
+  const dirty = snapshot !== null && (Object.keys(current) as (keyof InvoicingFields)[]).some(k => current[k] !== snapshot[k]);
+
+  async function handleSave(): Promise<boolean> {
+    if (!orgId) return false;
     setSaving(true);
     const { error } = await supabase
       .from('organizations')
       .update({ inv_prefix: prefix, inv_next_number: nextNum, payment_terms: terms, delivery_terms: deliveryTerms, default_tax_rate: taxRate, invoice_footer: footer })
       .eq('id', orgId);
     setSaving(false);
-    if (error) { showToast(error.message, true); return; }
+    if (error) { showToast(error.message, true); return false; }
     setOrgSettings(prev => ({ ...prev, paymentTerms: terms, deliveryTerms }));
+    setSnapshot(current);
     posthog.capture('settings_saved', { section: 'invoicing' });
     showToast('Paramètres de facturation enregistrés');
+    return true;
   }
+
+  const inBar = useSaveBar(
+    { dirty, problem: null, saving },
+    { save: handleSave, reset: () => { if (snapshot) applyInvoicing(snapshot); } },
+  );
 
   return (
     <>
@@ -456,6 +534,7 @@ function InvoicingSection() {
           <div className="s-card-desc">Pré-remplis sur chaque nouvelle facture. Vous pouvez les modifier par facture.</div>
         </div>
         <div className="s-card-body">
+          {loadFailed && <LoadFailed onRetry={() => { setLoadFailed(false); setAttempt(a => a + 1); }} />}
           <div className="s-field-row">
             <div className="s-field">
               <label className="s-label">Préfixe numéro</label>
@@ -493,13 +572,16 @@ function InvoicingSection() {
             <textarea className="form-input" rows={2} value={footer} onChange={e => setFooter(e.target.value)} disabled={loading} />
           </div>
         </div>
-        <div className="s-card-foot">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-            {saving ? 'Enregistrement…' : 'Enregistrer'}
-          </button>
-        </div>
+        {!inBar && (
+          <div className="s-card-foot">
+            <button className="btn btn-primary" onClick={() => void handleSave()} disabled={saving || loading}>
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
       </div>
-      <div className="s-card">
+      {/* New interface: in « Automatisation », where these settings will be saved */}
+      {!inBar && <div className="s-card">
         <div className="s-card-head"><div className="s-card-title">Automatisation</div></div>
         <div className="s-card-body">
           <div className="s-row">
@@ -530,7 +612,7 @@ function InvoicingSection() {
             <div className="s-row-aside"><Toggle on={lateFees} onChange={setLateFees} /></div>
           </div>
         </div>
-      </div>
+      </div>}
     </>
   );
 }
@@ -633,432 +715,89 @@ function PaymentMethodsSection({ onSave }: { onSave: () => void }) {
   );
 }
 
-/* ─── Providers ─────────────────────────────────────────────────── */
-
-type ConnectTarget = 'paystack' | 'pawapay' | null;
-
-// BF-centric bank list for Paystack settlement
-const BF_BANKS = [
-  { code: 'ecobank',  label: 'Ecobank Burkina'           },
-  { code: 'biciab',   label: 'BICIAB'                    },
-  { code: 'boa',      label: 'Bank of Africa (BOA)'      },
-  { code: 'coris',    label: 'Coris Bank International'  },
-  { code: 'sgbf',     label: 'Société Générale BF'       },
-  { code: 'uba',      label: 'UBA Burkina'               },
-  { code: 'bsic',     label: 'BSIC Burkina'              },
-];
-
-const PAWAPAY_CORRESPONDENTS: Record<string, { label: string; country: string }[]> = {
-  BFA: [
-    { label: 'MTN MoMo',    country: 'MTN_MOMO_BFA'    },
-    { label: 'Orange Money', country: 'ORANGE_MONEY_BFA'},
-    { label: 'Moov Money',  country: 'MOOV_MONEY_BFA'  },
-  ],
-  CIV: [
-    { label: 'MTN MoMo',    country: 'MTN_MOMO_CIV'    },
-    { label: 'Orange Money', country: 'ORANGE_MONEY_CIV'},
-    { label: 'Wave',         country: 'WAVE_MONEY_CIV'  },
-  ],
-  SEN: [
-    { label: 'Orange Money', country: 'ORANGE_MONEY_SEN'},
-    { label: 'Wave',         country: 'WAVE_MONEY_SEN'  },
-    { label: 'Free Money',   country: 'FREE_MONEY_SEN'  },
-  ],
-  GHA: [
-    { label: 'MTN MoMo',    country: 'MTN_MOMO_GHA'    },
-    { label: 'AirtelTigo',  country: 'AIRTELTIGO_MONEY_GHA' },
-  ],
-};
-
-const CHECKOUT_METHODS: { label: string; icon: string; cls: string; sub: string; feePaystack: string; feePawapay: string | null; key: keyof PaymentSettings }[] = [
-  { label: 'Mobile Money', icon: 'device-mobile', cls: 'pv-mi-momo', sub: 'MTN · Orange · Moov',    feePaystack: '1,5 %',       feePawapay: '1,0 %',  key: 'checkoutMomoEnabled' },
-  { label: 'Wave',         icon: 'wave',          cls: 'pv-mi-wave', sub: 'QR & lien deep-link',     feePaystack: '1,0 %',       feePawapay: '0,8 %',  key: 'checkoutWaveEnabled' },
-  { label: 'Carte',        icon: 'credit-card',   cls: 'pv-mi-card', sub: 'Visa · Mastercard · 3DS', feePaystack: '2,9 % + 100', feePawapay: null,      key: 'checkoutCardEnabled' },
-  { label: 'Virement',     icon: 'building-bank', cls: 'pv-mi-bank', sub: 'Pay-with-transfer',       feePaystack: '0,5 %',       feePawapay: null,      key: 'checkoutBankEnabled' },
-];
-
-const STATUS_BADGE: Record<string, { label: string; icon: string; cls: string }> = {
-  pending:   { label: 'Vérification en cours', icon: 'clock-pause',   cls: 'pv-badge-pending'  },
-  active:    { label: 'Actif',                  icon: 'circle-check',  cls: 'pv-badge-active'   },
-  suspended: { label: 'Suspendu',               icon: 'alert-triangle',cls: 'pv-badge-suspended'},
-};
-
-function ProvidersSection({ onSave }: { onSave: () => void }) {
+/* ─── Paiements en ligne (PRO-189) ─────────────────────────────── */
+// One switch, and the business's PI-SPI alias. How a payment is confirmed (on the alias, or by Billio through its
+// payment gateway) is Billio's decision (paygate_status), not shown here.
+function OnlinePaymentsSection({ onSave }: { onSave: () => void }) {
   const { orgId, showToast } = useApp();
-  const [settings,      setSettings]      = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
-  const [loading,       setLoading]       = useState(true);
-  const [saving,        setSaving]        = useState(false);
-  const [connectTarget, setConnectTarget] = useState<ConnectTarget>(null);
-
-  // Paystack settlement form
-  const [psBusinessName,   setPsBusinessName]   = useState('');
-  const [psBank,           setPsBank]           = useState('');
-  const [psAccountNumber,  setPsAccountNumber]  = useState('');
-
-  // PawaPay settlement form
-  const [ppCountry,        setPpCountry]        = useState('BFA');
-  const [ppCorrespondent,  setPpCorrespondent]  = useState('');
-  const [ppPhone,          setPpPhone]          = useState('');
+  const [settings, setSettings] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
     fetchPaymentSettings(orgId)
       .then(s => { setSettings(s); setLoading(false); })
-      .catch(err => { console.error('[Providers] fetch:', err); setLoading(false); });
+      .catch(err => { console.error('[OnlinePayments] fetch:', err); setLoading(false); });
   }, [orgId]);
 
-  function patchLocal<K extends keyof PaymentSettings>(key: K, value: PaymentSettings[K]) {
-    setSettings(prev => ({ ...prev, [key]: value }));
-  }
+  const patch = <K extends keyof PaymentSettings>(key: K, value: PaymentSettings[K]) => setSettings(prev => ({ ...prev, [key]: value }));
+  const enabled = settings.onlineMode !== 'off';
+  const aliasError = enabled ? aliasProblem(settings.pispiAlias) : null;
 
-  async function persist(patch: Partial<PaymentSettings>) {
+  async function handleSave() {
     if (!orgId) return;
+    setTouched(true);
+    if (aliasError) { showToast(aliasError, true); return; }
     setSaving(true);
     try {
-      await upsertPaymentSettings(orgId, patch);
-      setSettings(prev => ({ ...prev, ...patch }));
+      await upsertPaymentSettings(orgId, { onlineMode: settings.onlineMode, pispiAlias: settings.pispiAlias.trim().toLowerCase(), pispiCountry: settings.pispiCountry });
+      posthog.capture('settings_saved', { section: 'online_payments', enabled });
+      showToast(enabled ? 'Paiement en ligne activé' : 'Paiement en ligne désactivé');
       onSave();
     } catch (err) {
-      console.error('[Providers] save:', err);
+      console.error('[OnlinePayments] save:', err);
       showToast('Erreur lors de l\'enregistrement', true);
     } finally {
       setSaving(false);
     }
   }
 
-  function openConnect(target: 'paystack' | 'pawapay') {
-    // Pre-fill from existing settings if already set
-    if (target === 'paystack') {
-      setPsBusinessName(settings.paystackBusinessName);
-      setPsBank(settings.paystackSettlementBank);
-      setPsAccountNumber(settings.paystackAccountNumber);
-    } else {
-      setPpCountry(settings.pawapayCountry || 'BFA');
-      setPpCorrespondent(settings.pawapayCorrespondent);
-      setPpPhone(settings.pawapayPhone);
-    }
-    setConnectTarget(target);
-  }
-
-  async function handleSubmitConnect() {
-    if (!connectTarget) return;
-    if (connectTarget === 'paystack') {
-      if (!psBusinessName.trim() || !psBank || !psAccountNumber.trim()) {
-        showToast('Remplissez tous les champs de règlement', true); return;
-      }
-      await persist({
-        activeProvider:         'paystack',
-        providerStatus:         'pending',
-        paystackBusinessName:   psBusinessName.trim(),
-        paystackSettlementBank: psBank,
-        paystackAccountNumber:  psAccountNumber.trim(),
-      });
-    } else {
-      if (!ppCountry || !ppCorrespondent || !ppPhone.trim()) {
-        showToast('Remplissez tous les champs de règlement', true); return;
-      }
-      await persist({
-        activeProvider:      'pawapay',
-        providerStatus:      'pending',
-        pawapayCountry:      ppCountry,
-        pawapayCorrespondent: ppCorrespondent,
-        pawapayPhone:        ppPhone.trim(),
-      });
-    }
-    showToast('Demande envoyée — activation sous 24 h');
-    setConnectTarget(null);
-  }
-
-  async function handleDisconnect() {
-    await persist({ activeProvider: null, providerStatus: 'pending' });
-    showToast('Prestataire déconnecté');
-  }
-
-  async function handleSaveMethods() {
-    await persist({
-      checkoutMomoEnabled: settings.checkoutMomoEnabled,
-      checkoutWaveEnabled: settings.checkoutWaveEnabled,
-      checkoutCardEnabled: settings.checkoutCardEnabled,
-      checkoutBankEnabled: settings.checkoutBankEnabled,
-    });
-    showToast('Méthodes enregistrées');
-  }
-
-  async function handleToggleReconcile(value: boolean) {
-    patchLocal('autoReconcile', value);
-    await persist({ autoReconcile: value });
-  }
-
-  const provider      = settings.activeProvider;
-  const isPaystack    = provider === 'paystack';
-  const providerLabel = isPaystack ? 'Paystack' : 'PawaPay';
-  const statusMeta    = STATUS_BADGE[settings.providerStatus] ?? STATUS_BADGE.pending;
-  const visibleMethods = CHECKOUT_METHODS.filter(m => isPaystack || m.feePawapay !== null);
-
-  // Sub-account summary line shown in the connected card
-  const connectedMeta = provider
-    ? isPaystack
-      ? `${settings.paystackBusinessName || '—'} · ${(BF_BANKS.find(b => b.code === settings.paystackSettlementBank)?.label ?? settings.paystackSettlementBank) || '—'} ••${settings.paystackAccountNumber.slice(-3) || '?'}`
-      : `${settings.pawapayPhone || '—'} · ${settings.pawapayCorrespondent || '—'} · ${settings.pawapayCountry || '—'}`
-    : '';
-
   return (
-    <>
-      {/* ── Status card (when a provider is set) ── */}
-      {provider && !connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
-            <div>
-              <div className="s-card-title">Prestataire de paiement</div>
-              <div className="s-card-desc">Billio collecte les paiements via votre sous-compte — aucune clé API à gérer.</div>
-            </div>
-            <div className="pv-mode">
-              <button className={'pv-mode-opt' + (settings.providerMode === 'test' ? ' active' : '')}
-                onClick={() => persist({ providerMode: 'test' })}>Test</button>
-              <button className={'pv-mode-opt' + (settings.providerMode === 'live' ? ' active' : '')}
-                onClick={() => persist({ providerMode: 'live' })}>Live</button>
-            </div>
+    <div className="s-card">
+      <div className="s-card-head">
+        <div className="s-card-title">Paiements en ligne</div>
+        <div className="s-card-desc">Vos clients paient par PI-SPI en scannant le QR code de la facture.</div>
+      </div>
+      <div className="s-card-body">
+        <div className="s-row">
+          <div className="s-row-ico"><Icon name="qrcode" size={17} /></div>
+          <div className="s-row-main">
+            <div className="s-row-title" id="online-toggle">Paiement en ligne</div>
+            <div className="s-row-sub">{enabled ? 'Activé sur vos factures émises.' : 'Désactivé.'}</div>
           </div>
-          <div className="s-card-body">
-            <div className="pv-connected-head">
-              <div className={`pv-logo ${isPaystack ? 'pv-paystack' : 'pv-pawapay'}`}>
-                {isPaystack ? 'P' : 'PP'}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="pv-conn-name">
-                  {providerLabel}
-                  <span className={`pv-conn-badge ${statusMeta.cls}`}>
-                    <Icon name={statusMeta.icon} size={12} /> {statusMeta.label}
-                  </span>
-                </div>
-                <div className="pv-conn-meta">{connectedMeta}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-sm" onClick={() => openConnect(provider)} disabled={saving}>
-                  Modifier
-                </button>
-                <button className="btn btn-sm" onClick={handleDisconnect} disabled={saving}>
-                  Déconnecter
-                </button>
-              </div>
-            </div>
-
-            {settings.providerStatus === 'pending' && (
-              <div className="pv-notice pv-notice-pending">
-                <Icon name="clock-pause" size={15} />
-                <span>Votre sous-compte est en cours de vérification. Vous recevrez un email sous 24 h à l'activation.</span>
-              </div>
-            )}
-            {settings.providerStatus === 'suspended' && (
-              <div className="pv-notice pv-notice-suspended">
-                <Icon name="alert-triangle" size={15} />
-                <span>Ce sous-compte a été suspendu. Contactez le support pour rétablir l'accès.</span>
-              </div>
-            )}
+          <div className="s-row-aside" aria-labelledby="online-toggle">
+            <Toggle on={enabled} onChange={v => { patch('onlineMode', v ? 'alias' : 'off'); if (!v) setTouched(false); }} />
           </div>
         </div>
-      )}
 
-      {/* ── No provider — show picker ── */}
-      {!provider && !connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">Prestataires de paiement</div>
-            <div className="s-card-desc">Billio crée un sous-compte en votre nom — vos règlements arrivent directement sur votre compte bancaire ou mobile.</div>
-          </div>
-          <div className="s-card-body">
-            {loading ? (
-              <div style={{ color: 'var(--color-text-tertiary)', padding: '8px 0' }}>Chargement…</div>
-            ) : (
-              <div className="pv-avail-grid">
-                <div className="pv-avail-card pv-avail-card--featured">
-                  <div className="pv-logo pv-paystack">P</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="pv-avail-name">Paystack</div>
-                    <div className="pv-avail-sub">MoMo · Wave · carte · virement — règlement J+1</div>
-                  </div>
-                  <button className="btn btn-primary btn-sm" onClick={() => openConnect('paystack')}>Activer</button>
-                </div>
-                <div className="pv-avail-card">
-                  <div className="pv-logo pv-pawapay">PP</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="pv-avail-name">PawaPay</div>
-                    <div className="pv-avail-sub">MoMo · Wave — agrégateur Afrique subsaharienne</div>
-                  </div>
-                  <button className="btn btn-sm" onClick={() => openConnect('pawapay')}>Activer</button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Connect / edit form ── */}
-      {connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">
-              {provider === connectTarget ? 'Modifier le compte de règlement' : `Activer ${connectTarget === 'paystack' ? 'Paystack' : 'PawaPay'}`}
+        {enabled && (
+          <div className="s-row">
+            <div className="s-row-ico"><Icon name="building-bank" size={17} /></div>
+            <div className="s-row-main">
+              <label className="s-row-title" htmlFor="pispi-alias">Alias PI-SPI</label>
+              <div className="s-row-sub">Identifiant de votre compte, fourni par votre banque.</div>
+              {touched && aliasError && <div className="s-field-error" role="alert">{aliasError}</div>}
             </div>
-            <div className="s-card-desc">
-              {connectTarget === 'paystack'
-                ? 'Billio crée un sous-compte Paystack lié à votre banque. Vos règlements arrivent directement sur ce compte sous 24 h.'
-                : 'Billio enregistre votre numéro de règlement auprès de PawaPay. Les fonds sont versés sur ce mobile money après chaque transaction.'}
+            <div className="s-row-aside">
+              <input id="pispi-alias" className="form-input" style={{ width: 300 }} placeholder="3497a720-ab11-4973-9619-534e04f263a1" spellCheck={false}
+                value={settings.pispiAlias} disabled={loading} aria-invalid={touched && !!aliasError}
+                onChange={e => patch('pispiAlias', e.target.value)} onBlur={() => setTouched(true)} />
+              <select className="form-input" style={{ width: 150 }} aria-label="Pays du compte" value={settings.pispiCountry} disabled={loading}
+                onChange={e => patch('pispiCountry', e.target.value as PispiCountry)}>
+                {PISPI_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
             </div>
           </div>
-          <div className="s-card-body">
-            {connectTarget === 'paystack' ? (
-              <>
-                <div className="form-group">
-                  <label className="form-label">Nom de l'entreprise</label>
-                  <input className="form-input" placeholder="Studio Wend SARL"
-                    value={psBusinessName} onChange={e => setPsBusinessName(e.target.value)} />
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Banque de règlement</label>
-                    <select className="form-input" value={psBank} onChange={e => setPsBank(e.target.value)}>
-                      <option value="">Sélectionner…</option>
-                      {BF_BANKS.map(b => <option key={b.code} value={b.code}>{b.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Numéro de compte</label>
-                    <input className="form-input" placeholder="BF76 0001 2345 6789"
-                      value={psAccountNumber} onChange={e => setPsAccountNumber(e.target.value)} />
-                  </div>
-                </div>
-                <div className="pv-notice pv-notice-info">
-                  <Icon name="info-circle" size={15} />
-                  <span>Paystack vérifie le titulaire du compte automatiquement. Aucune clé API ne vous sera demandée.</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Pays</label>
-                    <select className="form-input" value={ppCountry}
-                      onChange={e => { setPpCountry(e.target.value); setPpCorrespondent(''); }}>
-                      <option value="BFA">Burkina Faso</option>
-                      <option value="CIV">Côte d'Ivoire</option>
-                      <option value="SEN">Sénégal</option>
-                      <option value="GHA">Ghana</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Opérateur mobile</label>
-                    <select className="form-input" value={ppCorrespondent} onChange={e => setPpCorrespondent(e.target.value)}>
-                      <option value="">Sélectionner…</option>
-                      {(PAWAPAY_CORRESPONDENTS[ppCountry] ?? []).map(c => (
-                        <option key={c.country} value={c.country}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Numéro de règlement</label>
-                  <input className="form-input" type="tel" placeholder="70 12 34 56"
-                    value={ppPhone} onChange={e => setPpPhone(e.target.value)} />
-                </div>
-                <div className="pv-notice pv-notice-info">
-                  <Icon name="info-circle" size={15} />
-                  <span>PawaPay versera les règlements sur ce numéro après chaque paiement client réussi.</span>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="s-card-foot" style={{ gap: 8 }}>
-            <button className="btn" onClick={() => setConnectTarget(null)} disabled={saving}>Annuler</button>
-            <button className="btn btn-primary" onClick={handleSubmitConnect} disabled={saving}>
-              {saving ? 'Envoi…' : 'Envoyer la demande'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Checkout methods (only when active) ── */}
-      {provider && settings.providerStatus === 'active' && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">Méthodes de paiement en ligne</div>
-            <div className="s-card-desc">Les méthodes activées s'affichent sur votre lien de paiement billio.app/pay. Les frais sont prélevés par {providerLabel}.</div>
-          </div>
-          <div className="s-card-body">
-            {visibleMethods.map(m => (
-              <div key={m.key} className="pv-method-row">
-                <div className={`pv-m-ico ${m.cls}`}><Icon name={m.icon} size={18} /></div>
-                <div className="pv-m-main">
-                  <div className="pv-m-title">{m.label}</div>
-                  <div className="pv-m-sub">{m.sub}</div>
-                </div>
-                <div className="pv-m-fee">{isPaystack ? m.feePaystack : m.feePawapay}</div>
-                <Toggle on={Boolean(settings[m.key])} onChange={v => patchLocal(m.key, v as PaymentSettings[typeof m.key])} />
-              </div>
-            ))}
-          </div>
-          <div className="s-card-foot">
-            <button className="btn btn-primary" onClick={handleSaveMethods} disabled={saving}>
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Auto-reconciliation (only when active) ── */}
-      {provider && settings.providerStatus === 'active' && (
-        <div className="s-card">
-          <div className="s-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
-            <div>
-              <div className="s-card-title">Rapprochement automatique</div>
-              <div className="s-card-desc">À chaque webhook de paiement reçu, Billio marque la facture correspondante comme payée.</div>
-            </div>
-            <Toggle on={settings.autoReconcile} onChange={handleToggleReconcile} />
-          </div>
-          <div className="s-card-body">
-            <div className="pv-flow">
-              <div className="pv-flow-step"><span className="pv-fs-ico"><Icon name="device-mobile" size={14} /></span>Client paie</div>
-              <Icon name="arrow-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="pv-flow-step"><span className="pv-fs-ico"><Icon name="bolt" size={14} /></span>Webhook</div>
-              <Icon name="arrow-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="pv-flow-step"><span className="pv-fs-ico"><Icon name="link" size={14} /></span>Correspondance</div>
-              <Icon name="arrow-right" size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="pv-flow-step pv-flow-paid"><span className="pv-fs-ico"><Icon name="check" size={14} /></span>Payée</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Switch provider (only when one is already connected) ── */}
-      {provider && !connectTarget && (
-        <div className="s-card">
-          <div className="s-card-head">
-            <div className="s-card-title">Changer de prestataire</div>
-            <div className="s-card-desc">Un seul prestataire actif à la fois. L'ancien sous-compte sera désactivé.</div>
-          </div>
-          <div className="s-card-body">
-            <div className="pv-avail-grid">
-              {([
-                { id: 'paystack' as const, name: 'Paystack', cls: 'pv-paystack', letter: 'P',  sub: 'MoMo · Wave · carte · virement' },
-                { id: 'pawapay' as const, name: 'PawaPay',  cls: 'pv-pawapay',  letter: 'PP', sub: 'MoMo · Wave — agrégateur Afrique' },
-              ] as const).map(p => (
-                <div key={p.id} className="pv-avail-card">
-                  <div className={`pv-logo ${p.cls}`}>{p.letter}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="pv-avail-name">{p.name}</div>
-                    <div className="pv-avail-sub">{p.sub}</div>
-                  </div>
-                  {provider === p.id
-                    ? <span className="pv-conn-badge pv-badge-active"><Icon name="circle-check" size={12} /> Actif</span>
-                    : <button className="btn btn-sm" onClick={() => openConnect(p.id)}>Passer à {p.name}</button>
-                  }
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+        )}
+      </div>
+      <div className="s-card-foot">
+        <button className="btn btn-primary" onClick={handleSave} disabled={loading || saving}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1701,7 +1440,7 @@ function PlanSection() {
 /* ─── Main component ────────────────────────────────────────────── */
 const ORG_TABS: SettingsTab[] = ['business', 'invoicing', 'payments', 'providers'];
 
-export default function SettingsPage() {
+function LegacySettingsPage() {
   const { showToast } = useApp();
   const { managesOrg } = usePermissions();
   // ?tab= opens a section directly (e.g. links from the invoice compliance warning)
@@ -1753,7 +1492,7 @@ export default function SettingsPage() {
               {tab === 'business'      && <BusinessSection />}
               {tab === 'invoicing'     && <InvoicingSection />}
               {tab === 'payments'      && <PaymentMethodsSection onSave={onSave} />}
-              {tab === 'providers'     && <ProvidersSection     onSave={onSave} />}
+              {tab === 'providers'     && <OnlinePaymentsSection onSave={onSave} />}
             </fieldset>
             {tab === 'team'          && <TeamSection />}
             {tab === 'plan'          && <PlanSection />}
@@ -1767,6 +1506,258 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
+    </Page>
+  );
+}
+
+export default function SettingsPage() {
+  return UI_V2 ? <SettingsPageV2 /> : <LegacySettingsPage />;
+}
+
+/* ─── New interface (PRO-171) ───────────────────────────────────── */
+type SectionV2 = 'business' | 'compliance' | 'invoicing' | 'payments' | 'providers' | 'team' | 'automation' | 'plan';
+
+const SECTIONS_V2: { key: SectionV2; icon: string; label: string }[] = [
+  { key: 'business',   icon: 'building',       label: 'Entreprise' },
+  { key: 'compliance', icon: 'shield-check',   label: 'Conformité DGI' },
+  { key: 'invoicing',  icon: 'file-invoice',   label: 'Facturation par défaut' },
+  { key: 'payments',   icon: 'credit-card',    label: 'Moyens de paiement' },
+  { key: 'providers',  icon: 'plug-connected', label: 'Paiements en ligne' },
+  { key: 'team',       icon: 'users',          label: 'Équipe et accès' },
+  { key: 'automation', icon: 'bell',           label: 'Automatisation' },
+  { key: 'plan',       icon: 'sparkles',       label: 'Abonnement' },
+];
+/** Sections whose fields the DGI checklist reads: it sits beside them */
+const WITH_CHECKLIST: SectionV2[] = ['business', 'invoicing', 'payments', 'providers'];
+const ORG_SECTIONS: SectionV2[] = ['business', 'invoicing', 'payments', 'providers'];
+
+/** Old ?tab= links (from the invoice editor and elsewhere) to the new sections. */
+function sectionFromParam(t: string | null): SectionV2 | 'profile' {
+  if (t === 'profile') return 'profile';
+  if (t === 'reminders' || t === 'notifications') return 'automation';
+  return SECTIONS_V2.some(s => s.key === t) ? (t as SectionV2) : 'business';
+}
+
+function DgiChecklist({ rows, onFix, large = false }: { rows: ChecklistRow[]; onFix: (fix: ChecklistFix) => void; large?: boolean }) {
+  const required = rows.filter(r => r.state !== 'auto' && r.state !== 'info');
+  const done = required.filter(r => r.state === 'ok').length;
+  const missing = checklistMissing(rows);
+  return (
+    <section className={`s2-check${large ? ' large' : ''}`} aria-labelledby="s2-check-title">
+      <div className="s2-check-head">
+        <h2 id="s2-check-title">Conformité DGI</h2>
+        <span className={`s2-count${missing ? ' warn' : ''}`}>{done} / {required.length}</span>
+      </div>
+      <p className="s2-check-intro">
+        {missing === 0
+          ? 'Vos factures portent toutes les mentions obligatoires de l’entreprise.'
+          : 'Il manque des mentions obligatoires : sans elles, vos clients professionnels risquent de ne pas pouvoir déduire la TVA.'}
+      </p>
+      <ul className="s2-check-list">
+        {rows.map(r => (
+          <li key={r.key} className={`s2-row ${r.state}`}>
+            <Icon name={r.state === 'ok' || r.state === 'auto' ? 'circle-check' : r.state === 'missing' ? 'alert-triangle' : 'dots'} size={16} ariaHidden />
+            <span className="s2-row-main">
+              {r.label}
+              <span className="sr-only">{r.state === 'ok' ? ' : renseigné' : r.state === 'auto' ? ' : automatique' : r.state === 'missing' ? ' : manquant' : ' : non vérifié'}</span>
+              {r.state === 'auto' && <small>Automatique</small>}
+              {r.state !== 'ok' && r.state !== 'auto' && r.hint && <small>{r.hint}</small>}
+            </span>
+            {(r.state === 'missing' || r.state === 'unknown') && r.fix && (
+              <button type="button" className="s2-fix" onClick={() => onFix(r.fix!)}>Corriger<span className="sr-only"> : {r.label}</span></button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="s2-secef">
+        <Icon name="shield-check" size={16} ariaHidden />
+        <span className="s2-row-main">
+          Facturation certifiée SECeF
+          <small>Pas encore active. Une fois vos factures certifiées, chacune portera le code et le QR SECeF. N’empêche pas d’émettre.</small>
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function SettingsPageV2() {
+  const { orgId, orgSettings, showToast } = useApp();
+  const { managesOrg } = usePermissions();
+  const [searchParams] = useSearchParams();
+  const initial = sectionFromParam(searchParams.get('tab'));
+  const [section, setSection] = useState<SectionV2>(initial === 'profile' ? 'business' : initial);
+  const [draft, setDraft] = useState<SellerInfo | null>(null);
+  const [payments, setPayments] = useState<PaymentSettings | null | undefined>(undefined);
+  const [bar, setBar] = useState<SaveBarState | null>(null);
+  const actionsRef = useRef<SaveBarActions | null>(null);
+  const [focusField, setFocusField] = useState<string | null>(null);
+
+  const loadPayments = useCallback(() => {
+    if (!orgId) return;
+    fetchPaymentSettings(orgId).then(setPayments, () => setPayments(null));
+  }, [orgId]);
+  useEffect(() => { loadPayments(); }, [loadPayments]);
+
+  const api = useMemo<SaveBarApi>(() => ({
+    report: (state, actions) => {
+      actionsRef.current = actions;
+      setBar(prev => (prev === null && state === null) || (prev && state && prev.dirty === state.dirty && prev.problem === state.problem && prev.saving === state.saving) ? prev : state);
+    },
+  }), []);
+  const dirty = !!bar?.dirty;
+
+  // Leaving with unsaved changes asks first, as in the invoice editor
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (window.confirm('Des modifications ne sont pas enregistrées. Quitter sans enregistrer ?')) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+  useEffect(() => {
+    if (!dirty) return;
+    const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]);
+
+  // The field a « Corriger » link points to, once its section is on screen
+  // (the section may still be loading, its fields disabled: tried again until they can take it)
+  useEffect(() => {
+    if (!focusField) return;
+    let tries = 0;
+    const tryFocus = () => {
+      const el = document.getElementById(focusField) as HTMLInputElement | null;
+      if (el && !el.disabled) {
+        el.scrollIntoView({ block: 'center' });
+        el.focus();
+        setFocusField(null);
+        return true;
+      }
+      return false;
+    };
+    if (tryFocus()) return;
+    const timer = window.setInterval(() => {
+      // Given up after 10 s (the section couldn't load)
+      if (tryFocus() || ++tries >= 100) { window.clearInterval(timer); if (tries >= 100) setFocusField(null); }
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [focusField, section]);
+
+  function go(next: SectionV2): boolean {
+    if (next === section) return true;
+    if (dirty) {
+      if (!window.confirm('Des modifications ne sont pas enregistrées. Les abandonner ?')) return false;
+      actionsRef.current?.reset();
+    }
+    setDraft(null);
+    setSection(next);
+    return true;
+  }
+
+  function fix(f: ChecklistFix) {
+    if (!go(f.tab)) return;
+    if (f.field) setFocusField(f.field);
+  }
+
+  async function save() {
+    if (!actionsRef.current || !bar || bar.problem) return;
+    await actionsRef.current.save();
+  }
+
+  const onPaymentsSaved = () => { showToast('Moyens de paiement enregistrés'); loadPayments(); };
+  const seller: SellerInfo = draft ?? {
+    name: orgSettings.name, address: orgSettings.address, city: orgSettings.city, country: orgSettings.country,
+    ifu: orgSettings.ifu, rccm: orgSettings.rccm, taxRegime: orgSettings.taxRegime, divisionFiscale: orgSettings.divisionFiscale,
+    cadastralRef: orgSettings.cadastralRef,
+  };
+  const rows = payments === undefined ? null : complianceChecklist(seller, payments);
+  const missingBusiness = rows ? rows.filter(r => r.state === 'missing' && r.fix?.tab === 'business').length : 0;
+  const missingPayments = rows ? rows.filter(r => r.state === 'missing' && r.fix?.tab === 'payments').length : 0;
+  const withChecklist = WITH_CHECKLIST.includes(section);
+
+  if (initial === 'profile') return <Navigate to="/profile" replace />;
+
+  return (
+    <Page title="Paramètres" subtitle={managesOrg ? 'Les informations de l’entreprise imprimées sur vos factures, et le fonctionnement de Billio.' : 'Seuls les administrateurs peuvent modifier ces paramètres.'}>
+      <SaveBarContext.Provider value={api}>
+        <div className={`s2-grid${withChecklist ? '' : ' no-aside'}`}>
+          <nav className="s2-nav" aria-label="Sections des paramètres">
+            {SECTIONS_V2.map(s => {
+              const n = s.key === 'business' || s.key === 'compliance' ? missingBusiness + (s.key === 'compliance' ? missingPayments : 0)
+                : s.key === 'payments' ? missingPayments : 0;
+              return (
+                <button key={s.key} type="button" className={`s2-nav-item${section === s.key ? ' active' : ''}`} aria-current={section === s.key ? 'page' : undefined} onClick={() => go(s.key)}>
+                  <Icon name={s.icon} size={16} ariaHidden />
+                  <span>{s.label}</span>
+                  {n > 0 && <span className="s2-nav-count" aria-label={`${n} à corriger`}>{n}</span>}
+                </button>
+              );
+            })}
+            <p className="s2-nav-note">Votre profil : depuis le menu du compte.</p>
+          </nav>
+
+          <div className="s2-main">
+            {ORG_SECTIONS.includes(section) && !managesOrg && (
+              <div className="s-card">
+                <div className="s-card-body" style={{ color: 'var(--color-text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Icon name="lock" size={16} ariaHidden />
+                  Seuls les administrateurs peuvent modifier ces paramètres.
+                </div>
+              </div>
+            )}
+            <fieldset disabled={!managesOrg} style={{ border: 0, margin: 0, padding: 0, minWidth: 0, display: 'contents' }}>
+              {section === 'business'  && <BusinessSection onDraft={setDraft} />}
+              {section === 'invoicing' && <InvoicingSection />}
+              {section === 'payments'  && <PaymentMethodsSection onSave={onPaymentsSaved} />}
+              {section === 'providers' && <OnlinePaymentsSection onSave={onPaymentsSaved} />}
+            </fieldset>
+            {section === 'compliance' && (rows
+              ? <DgiChecklist rows={rows} onFix={fix} large />
+              : <div className="s-card"><div className="s-card-body">Chargement…</div></div>)}
+            {section === 'team' && <TeamSection />}
+            {section === 'plan' && <PlanSection />}
+            {section === 'automation' && (
+              <div className="s-card">
+                <div className="s-card-head">
+                  <div className="s-card-title">Automatisation</div>
+                  <div className="s-card-desc">Relances automatiques, PDF joint aux e-mails, pénalités de retard, notifications.</div>
+                </div>
+                <div className="s-card-body" style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: '40px 20px' }}>
+                  <div style={{ fontWeight: 600 }}>Bientôt disponible</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {withChecklist && (
+            <aside className="s2-aside" aria-label="Conformité DGI">
+              {rows ? <DgiChecklist rows={rows} onFix={fix} /> : <div className="s2-check">Chargement…</div>}
+            </aside>
+          )}
+        </div>
+
+        {dirty && (
+          <div className="s2-savebar" role="region" aria-label="Modifications non enregistrées">
+            <span className="s2-savebar-dot" aria-hidden="true" />
+            <span className="s2-savebar-text">{bar?.problem ?? 'Modifications non enregistrées'}</span>
+            <button type="button" className="btn" onClick={() => actionsRef.current?.reset()} disabled={bar?.saving}>Annuler</button>
+            <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={bar?.saving || !!bar?.problem}>
+              {bar?.saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
+      </SaveBarContext.Provider>
+    </Page>
+  );
+}
+
+/** « Mon profil », from the account menu (new interface): every member's own details. */
+export function ProfilePage() {
+  return (
+    <Page title="Mon profil" subtitle="Vos informations personnelles, pour votre compte et le journal d’activité.">
+      <div style={{ maxWidth: 720 }}>
+        <ProfileSection />
+      </div>
     </Page>
   );
 }

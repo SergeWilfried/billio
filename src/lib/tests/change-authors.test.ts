@@ -15,7 +15,7 @@ describe('lastChangeLabel', () => {
 });
 
 describe('paymentAuthor', () => {
-  it('names who recorded it; online payments come from Paystack', () => {
+  it('names who recorded it; online payments come from Paygate', () => {
     expect(paymentAuthor({ source: 'manual', createdByName: 'Awa' })).toBe('Awa');
     expect(paymentAuthor({ source: 'online', createdByName: undefined })).toBe('En ligne');
     expect(paymentAuthor({ source: 'manual', createdByName: undefined })).toBe('Inconnu');

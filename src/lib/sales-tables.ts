@@ -32,6 +32,42 @@ export function invoiceRows(
   });
 }
 
+/** A row of the Factures table: an invoice, or a credit note on one (PRO-168). */
+export type DocRow = (InvoiceRow & { kind: 'invoice' }) | {
+  kind: 'credit';
+  /** Unique among the rows: credit note ids live apart from invoice ids */
+  key: string;
+  creditNote: CreditNote;
+  /** The invoice it credits, when it is in the list */
+  origin?: Invoice;
+  client: string;
+  issued: string;
+  ownerId?: string;
+  ownerName?: string;
+};
+
+/**
+ * Invoices and credit notes in one list. Each credit note sits just above the
+ * invoice it credits (newest first); one whose invoice isn't listed goes last.
+ * Drafts of either show too.
+ */
+export function docRows(invoiceRows: InvoiceRow[], credits: CreditNote[], invoices: Invoice[]): DocRow[] {
+  const byId = new Map(invoices.map(i => [i.id, i]));
+  const byInvoice = new Map<string, DocRow[]>();
+  for (const cn of [...credits].sort((a, b) => b.issued.localeCompare(a.issued))) {
+    const origin = byId.get(cn.invoiceId);
+    const row: DocRow = { kind: 'credit', key: `cn:${cn.id}`, creditNote: cn, origin, client: cn.client, issued: cn.issued, ownerId: origin?.ownerId, ownerName: origin?.ownerName };
+    byInvoice.set(cn.invoiceId, [...(byInvoice.get(cn.invoiceId) ?? []), row]);
+  }
+  const out: DocRow[] = [];
+  for (const r of invoiceRows) {
+    out.push(...(byInvoice.get(r.id) ?? []), { ...r, kind: 'invoice' });
+    byInvoice.delete(r.id);
+  }
+  for (const rest of byInvoice.values()) out.push(...rest);
+  return out;
+}
+
 /**
  * The status shown for an invoice. Expects the display status already applied
  * (an issued invoice past its due date is 'overdue', see invoice-status.ts).
@@ -128,16 +164,16 @@ export function paymentFigures(payments: Payment[]): PaymentFigures {
     const list = done.filter(p => methods.includes(p.method));
     return { amount: list.reduce((s, p) => s + p.amount, 0), count: list.length };
   };
-  const collected = sum(['momo', 'wire', 'cash', 'cheque']);
+  const collected = sum(['momo', 'wire', 'cash', 'cheque', 'pispi']);
   const momo = sum(['momo']);
-  const wire = sum(['wire']);
+  const wire = sum(['wire', 'pispi']); // PI-SPI is a bank-to-bank instant transfer: counted with transfers
   const cashCheque = sum(['cash', 'cheque']);
   const pct = (f: Figure) => collected.amount ? Math.round((f.amount / collected.amount) * 100) : 0;
   return { collected, momo, wire, cashCheque, share: { momo: pct(momo), wire: pct(wire), cashCheque: pct(cashCheque) } };
 }
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
-  momo: 'Mobile Money', wire: 'Virement', cash: 'Espèces', cheque: 'Chèque',
+  momo: 'Mobile Money', wire: 'Virement', cash: 'Espèces', cheque: 'Chèque', pispi: 'PI-SPI',
 };
 
 export const PAYMENT_STATUS: Record<Payment['status'], RowStatus> = {
@@ -176,7 +212,7 @@ export function ownerOptions(rows: Owned[]): { key: string; label: string }[] {
 
 // ── « Saisi par » (PRO-173) ──────────────────────────────────────────────────
 
-/** Who recorded a payment, as shown: online payments come from Paystack. */
+/** Who recorded a payment, as shown: online payments come from Paygate (PI-SPI). */
 export function paymentAuthor(p: Pick<Payment, 'source' | 'createdByName'>): string {
   return p.source === 'online' ? 'En ligne' : p.createdByName ?? 'Inconnu';
 }

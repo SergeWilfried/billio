@@ -3,6 +3,8 @@ import { createContext, useContext } from 'react';
 import { fmt } from '@/data';
 import { getFiscalIdLabel } from '@/lib/ohada';
 import { VAT_LABEL, chargesVat, vatOn } from '@/lib/vat';
+import { paperBands } from '@/lib/invoice-template';
+import { qrMatrix, qrRuns } from '@/lib/certification';
 import type { PaymentMethodLine } from '@/lib/payment-methods';
 
 export type PaperLayout   = 'classic' | 'band' | 'minimal' | 'sidebar' | 'receipt';
@@ -24,9 +26,15 @@ export interface PaperConfig {
   /** Kept for saved templates; a discount line appears when the invoice has one. */
   showDiscount:  boolean;
   showSignature: boolean;
+  /** QR code « Scanner pour payer » beside the payment methods; only printed with a payment link (paymentQrTarget) */
+  showPaymentQr: boolean;
   /** Kept for saved templates; the invoice always shows payment details. */
   showPayment:   boolean;
   footer:        string;
+  /** Header and footer in light bands (Classique and Minimal only); on unless switched off */
+  bands:         boolean;
+  /** The bands' tint, one of BAND_COLORS */
+  bandColor:     string;
 }
 
 export interface BizInfo {
@@ -204,17 +212,39 @@ function Totals({ cfg }: { cfg: PaperConfig }) {
   );
 }
 
-function PayNotes() {
+/**
+ * The « Scanner pour payer » QR code, as the PDF prints it beside the payment
+ * methods: an example here (the PDF only prints one with a payment link).
+ */
+function PayQr() {
+  const m = qrMatrix('https://billio.app/payer/exemple');
+  const quiet = 1;
+  const n = m.size + quiet * 2;
+  return (
+    <div className="tp-pay-qr" aria-label="QR code de paiement (exemple)">
+      <svg viewBox={`0 0 ${n} ${n}`} aria-hidden="true">
+        <rect width={n} height={n} fill="#ffffff" />
+        {qrRuns(m).map(r => <rect key={`${r.x}-${r.y}`} x={r.x + quiet} y={r.y + quiet} width={r.w} height={1} fill="#1a1a1a" />)}
+      </svg>
+      <span>Scanner pour payer</span>
+    </div>
+  );
+}
+
+function PayNotes({ cfg }: { cfg: PaperConfig }) {
   const { payLines, paymentTerms } = usePaper();
   return (
     <div className="tp-pay-row">
-      <div>
-        <div className="tp-block-label">Modes de paiement</div>
-        <div className="tp-pm-list">
-          {payLines.length > 0
-            ? payLines.map(m => <div key={m.label} className="tp-pm">{m.label} — {m.value}</div>)
-            : <div className="tp-pm">Contactez-nous pour les modalités de paiement.</div>}
+      <div className="tp-pay-methods">
+        <div>
+          <div className="tp-block-label">Modes de paiement</div>
+          <div className="tp-pm-list">
+            {payLines.length > 0
+              ? payLines.map(m => <div key={m.label} className="tp-pm">{m.label} — {m.value}</div>)
+              : <div className="tp-pm">Contactez-nous pour les modalités de paiement.</div>}
+          </div>
         </div>
+        {cfg.showPaymentQr && <PayQr />}
       </div>
       <div>
         <div className="tp-block-label">Notes</div>
@@ -262,7 +292,7 @@ function Rest({ cfg }: { cfg: PaperConfig }) {
       <InvoiceTable cfg={cfg} />
       <Totals cfg={cfg} />
       <CertArea />
-      <PayNotes />
+      <PayNotes cfg={cfg} />
       <Signature cfg={cfg} />
       <Footer cfg={cfg} />
     </>
@@ -414,7 +444,7 @@ function ReceiptBody({ cfg }: { cfg: PaperConfig }) {
       </div>
       <div className="tp-rcpt-divider dashed" />
       <CertArea />
-      <PayNotes />
+      <PayNotes cfg={cfg} />
       <Signature cfg={cfg} />
       <div className="tp-rcpt-foot">{cfg.footer.trim() || 'Facture générée via Billio'}</div>
     </div>
@@ -440,8 +470,10 @@ export default function InvoicePaper({ config, biz, paymentMethods, paymentTerms
     payLines: paymentMethods ?? (biz?.name ? [] : MOCK_PAYMENT),
     paymentTerms: paymentTerms || 'Net 14 jours',
   };
+  const band = paperBands(config);
   const paperStyle: React.CSSProperties = {
     '--acc': config.color,
+    ...(band ? { '--band': band } : {}),
     fontFamily: config.fontFamily,
   } as React.CSSProperties;
 
@@ -451,6 +483,7 @@ export default function InvoicePaper({ config, biz, paymentMethods, paymentTerms
         className="tp-paper"
         data-layout={config.layout}
         data-density={config.density}
+        data-bands={band ? 'on' : undefined}
         style={paperStyle}
       >
         {config.layout === 'classic'  && <ClassicBody  cfg={config} />}

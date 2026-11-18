@@ -9,6 +9,7 @@
 import { getFiscalIdLabel } from '@/lib/ohada';
 import { clientTypeDef, clientTypeOf } from '@/lib/client-type';
 import { cadastralRequired, parseCadastralRef } from '@/lib/cadastral';
+import { ifuProblem } from '@/lib/ifu';
 import type { PaymentSettings } from '@/lib/api/payment-settings';
 
 export type ComplianceFix = 'business' | 'payments' | 'client';
@@ -46,7 +47,7 @@ export function sellerIssues(org: SellerInfo, payments: PaymentSettings | null):
   };
   add(blank(org.name), 'seller-name', "Nom de l'entreprise");
   add(blank(org.address) && blank(org.city), 'seller-address', "Adresse de l'entreprise");
-  add(blank(org.ifu), 'seller-ifu', `${id} de l'entreprise`);
+  add(blank(org.ifu) || ifuProblem(org.country, org.ifu) !== null, 'seller-ifu', `${id} de l'entreprise`);
   add(blank(org.rccm), 'seller-rccm', 'RCCM');
   add(blank(org.taxRegime), 'seller-regime', "Régime d'imposition");
   add(blank(org.divisionFiscale), 'seller-division', 'Service des impôts de rattachement');

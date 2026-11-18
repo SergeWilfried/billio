@@ -142,6 +142,8 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
   // From the command box (PRO-162): a new quote, maybe for a client
   useCommandIntent(intent => {
     if (intent.command !== 'new-quote' || !writable) return false;
+    // The ERP look writes quotes in the invoice editor (PRO-185)
+    if (UI_V2) { navigate(intent.client ? `/quotes/new?client=${encodeURIComponent(intent.client)}` : '/quotes/new', { replace: true }); return 'navigated'; }
     openPanel();
     if (intent.client) setFClient(intent.client);
   }, !loading);
@@ -243,7 +245,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
       const issued = new Date().toISOString().slice(0, 10);
       const valid = new Date(Date.now() + validDays * 86_400_000).toISOString().slice(0, 10);
       const newId = await nextQuoteId(orgId);
-      const created = await createQuote(orgId, { id: newId, subject: quote.subject, client: quote.client, issued, valid, amount: quote.amount, status: 'draft' });
+      const created = await createQuote(orgId, { id: newId, subject: quote.subject, client: quote.client, issued, valid, amount: quote.amount, status: 'draft', discountPct: quote.discountPct, notes: quote.notes });
       try {
         await saveLineItems(orgId, lines, { quoteId: newId });
       } catch (err) {
@@ -291,7 +293,7 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
         subtitle="Estimations envoyées avant facturation"
         actions={<>
           {writable && (
-            <button className="btn btn-primary" onClick={openPanel}>
+            <button className="btn btn-primary" onClick={() => UI_V2 ? navigate('/quotes/new') : openPanel()}>
               <Icon name="plus" size={16} />
               Nouveau devis
             </button>
@@ -303,7 +305,8 @@ export default function QuotesPage({ tabs }: { tabs?: ReactNode }) {
               writable={writable}
               deletable={deletable}
               onOpen={id => navigate(`/quotes/${id}`)}
-              onConvert={q => void compliance.guard(q.client, () => void convertToInvoice(q.id), { returnTo: '/quotes' })}
+              onEdit={id => navigate(`/quotes/${id}/edit`)}
+              onConvert={q => navigate(`/invoices/new?quote=${encodeURIComponent(q.id)}`)}
               onRemind={id => sendReminder(id)}
               onDuplicate={id => void duplicateQuote(id)}
               onDelete={id => handleDelete(id)}
